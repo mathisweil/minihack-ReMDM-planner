@@ -1,0 +1,7 @@
+# Smoke test overrides — fast iteration for sanity checking.
+buffer_capacity: 50
+max_iterations: 30
+eval_episodes_per_env: 5
+checkpoint_eval_episodes: 5
+offline_epochs: 1
+use_wandb: false
