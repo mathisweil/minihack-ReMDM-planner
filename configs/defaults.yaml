@@ -20,7 +20,7 @@ n_embd: 256
 n_head: 4
 n_layer: 4
 n_global_tokens: 8
-seq_len: 64
+seq_len: 128
 global_gate_init: -3.0
 ema_decay: 0.999
 
@@ -35,25 +35,25 @@ eta: 0.15
 remask_strategy: conf
 
 # ── Inference ─────────────────────────────────────────────────────────
-diffusion_steps_eval: 5
+diffusion_steps_eval: 30
 temperature: 0.5
 top_k: 4
 replan_every: 16
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
-offline_batch_size: 256
+offline_batch_size: 512
 offline_grad_clip: 1.0
-offline_epochs: 10
+offline_epochs: 30
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 256
+dagger_batch_size: 512
 dagger_grad_clip: 1.0
 buffer_capacity: 10000
-grad_steps_per_iteration: 50
-efficiency_multiplier: 1.5
+grad_steps_per_iteration: 100
+efficiency_multiplier: 2.0
 curriculum_queue_size: 100
 max_iterations: 8000
 id_eval_every: 100
@@ -68,4 +68,6 @@ save_policy: true
 use_wandb: false
 wandb_project: remdm-minihack
 wandb_entity: ""
+wandb_run_name: null
+offline_log_every: 10
 seed: null
