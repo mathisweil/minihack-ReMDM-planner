@@ -172,6 +172,13 @@ def run_offline(cfg, data_path: str | None) -> None:
     buffer.load_offline_data(data, cfg.id_envs)
     logger.info(f"Loaded {len(buffer)} windows")
 
+    if len(buffer) == 0:
+        logger.error(
+            "Buffer is empty after loading dataset — no trajectories matched "
+            f"id_envs={cfg.id_envs}. Exiting."
+        )
+        sys.exit(1)
+
     model = make_model(cfg).to(device)
     ema = ModelEMA(model, decay=cfg.ema_decay)
 

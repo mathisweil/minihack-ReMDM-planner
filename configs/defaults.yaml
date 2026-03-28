@@ -46,15 +46,12 @@ offline_batch_size: 256
 offline_grad_clip: 1.0
 offline_epochs: 10
 aux_loss_weight: 0.5
-lr_warmup_steps: 0
-val_interval: 50
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
 dagger_batch_size: 256
 dagger_grad_clip: 1.0
 buffer_capacity: 10000
-episodes_per_iteration: 10
 grad_steps_per_iteration: 50
 efficiency_multiplier: 1.5
 curriculum_queue_size: 100
