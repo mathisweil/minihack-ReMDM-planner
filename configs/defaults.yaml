@@ -1,0 +1,74 @@
+# ── Environments ──────────────────────────────────────────────────────
+id_envs:
+  - MiniHack-Room-Random-5x5-v0
+  - MiniHack-Room-Random-15x15-v0
+  - MiniHack-Corridor-R2-v0
+  - MiniHack-MazeWalk-9x9-v0
+ood_envs:
+  - MiniHack-Room-Dark-15x15-v0
+  - MiniHack-Corridor-R5-v0
+  - MiniHack-MazeWalk-45x19-v0
+crop_size: 9
+map_h: 21
+map_w: 79
+action_dim: 12
+mask_token: 12
+pad_token: 13
+
+# ── Model ─────────────────────────────────────────────────────────────
+n_embd: 256
+n_head: 4
+n_layer: 4
+n_global_tokens: 8
+seq_len: 64
+global_gate_init: -3.0
+ema_decay: 0.999
+
+# ── Diffusion (MDLM) ─────────────────────────────────────────────────
+noise_schedule: linear
+num_diffusion_steps: 100
+loss_weight_clip: 1000.0
+label_smoothing: 0.0
+# ReMDM stochastic remask base fraction
+eta: 0.15
+# Remasking strategy: rescale | cap | conf
+remask_strategy: conf
+
+# ── Inference ─────────────────────────────────────────────────────────
+diffusion_steps_eval: 5
+temperature: 0.5
+top_k: 4
+replan_every: 16
+
+# ── Offline BC ────────────────────────────────────────────────────────
+offline_lr: 0.0003
+offline_batch_size: 256
+offline_grad_clip: 1.0
+offline_epochs: 10
+aux_loss_weight: 0.5
+lr_warmup_steps: 0
+val_interval: 50
+
+# ── DAgger ────────────────────────────────────────────────────────────
+dagger_lr: 0.00003
+dagger_batch_size: 256
+dagger_grad_clip: 1.0
+buffer_capacity: 10000
+episodes_per_iteration: 10
+grad_steps_per_iteration: 50
+efficiency_multiplier: 1.5
+curriculum_queue_size: 100
+max_iterations: 8000
+id_eval_every: 100
+ood_eval_every: 500
+checkpoint_every: 1000
+eval_episodes_per_env: 50
+checkpoint_eval_episodes: 20
+
+# ── Checkpointing & Logging ──────────────────────────────────────────
+checkpoint_dir: checkpoints
+save_policy: true
+use_wandb: false
+wandb_project: remdm-minihack
+wandb_entity: ""
+seed: null
