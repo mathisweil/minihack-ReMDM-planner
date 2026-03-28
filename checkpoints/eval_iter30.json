@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-03-28T23:06:09.270895+00:00",
+  "results": {
+    "id": {
+      "MiniHack-Room-Random-5x5-v0": {
+        "win_rate": 0.6,
+        "avg_reward": 0.0,
+        "avg_steps": 59.4,
+        "n_episodes": 5
+      },
+      "MiniHack-Room-Random-15x15-v0": {
+        "win_rate": 0.4,
+        "avg_reward": 0.0,
+        "avg_steps": 243.6,
+        "n_episodes": 5
+      },
+      "MiniHack-Corridor-R2-v0": {
+        "win_rate": 0.6,
+        "avg_reward": 0.0,
+        "avg_steps": 275.6,
+        "n_episodes": 5
+      },
+      "MiniHack-MazeWalk-9x9-v0": {
+        "win_rate": 0.4,
+        "avg_reward": 0.0,
+        "avg_steps": 162.8,
+        "n_episodes": 5
+      }
+    },
+    "ood": {
+      "MiniHack-Room-Dark-15x15-v0": {
+        "win_rate": 0.4,
+        "avg_reward": 0.0,
+        "avg_steps": 274.8,
+        "n_episodes": 5
+      },
+      "MiniHack-Corridor-R5-v0": {
+        "win_rate": 0.0,
+        "avg_reward": 0.0,
+        "avg_steps": 371.8,
+        "n_episodes": 5
+      },
+      "MiniHack-MazeWalk-45x19-v0": {
+        "win_rate": 0.0,
+        "avg_reward": 0.0,
+        "avg_steps": 500.0,
+        "n_episodes": 5
+      }
+    }
+  },
+  "metadata": {
+    "iteration": 30
+  }
+}
