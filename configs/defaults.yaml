@@ -20,7 +20,7 @@ n_embd: 256
 n_head: 4
 n_layer: 4
 n_global_tokens: 8
-seq_len: 128
+seq_len: 192
 global_gate_init: -3.0
 ema_decay: 0.999
 
@@ -42,14 +42,14 @@ replan_every: 16
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
-offline_batch_size: 512
+offline_batch_size: 1024
 offline_grad_clip: 1.0
 offline_epochs: 30
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 512
+dagger_batch_size: 1024
 dagger_grad_clip: 1.0
 buffer_capacity: 10000
 grad_steps_per_iteration: 100
