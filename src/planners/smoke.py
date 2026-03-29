@@ -30,11 +30,15 @@ def run_smoke(cfg) -> None:
 
     model = make_model(cfg).to(device)
     ema = ModelEMA(model, decay=cfg.ema_decay)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.dagger_lr)
-    curriculum = DynamicCurriculum(cfg.id_envs, cfg.curriculum_queue_size)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=cfg.dagger_lr,
+        weight_decay=cfg.weight_decay,
+    )
+    curriculum = DynamicCurriculum(
+        cfg.id_envs, cfg.curriculum_queue_size, cfg.curriculum_preseed,
+    )
 
-    eval_model = ema.make_eval_model(model)
-    collector = DataCollector(eval_model, buffer, curriculum, cfg, device)
+    collector = DataCollector(ema, model, buffer, curriculum, cfg, device)
     evaluator = Evaluator()
     log = Logger(cfg)
 

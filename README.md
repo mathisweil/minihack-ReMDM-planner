@@ -1,6 +1,6 @@
 # ReMDM Planner for MiniHack
 
-PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) for action-sequence planning in [MiniHack](https://github.com/facebookresearch/minihack) navigation environments. A dual-stream transformer generates 64-step action plans by iteratively denoising masked token sequences, conditioned on a 9x9 local crop and the full 21x79 dungeon map.
+PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) for action-sequence planning in [MiniHack](https://github.com/facebookresearch/minihack) navigation environments. A dual-stream transformer generates 192-step action plans by iteratively denoising masked token sequences, conditioned on a 9x9 local crop and the full 21x79 dungeon map.
 
 Trained on BFS oracle demonstrations via behavioural cloning, then refined online with DAgger. Generalises **zero-shot** from 4 in-distribution environments to 3 out-of-distribution environments.
 
@@ -140,12 +140,12 @@ Local stream:   9x9 glyphs -> Embedding(6000,64) -> CNN(64->32->64) -> Linear ->
 Global stream:  21x79 glyphs -> Embedding(6000,32) -> CNN(32->32->64) -> Pool(2,4) -> 8 tokens
                 Goal head: mean(global) -> MLP -> [B,2] staircase coords (aux loss)
                 Gate: sigmoid(learnable scalar, init=-3.0) * global_tokens
-Action stream:  Embedding(14, 256) + timestep_emb(100, 256) + position_emb(64, 256)
-Transformer:    concat [1 + 8 + 64 = 73 tokens] -> 4-layer encoder (256D, 4 heads, pre-norm)
-Output head:    last 64 tokens -> Linear(256, 12) -> action logits
+Action stream:  Embedding(14, 256) + timestep_emb(100, 256) + position_emb(192, 256)
+Transformer:    concat [1 + 8 + 192 = 201 tokens] -> 4-layer encoder (256D, 4 heads, pre-norm)
+Output head:    last 192 tokens -> Linear(256, 12) -> action logits
 ```
 
-The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and returns `{"actions": [B,64,12], "goal_pred": [B,2]}`.
+The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and returns `{"actions": [B,192,12], "goal_pred": [B,2]}`.
 
 ---
 
@@ -153,14 +153,16 @@ The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and retu
 
 **Forward process (MDLM):** Each action token is independently replaced with `MASK` (token 12) with probability `1 - alpha(t)`, where `alpha(t)` follows a linear or cosine schedule. PAD tokens (13) are never masked.
 
-**Loss:** Continuous-time ELBO with SUBS parameterisation. Cross-entropy is computed on masked positions only, weighted by `w(t) = -alpha'(t) / (1 - alpha(t))`, clipped to `[0, 1000]`.
+**Loss:** Cross-entropy on masked positions only, averaged globally across the batch. By default uses a flat average (matching the reference implementation). Optional SUBS importance weighting `w(t) = -alpha'(t) / (1 - alpha(t))`, clipped to `[0, 1000]`, can be enabled via `use_importance_weighting: true`.
 
-**Reverse sampling (ReMDM):** Over `K` denoising steps:
+**Reverse sampling (ReMDM):** Over `K` denoising steps (default 10):
 1. Model predicts logits; apply temperature scaling and top-K filtering.
 2. Sample predictions; compute per-token confidence.
 3. **MaskGIT unmask:** commit the `n_unmask` highest-confidence masked positions.
 4. **ReMDM remask:** stochastically re-mask committed positions to allow refinement.
 5. Final step: commit all remaining positions.
+
+**Greedy sampling:** Used during DAgger data collection for deterministic rollouts. Same MaskGIT progressive unmasking loop but with argmax decoding (no temperature, no top-K, no remasking).
 
 ### Remasking strategies
 
@@ -184,7 +186,8 @@ The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and retu
 | `n_head` | 4 | Attention heads |
 | `n_layer` | 4 | Transformer blocks |
 | `n_global_tokens` | 8 | Global stream context tokens |
-| `seq_len` | 64 | Action plan length |
+| `seq_len` | 192 | Action plan length |
+| `dropout` | 0.0 | Transformer dropout (0.0 — forward masking regularises) |
 | `ema_decay` | 0.999 | EMA smoothing for inference weights |
 
 **Diffusion**
@@ -193,7 +196,7 @@ The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and retu
 |---|---|---|
 | `noise_schedule` | `linear` | `linear` or `cosine` |
 | `num_diffusion_steps` | 100 | Discrete timestep resolution |
-| `diffusion_steps_eval` | 5 | Denoising iterations at inference |
+| `diffusion_steps_eval` | 10 | Denoising iterations at inference |
 | `remask_strategy` | `conf` | `rescale`, `cap`, or `conf` |
 | `eta` | 0.15 | Remasking strength |
 | `temperature` | 0.5 | Sampling temperature |
@@ -206,14 +209,18 @@ The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and retu
 |---|---|---|
 | `offline_lr` | 0.0003 | BC learning rate (cosine-decayed to 10%) |
 | `dagger_lr` | 0.00003 | DAgger learning rate |
-| `offline_batch_size` | 256 | Offline BC batch size |
-| `dagger_batch_size` | 256 | DAgger batch size |
-| `offline_epochs` | 10 | BC training epochs |
+| `offline_batch_size` | 1024 | Offline BC batch size |
+| `dagger_batch_size` | 1024 | DAgger batch size |
+| `weight_decay` | 0.0001 | AdamW weight decay (both optimizers) |
+| `offline_epochs` | 30 | BC training epochs |
 | `max_iterations` | 8000 | DAgger iterations |
-| `grad_steps_per_iteration` | 50 | Gradient steps per DAgger iteration |
+| `grad_steps_per_iteration` | 100 | Gradient steps per DAgger iteration |
 | `aux_loss_weight` | 0.5 | Weight for auxiliary goal loss |
+| `use_importance_weighting` | false | SUBS w(t) in loss (off = flat average) |
 | `buffer_capacity` | 10000 | Replay buffer size (windows) |
 | `efficiency_multiplier` | 1.5 | DAgger efficiency filter threshold |
+| `curriculum_preseed` | true | Pre-seed curriculum with 50/50 prior |
+| `physics_aware_sampling` | false | Penalise hazardous actions at inference |
 
 **Evaluation**
 
@@ -239,11 +246,10 @@ The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and retu
 Each DAgger iteration:
 
 1. **Curriculum sampling:** Select an environment weighted by difficulty (low win-rate environments sampled more).
-2. **Model rollout:** Generate plans with the EMA model; execute with replanning every 16 steps.
+2. **Model rollout:** Generate plans with the EMA model using greedy sampling; execute with replanning every 16 steps.
 3. **Oracle rollout:** Run the BFS oracle on the **same seed** for comparison.
 4. **Efficiency filter:** Add the oracle trajectory to the buffer if the model failed or took >1.5x the oracle's steps.
-5. **Training:** Sample from the replay buffer; run `grad_steps_per_iteration` gradient steps.
-6. **EMA update:** Blend model weights into the shadow copy.
+5. **Training:** Sample from the replay buffer; run `grad_steps_per_iteration` gradient steps, updating EMA weights after each gradient step.
 
 The BFS oracle uses a 5-tier priority: (1) kick adjacent doors, (2) BFS to staircase, (3) BFS to frontier, (4) BFS to farthest tile, (5) random cardinal.
 
@@ -285,9 +291,10 @@ remdm_minihack/
 │   │   └── minihack_env.py        AdvancedObservationEnv + BFS oracle
 │   └── planners/
 │       ├── collect.py             run_model_episode + DataCollector
-│       ├── train.py               Offline BC trainer
+│       ├── offline.py             Offline BC trainer
 │       ├── online.py              DAgger Trainer + checkpointing
 │       ├── inference.py           Evaluator + result formatting
+│       ├── smoke.py               Smoke-test runner
 │       └── logging.py             Centralised W&B + stdout logging
 ├── scripts/
 │   └── hf_upload.py               HuggingFace Hub upload utility

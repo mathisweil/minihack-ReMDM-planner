@@ -84,7 +84,7 @@ class AdvancedObservationEnv(gym.Env):
         self._cfg = cfg
         self._crop_half = cfg.crop_size // 2
 
-        obs_keys = ("glyphs", "chars", "blstats")
+        obs_keys = ("glyphs", "chars", "pixel")
         if des_file is not None:
             self._inner = gym.make(
                 "MiniHack-Navigation-Custom-v0",

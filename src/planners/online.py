@@ -95,15 +95,13 @@ class Trainer:
                 "added_to_buffer": added_total,
             }
 
-            # 2. Gradient steps
+            # 2. Gradient steps (EMA updated after each step)
             self.model.train()
             losses: list[float] = []
             for _ in range(cfg.grad_steps_per_iteration):
                 loss_val = self._train_step()
                 losses.append(loss_val)
-
-            # 3. EMA update
-            self.ema_model.update(self.model)
+                self.ema_model.update(self.model)
 
             # 4. Log
             avg_loss = sum(losses) / len(losses) if losses else 0.0
@@ -205,9 +203,10 @@ class Trainer:
             Scalar loss value.
         """
         cfg = self.cfg
-        local_np, global_np, actions_np = self.buffer.sample(
-            cfg.dagger_batch_size,
-        )
+        batch = self.buffer.sample(cfg.dagger_batch_size)
+        if batch is None:
+            return 0.0
+        local_np, global_np, actions_np = batch
         local_t = torch.from_numpy(local_np).long().to(self.device)
         global_t = torch.from_numpy(global_np).long().to(self.device)
         actions_t = torch.from_numpy(actions_np).long().to(self.device)
@@ -219,7 +218,9 @@ class Trainer:
             actions_t, t, cfg.mask_token, cfg.pad_token,
             self._schedule_fn,
         )
-        t_discrete = (t * (cfg.num_diffusion_steps - 1)).long()
+        t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
+            0, cfg.num_diffusion_steps - 1,
+        )
 
         out = self.model(local_t, global_t, zt, t_discrete)
 
@@ -228,6 +229,7 @@ class Trainer:
             cfg.mask_token, cfg.pad_token, self._schedule_fn,
             weight_clip=cfg.loss_weight_clip,
             label_smoothing=cfg.label_smoothing,
+            use_importance_weighting=cfg.use_importance_weighting,
         )
 
         loss_aux = torch.tensor(0.0, device=self.device)
@@ -441,10 +443,15 @@ def run_dagger(
 
     model = make_model(cfg).to(device)
     ema = ModelEMA(model, decay=cfg.ema_decay)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.dagger_lr)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=cfg.dagger_lr,
+        weight_decay=cfg.weight_decay,
+    )
 
     buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)
-    curriculum = DynamicCurriculum(cfg.id_envs, cfg.curriculum_queue_size)
+    curriculum = DynamicCurriculum(
+        cfg.id_envs, cfg.curriculum_queue_size, cfg.curriculum_preseed,
+    )
 
     # Seed buffer with some oracle data
     for i, env_id in enumerate(cfg.id_envs):
@@ -454,8 +461,7 @@ def run_dagger(
                 buffer.add(traj)
     logger.info(f"Buffer seeded with {len(buffer)} windows")
 
-    eval_model = ema.make_eval_model(model)
-    collector = DataCollector(eval_model, buffer, curriculum, cfg, device)
+    collector = DataCollector(ema, model, buffer, curriculum, cfg, device)
     evaluator = Evaluator()
     log = Logger(cfg)
 

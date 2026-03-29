@@ -268,6 +268,89 @@ def remdm_sample(
     return seq
 
 
+@torch.no_grad()
+def greedy_sample(
+    model: torch.nn.Module,
+    local_obs: Tensor,
+    global_obs: Tensor,
+    cfg: SimpleNamespace,
+    device: torch.device | str,
+    blind_global: bool = False,
+) -> Tensor:
+    """Greedy (argmax) MaskGIT sampling — no temperature, top-K, or remasking.
+
+    Used by ``DataCollector`` during DAgger for deterministic rollouts,
+    matching the reference ``run_model_episode`` behaviour.
+
+    Args:
+        model: Denoising model.
+        local_obs: Shape ``[B, 9, 9]``.
+        global_obs: Shape ``[B, 21, 79]``.
+        cfg: Config namespace.
+        device: Torch device.
+        blind_global: Zero out global map (local-only ablation).
+
+    Returns:
+        Fully committed action sequence ``[B, seq_len]``, int64.
+    """
+    B = local_obs.shape[0]
+    seq_len = cfg.seq_len
+    mask_token = cfg.mask_token
+    action_dim = cfg.action_dim
+    K = cfg.diffusion_steps_eval
+
+    local_obs = local_obs.to(device)
+    global_obs = global_obs.to(device)
+    if blind_global:
+        global_obs = torch.zeros_like(global_obs)
+
+    seq = torch.full(
+        (B, seq_len), mask_token, dtype=torch.long, device=device,
+    )
+
+    for k in range(1, K + 1):
+        ratio = k / K
+        t_discrete = int(cfg.num_diffusion_steps * (1.0 - ratio))
+
+        out = model(local_obs, global_obs, seq, t_discrete)
+        logits = out["actions"]  # [B, seq_len, vocab]
+
+        # Mask invalid action tokens
+        logits[:, :, action_dim:] = float("-inf")
+
+        # Greedy: argmax over softmax (no temperature, no top-K)
+        probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]
+        confidences, preds = probs.max(dim=-1)  # [B, seq_len] each
+
+        # MaskGIT progressive unmasking by confidence
+        num_to_unmask = max(1, int(seq_len * ratio))
+        is_masked = seq == mask_token  # [B, seq_len]
+
+        # Score only masked positions for unmasking
+        scores = confidences.clone()
+        scores[~is_masked] = -1.0
+        _, topk_idx = scores.topk(num_to_unmask, dim=-1)
+
+        unmask_mask = torch.zeros_like(seq, dtype=torch.bool)
+        unmask_mask.scatter_(1, topk_idx, True)
+        unmask_mask = unmask_mask & is_masked
+
+        seq = torch.where(unmask_mask, preds, seq)
+
+        # No remasking in greedy mode
+
+    # Force-commit any remaining masked tokens
+    still_masked = seq == mask_token
+    if still_masked.any():
+        out = model(local_obs, global_obs, seq, 0)
+        logits = out["actions"]
+        logits[:, :, action_dim:] = float("-inf")
+        preds = logits.argmax(dim=-1)
+        seq = torch.where(still_masked, preds, seq)
+
+    return seq
+
+
 def select_action(
     model: torch.nn.Module,
     local_obs: Tensor,
