@@ -80,8 +80,20 @@ class Trainer:
         """
         cfg = self.cfg
         for iteration in range(start_iter, cfg.max_iterations):
-            # 1. Collect
-            collect_stats = self.collector.collect_one_iteration()
+            # 1. Collect N episodes per iteration
+            n_eps = getattr(cfg, "episodes_per_iteration", 1)
+            model_wins = 0
+            added_total = 0
+            last_stats: dict = {}
+            for _ in range(n_eps):
+                last_stats = self.collector.collect_one_iteration()
+                model_wins += int(last_stats["model_won"])
+                added_total += int(last_stats["added_to_buffer"])
+            collect_stats = {
+                **last_stats,
+                "model_won": model_wins,
+                "added_to_buffer": added_total,
+            }
 
             # 2. Gradient steps
             self.model.train()
@@ -108,6 +120,7 @@ class Trainer:
                     "train/added_to_buffer": int(
                         collect_stats["added_to_buffer"]
                     ),
+                    "train/episodes_collected": n_eps,
                     "train/model_steps": collect_stats["model_steps"],
                     "train/oracle_steps": collect_stats["oracle_steps"],
                     "train/efficiency_ratio": (
@@ -134,11 +147,17 @@ class Trainer:
                     self.device,
                 )
                 self.log.log_eval(results, step=iteration, prefix="eval_id")
+                mean_id_wr = float(np.mean(
+                    [s["win_rate"] for s in results.values()]
+                )) if results else 0.0
                 self.log.log(
                     {
-                        f"curriculum/{env_id}/win_rate":
-                            self.collector.curriculum.win_rate(env_id)
-                        for env_id in self.cfg.id_envs
+                        "eval_id/mean_win_rate": mean_id_wr,
+                        **{
+                            f"curriculum/{env_id}/win_rate":
+                                self.collector.curriculum.win_rate(env_id)
+                            for env_id in self.cfg.id_envs
+                        },
                     },
                     step=iteration,
                 )
@@ -158,6 +177,12 @@ class Trainer:
                     self.device,
                 )
                 self.log.log_eval(results, step=iteration, prefix="eval_ood")
+                mean_ood_wr = float(np.mean(
+                    [s["win_rate"] for s in results.values()]
+                )) if results else 0.0
+                self.log.log(
+                    {"eval_ood/mean_win_rate": mean_ood_wr}, step=iteration,
+                )
 
             # 7. Checkpoint
             if (
@@ -273,14 +298,92 @@ class Trainer:
                 self.cfg.checkpoint_eval_episodes,
                 self.cfg, self.device,
             )
-            combined = {"id": id_results, "ood": ood_results}
+
+            id_winrate = float(np.mean(
+                [s["win_rate"] for s in id_results.values()]
+            )) if id_results else 0.0
+            ood_winrate = float(np.mean(
+                [s["win_rate"] for s in ood_results.values()]
+            )) if ood_results else 0.0
+            current_lr = (
+                self.scheduler.get_last_lr()[0]
+                if self.scheduler is not None
+                else self.cfg.dagger_lr
+            )
+            training_meta = {
+                "iteration": iteration,
+                "lr": current_lr,
+                "dagger_batch_size": self.cfg.dagger_batch_size,
+                "aux_loss_weight": self.cfg.aux_loss_weight,
+                "buffer_size": len(self.buffer),
+                "buffer_capacity": self.cfg.buffer_capacity,
+                "ema_decay": self.cfg.ema_decay,
+                "grad_steps_per_iteration": self.cfg.grad_steps_per_iteration,
+                "episodes_per_iteration": getattr(
+                    self.cfg, "episodes_per_iteration", 1
+                ),
+                "id_winrate": id_winrate,
+                "ood_winrate": ood_winrate,
+                "per_env_id": {
+                    env_id: {
+                        "win_rate": s["win_rate"],
+                        "wins": s.get("wins", 0),
+                        "avg_reward": s["avg_reward"],
+                        "avg_steps": s["avg_steps"],
+                        "n_episodes": s["n_episodes"],
+                    }
+                    for env_id, s in id_results.items()
+                },
+                "per_env_ood": {
+                    env_id: {
+                        "win_rate": s["win_rate"],
+                        "wins": s.get("wins", 0),
+                        "avg_reward": s["avg_reward"],
+                        "avg_steps": s["avg_steps"],
+                        "n_episodes": s["n_episodes"],
+                    }
+                    for env_id, s in ood_results.items()
+                },
+            }
+
             json_path = ckpt_dir / f"eval_iter{iteration}.json"
             save_eval_json(
-                combined, str(json_path),
-                metadata={"iteration": iteration},
+                {"id": id_results, "ood": ood_results},
+                str(json_path),
+                metadata=training_meta,
             )
+
+            # W&B checkpoint log — per-env step metrics + aggregates
+            self.log.log_eval(
+                id_results, step=iteration, prefix="ckpt_eval_id",
+            )
+            self.log.log_eval(
+                ood_results, step=iteration, prefix="ckpt_eval_ood",
+            )
+            self.log.log(
+                {
+                    "ckpt_eval/id_winrate": id_winrate,
+                    "ckpt_eval/ood_winrate": ood_winrate,
+                },
+                step=iteration,
+            )
+            self.log.log_summary({
+                f"ckpt_{iteration}/id_winrate": id_winrate,
+                f"ckpt_{iteration}/ood_winrate": ood_winrate,
+            })
         except Exception:
             logger.error("Checkpoint eval failed", exc_info=True)
+
+        # HuggingFace Hub upload (no-op if HF_TOKEN or hub_run_id not set)
+        try:
+            from scripts.hf_upload import maybe_upload_checkpoint
+            maybe_upload_checkpoint(
+                str(ckpt_dir),
+                getattr(self.cfg, "hub_run_id", None),
+                getattr(self.cfg, "hub_repo_id", None),
+            )
+        except Exception:
+            logger.error("HF Hub upload failed", exc_info=True)
 
     def load_checkpoint(self, path: str) -> int:
         """Load a training checkpoint.

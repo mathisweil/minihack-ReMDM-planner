@@ -130,12 +130,14 @@ def find_staircase_from_glyphs(global_obs: Tensor) -> Tensor:
         global_obs = global_obs.unsqueeze(0)
 
     B, H, W = global_obs.shape
-    # NLE staircase glyph: character '>' has ordinal 62
-    # In NLE, stairs down are typically glyph offset 2359 (TILE_S_dnstair)
-    # but the chars channel maps to ord('>') = 62.
-    # We check for the glyph value modulo 256 equaling 62 as a heuristic,
-    # and also check raw value 62 (if chars are stored directly).
-    is_stair = (global_obs % 256 == 62) | (global_obs == 2359)
+    # NLE staircase-down glyphs: ord('>') = 62, plus NLE tile variants
+    # 2310 (S_dnstair), 2368 (S_dnstairs), 2383 (S_vodoor).
+    is_stair = (
+        (global_obs == 62)
+        | (global_obs == 2310)
+        | (global_obs == 2368)
+        | (global_obs == 2383)
+    )
 
     coords = torch.full(
         (B, 2), -1.0, dtype=torch.float32, device=global_obs.device
@@ -143,8 +145,8 @@ def find_staircase_from_glyphs(global_obs: Tensor) -> Tensor:
     for b in range(B):
         positions = is_stair[b].nonzero(as_tuple=False)  # [N, 2]
         if positions.shape[0] > 0:
-            row = positions[0, 0].float() / H
-            col = positions[0, 1].float() / W
+            row = positions[0, 0].float() / max(1, H - 1)
+            col = positions[0, 1].float() / max(1, W - 1)
             coords[b, 0] = row
             coords[b, 1] = col
 

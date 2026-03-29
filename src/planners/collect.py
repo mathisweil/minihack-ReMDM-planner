@@ -29,6 +29,8 @@ def run_model_episode(
     device: torch.device | str,
     seed: int | None = None,
     max_steps: int = 500,
+    des_file: str | None = None,
+    blind_global: bool = False,
 ) -> dict:
     """Roll out the diffusion model on a single episode.
 
@@ -42,22 +44,25 @@ def run_model_episode(
         device: Torch device.
         seed: Optional RNG seed.
         max_steps: Maximum episode length.
+        des_file: Optional ``.des`` file content for custom scenarios.
+        blind_global: If ``True``, zero out global map (local-only ablation).
 
     Returns:
         Dict with ``"local"`` ``[T,9,9]``, ``"global"`` ``[T,21,79]``,
         ``"actions"`` ``[T]``, ``"won"`` bool, ``"steps"`` int,
-        ``"seed"`` int.
+        ``"total_reward"`` float, ``"seed"`` int.
     """
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
 
-    env = make_env(env_id, None, cfg)
+    env = make_env(env_id, des_file, cfg)
     (local, glb), _info = env.reset(seed=seed)
 
     locals_list = [local]
     globals_list = [glb]
     actions_list: list[int] = []
     won = False
+    total_reward = 0.0
     plan: torch.Tensor | None = None
     step_in_plan = 0
 
@@ -73,6 +78,7 @@ def run_model_episode(
             ).long().to(device)  # [1, 21, 79]
             plan = remdm_sample(
                 model, local_t, glb_t, cfg, device,
+                blind_global=blind_global,
             )  # [1, seq_len]
             step_in_plan = 0
 
@@ -81,7 +87,8 @@ def run_model_episode(
         actions_list.append(action)
         step_in_plan += 1
 
-        (local, glb), _reward, terminated, truncated, info = env.step(action)
+        (local, glb), reward, terminated, truncated, info = env.step(action)
+        total_reward += reward
         locals_list.append(local)
         globals_list.append(glb)
 
@@ -103,6 +110,7 @@ def run_model_episode(
         "actions": actions_arr,
         "won": won,
         "steps": len(actions_list),
+        "total_reward": total_reward,
         "seed": seed,
     }
 

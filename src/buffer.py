@@ -38,18 +38,32 @@ class ReplayBuffer:
 
     def load_offline_data(
         self,
-        data: dict,
+        data: dict | list,
         allowed_envs: list[str],
+        metadata: dict | None = None,
     ) -> None:
         """Load pre-collected trajectories and slice into windows.
 
+        Supports two dataset formats:
+
+        **New format** (dict): ``{"trajectories": [...]}`` where each entry
+        is a dict with ``"local"``, ``"global"``, ``"actions"``, ``"env_id"``.
+
+        **Legacy format** (list): Flat list of ``((local, global), action_seq)``
+        tuples produced by the reference pipeline (pre-windowed, already
+        ``seq_len``-length). Env filtering uses an optional *metadata* dict
+        with a ``"samples_per_env"`` key mapping env IDs to sample counts.
+
         Args:
-            data: Dict with ``"trajectories"`` list of trajectory dicts,
-                each having ``"local"``, ``"global"``, ``"actions"``,
-                ``"env_id"`` keys. Alternatively, a flat dict with
-                those keys for a single trajectory.
-            allowed_envs: Only trajectories from these env IDs are kept.
+            data: Dataset in new dict format or legacy list format.
+            allowed_envs: Only samples from these env IDs are kept.
+            metadata: Optional sidecar metadata for legacy format env
+                filtering. Ignored for the new format.
         """
+        if isinstance(data, list):
+            self._load_legacy_offline_data(data, allowed_envs, metadata)
+            return
+
         trajectories = data.get("trajectories", [data])
         for traj in trajectories:
             if traj.get("env_id", "") not in allowed_envs:
@@ -59,6 +73,67 @@ class ReplayBuffer:
         # Truncate to capacity
         if len(self._offline) > self._capacity:
             self._offline = self._offline[: self._capacity]
+
+    def _load_legacy_offline_data(
+        self,
+        data: list,
+        allowed_envs: list[str],
+        metadata: dict | None = None,
+    ) -> None:
+        """Load reference-format datasets (pre-windowed tuples).
+
+        Args:
+            data: List of ``((local_crop, global_map), action_seq)`` tuples.
+                ``local_crop`` is ``[9, 9]``, ``global_map`` is ``[21, 79]``,
+                ``action_seq`` is a sequence of length ``seq_len``.
+            allowed_envs: Env IDs to retain.
+            metadata: Optional dict with ``"samples_per_env"`` key mapping
+                env IDs to per-env sample counts for precise filtering.
+        """
+        allowed = set(allowed_envs)
+
+        if metadata and "samples_per_env" in metadata:
+            # Build a per-sample env_id index from the metadata ordering
+            sample_to_env: list[str] = []
+            for env_id in sorted(metadata["samples_per_env"].keys()):
+                count = metadata["samples_per_env"][env_id]
+                sample_to_env.extend([env_id] * count)
+
+            for i, sample in enumerate(data):
+                env_id = (
+                    sample_to_env[i] if i < len(sample_to_env) else None
+                )
+                if env_id is None or env_id in allowed:
+                    self._offline.append(self._unpack_legacy_sample(sample))
+        else:
+            # No metadata — keep all samples (caller is responsible for
+            # pre-filtering)
+            for sample in data:
+                self._offline.append(self._unpack_legacy_sample(sample))
+
+        if len(self._offline) > self._capacity:
+            self._offline = self._offline[: self._capacity]
+
+    @staticmethod
+    def _unpack_legacy_sample(
+        sample: tuple,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Convert a legacy ``((local, global), action_seq)`` sample.
+
+        Args:
+            sample: Tuple of ``(state, action_seq)`` where state is
+                ``(local_crop, global_map)``.
+
+        Returns:
+            ``(local [9,9], global [21,79], actions [seq_len])`` as
+            numpy int16/int64 arrays.
+        """
+        (local, glb), action_seq = sample
+        return (
+            np.asarray(local, dtype=np.int16),
+            np.asarray(glb, dtype=np.int16),
+            np.asarray(action_seq, dtype=np.int64),
+        )
 
     # ── Online data ──────────���───────────────────────────────────
 

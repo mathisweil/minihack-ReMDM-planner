@@ -52,6 +52,7 @@ dagger_lr: 0.00003
 dagger_batch_size: 1024
 dagger_grad_clip: 1.0
 buffer_capacity: 10000
+episodes_per_iteration: 10
 grad_steps_per_iteration: 100
 efficiency_multiplier: 2.0
 curriculum_queue_size: 100
@@ -65,6 +66,8 @@ checkpoint_eval_episodes: 20
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
 save_policy: true
+hub_run_id: null
+hub_repo_id: null
 use_wandb: true
 wandb_project: remdm-minihack
 wandb_entity: "mathis-weil-university-college-london-ucl-"

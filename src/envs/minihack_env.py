@@ -38,11 +38,16 @@ def find_staircase_from_glyphs(global_obs: np.ndarray) -> np.ndarray:
     B, H, W = global_obs.shape
     coords = np.full((B, 2), -1.0, dtype=np.float32)
     for b in range(B):
-        is_stair = (global_obs[b] % 256 == 62) | (global_obs[b] == 2359)
+        is_stair = (
+            (global_obs[b] == 62)
+            | (global_obs[b] == 2310)
+            | (global_obs[b] == 2368)
+            | (global_obs[b] == 2383)
+        )
         positions = np.argwhere(is_stair)
         if positions.shape[0] > 0:
-            coords[b, 0] = positions[0, 0] / H
-            coords[b, 1] = positions[0, 1] / W
+            coords[b, 0] = positions[0, 0] / max(1, H - 1)
+            coords[b, 1] = positions[0, 1] / max(1, W - 1)
     return coords
 
 
