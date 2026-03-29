@@ -173,8 +173,7 @@ texture_cache*.pbz2
 .DS_Store
 
 #Claude specific
-.claude/
-CLAUDE.md
+
 claude_code_prompt.md
 
 minihack_reference
