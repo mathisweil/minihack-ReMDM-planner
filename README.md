@@ -299,7 +299,8 @@ remdm_minihack/
 ├── scripts/
 │   └── hf_upload.py               HuggingFace Hub upload utility
 ├── main.py                        CLI entry point (smoke/offline/dagger/inference)
-└── requirements.txt
+├── environment.yaml               Conda environment spec
+└── README.md
 ```
 
 ---
@@ -335,9 +336,12 @@ Inference uses EMA weights by default. Pass `--no-ema` to use training weights.
 
 ## Implementation Notes
 
-- **MDLM loss** returns `0.0` (not NaN) when no masked positions exist in the batch.
+- **MDLM loss** returns `0.0` (not NaN) when no masked positions exist in the batch. Uses global averaging by default; SUBS importance weighting is opt-in via `use_importance_weighting: true`.
 - **PAD tokens** are never masked during the forward process and are excluded from the loss.
-- **`remdm_sample`** guarantees a fully committed output (no MASK tokens) via a final-step commit and an assertion check.
-- **Curriculum** initialises with a 50/50 prior per environment and uses bucket-based weights: low win-rate (0.2), medium (1.0), high (0.1).
-- **Replay buffer** pins offline data at the front; only online samples are FIFO-evicted.
+- **Sampling paths:** Evaluation uses stochastic ReMDM sampling (temperature, top-K, remasking). DAgger collection uses greedy argmax sampling (deterministic, no remasking) for reproducible efficiency comparisons.
+- **`remdm_sample`** guarantees a fully committed output (no MASK tokens) via a final-step commit and an assertion check. A min-keep 10% safety net prevents degenerate all-masked states.
+- **EMA** shadow weights are updated after every gradient step (not per iteration). The `DataCollector` syncs the latest EMA weights before each rollout.
+- **Curriculum** initialises with a 50/50 prior per environment (configurable via `curriculum_preseed`) and uses bucket-based weights: low win-rate (0.2), medium (1.0), high (0.1).
+- **Replay buffer** pins offline data at the front; only online samples are FIFO-evicted. Returns `None` on empty buffer (callers handle gracefully).
 - **Global gate** initialises at `sigmoid(-3.0) ~ 0.047`, starting nearly closed to prevent the global stream from destabilising early training.
+- **Dropout** is set to 0.0 by default. The discrete diffusion forward masking already regularises; dropout on top is redundant.
