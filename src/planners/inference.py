@@ -34,6 +34,8 @@ class Evaluator:
         n_episodes: int,
         cfg: SimpleNamespace,
         device: torch.device | str,
+        des_files: list[str] | None = None,
+        blind_global: bool = False,
     ) -> dict[str, dict]:
         """Evaluate *model* on each environment in *env_ids*.
 
@@ -43,9 +45,14 @@ class Evaluator:
             n_episodes: Episodes per environment.
             cfg: Config namespace.
             device: Torch device.
+            des_files: Optional list of ``.des`` file paths for custom
+                scenario evaluation. Each file yields one extra env entry
+                keyed by its filename stem.
+            blind_global: If ``True``, zero out global map observations
+                (local-only ablation mode).
 
         Returns:
-            ``{env_id: {"win_rate", "avg_reward", "avg_steps",
+            ``{env_id: {"win_rate", "wins", "avg_reward", "avg_steps",
             "n_episodes"}}``
         """
         from src.planners.collect import run_model_episode
@@ -53,7 +60,18 @@ class Evaluator:
         model.eval()
         results: dict[str, dict] = {}
 
-        for env_id in env_ids:
+        # Build list of (env_id, des_content) pairs
+        eval_targets: list[tuple[str, str | None]] = [
+            (eid, None) for eid in env_ids
+        ]
+        if des_files:
+            for des_path in des_files:
+                from pathlib import Path
+                stem = Path(des_path).stem
+                with open(des_path) as fh:
+                    eval_targets.append((stem, fh.read()))
+
+        for env_id, des_content in eval_targets:
             wins = 0
             total_reward = 0.0
             total_steps = 0
@@ -64,10 +82,13 @@ class Evaluator:
                 try:
                     ep_result = run_model_episode(
                         model, env_id, cfg, device, seed,
+                        des_file=des_content,
+                        blind_global=blind_global,
                     )
                     if ep_result["won"]:
                         wins += 1
                     total_steps += ep_result["steps"]
+                    total_reward += ep_result["total_reward"]
                     completed += 1
                 except Exception:
                     logger.warning(
@@ -79,6 +100,7 @@ class Evaluator:
             n = max(completed, 1)
             results[env_id] = {
                 "win_rate": wins / n,
+                "wins": wins,
                 "avg_reward": total_reward / n,
                 "avg_steps": total_steps / n,
                 "n_episodes": completed,
@@ -145,6 +167,8 @@ def run_inference(
     output_path: str | None,
     use_ema: bool,
     log: Logger | None = None,
+    des_files: list[str] | None = None,
+    blind_global: bool = False,
 ) -> None:
     """Evaluate a checkpoint on specified environments."""
 
@@ -171,7 +195,10 @@ def run_inference(
         env_ids = cfg.id_envs + cfg.ood_envs
 
     evaluator = Evaluator()
-    results = evaluator.evaluate(env_ids, model, episodes, cfg, device)
+    results = evaluator.evaluate(
+        env_ids, model, episodes, cfg, device,
+        des_files=des_files, blind_global=blind_global,
+    )
 
     print(format_eval_results(results, label="Inference"))
 

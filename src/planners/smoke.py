@@ -50,4 +50,7 @@ def run_smoke(cfg) -> None:
         cfg.id_envs, eval_model, cfg.eval_episodes_per_env, cfg, device,
     )
     print(format_eval_results(results, label="Smoke"))
+    log.log_eval(results, step=0, prefix="smoke_eval")
+    mean_wr = float(sum(s["win_rate"] for s in results.values()) / len(results)) if results else 0.0
+    log.log({"smoke_eval/mean_win_rate": mean_wr}, step=0)
     log.finish()

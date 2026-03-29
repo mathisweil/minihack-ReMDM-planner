@@ -74,8 +74,16 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--no-ema", action="store_true")
 
     parser.add_argument("--envs", nargs="+", default=None)
+    parser.add_argument(
+        "--des", nargs="+", default=None,
+        help="Paths to .des scenario files for custom environment evaluation",
+    )
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--output", default=None)
+    parser.add_argument(
+        "--blind-global", action="store_true",
+        help="Zero out global map observations (local-only ablation)",
+    )
 
     return parser.parse_known_args()
 
@@ -130,6 +138,8 @@ def run_mode(mode: str, cfg, args) -> None:
             args.output,
             not args.no_ema,
             log=log,
+            des_files=args.des,
+            blind_global=args.blind_global,
         )
         log.finish()
 

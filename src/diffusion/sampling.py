@@ -9,12 +9,46 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Categorical
 
 from src.diffusion.schedules import get_schedule
+
+# NLE hazard glyph IDs and char codes (walls, locked doors, lava, water)
+_HAZARD_GLYPHS: frozenset[int] = frozenset({2359, 2360, 2389, 2390})
+_HAZARD_CHARS: frozenset[int] = frozenset(
+    {ord("|"), ord("-"), ord("+"), ord("L"), ord("W")}
+)
+# Cardinal action → (dy, dx) offsets
+_CARDINAL_OFFSETS: dict[int, tuple[int, int]] = {
+    0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1),
+}
+_N_PHYSICS_CHECK = 8  # only inspect the first N plan positions
+
+
+def _check_hazard(local_crop: np.ndarray, action: int) -> bool:
+    """Return True if *action* from the agent's centre steps into a hazard.
+
+    Args:
+        local_crop: ``[crop_size, crop_size]`` glyph array.
+        action: Cardinal action index (0=N, 1=E, 2=S, 3=W).
+
+    Returns:
+        ``True`` when the target cell contains a hazard glyph.
+    """
+    if action not in _CARDINAL_OFFSETS:
+        return False
+    cs = local_crop.shape[0]
+    cy, cx = cs // 2, cs // 2
+    dy, dx = _CARDINAL_OFFSETS[action]
+    ny, nx = cy + dy, cx + dx
+    if not (0 <= ny < cs and 0 <= nx < cs):
+        return True
+    glyph = int(local_crop[ny, nx])
+    return glyph in _HAZARD_GLYPHS or glyph in _HAZARD_CHARS
 
 
 def top_k_filter(logits: Tensor, k: int) -> Tensor:
@@ -69,7 +103,10 @@ def remdm_sample(
     global_obs: Tensor,
     cfg: SimpleNamespace,
     device: torch.device | str,
-) -> Tensor:
+    physics_aware: bool = True,
+    blind_global: bool = False,
+    return_analytics: bool = False,
+) -> Tensor | tuple[Tensor, list, list[float], list[int]]:
     """Generate action sequences via iterative ReMDM denoising.
 
     Args:
@@ -81,10 +118,23 @@ def remdm_sample(
             ``action_dim``, ``diffusion_steps_eval``, ``temperature``,
             ``top_k``, ``eta``, ``remask_strategy``, ``noise_schedule``.
         device: Torch device.
+        physics_aware: If ``True``, soft-penalise hazardous cardinal actions
+            by overriding their confidence to ``0.001`` before commitment
+            ranking. Only checks the first ``_N_PHYSICS_CHECK`` positions.
+        blind_global: If ``True``, zero out the global map observation
+            (local-only ablation).
+        return_analytics: If ``True``, also return per-step analytics as
+            ``(seq, path_per_step, tracking_confidence, tracking_masked)``.
 
     Returns:
-        Fully committed action sequence. Shape ``[B, seq_len]``, int64.
-        Guaranteed to contain no MASK tokens.
+        When ``return_analytics=False`` (default): fully committed action
+        sequence of shape ``[B, seq_len]``, int64, with no MASK tokens.
+
+        When ``return_analytics=True``: tuple
+        ``(seq, path_per_step, tracking_confidence, tracking_masked_count)``
+        where ``path_per_step`` is a list of ``[seq_len]`` numpy arrays,
+        ``tracking_confidence`` a list of per-step avg unmasked confidence
+        floats, and ``tracking_masked_count`` a list of masked-token counts.
     """
     B = local_obs.shape[0]
     seq_len = cfg.seq_len
@@ -92,9 +142,23 @@ def remdm_sample(
     action_dim = cfg.action_dim
     K = cfg.diffusion_steps_eval
     schedule_fn = get_schedule(cfg.noise_schedule)
+    min_keep = max(1, int(seq_len * 0.10))  # Safety Net: always unmask ≥10%
 
     local_obs = local_obs.to(device)
     global_obs = global_obs.to(device)
+
+    if blind_global:
+        global_obs = torch.zeros_like(global_obs)
+
+    # Pre-compute numpy local crops for physics checks (CPU, batch loop)
+    local_np: list[np.ndarray] | None = None
+    if physics_aware:
+        local_np = local_obs.cpu().numpy()
+
+    # Analytics buffers (only populated when return_analytics=True)
+    path_per_step: list[np.ndarray] = []
+    tracking_confidence: list[float] = []
+    tracking_masked_count: list[int] = []
 
     # Start fully masked
     seq = torch.full(
@@ -127,13 +191,24 @@ def remdm_sample(
             -1, preds.unsqueeze(-1)
         ).squeeze(-1)  # [B, seq_len]
 
+        # Physics softener: demote hazardous cardinal actions to conf=0.001
+        if physics_aware and local_np is not None:
+            preds_np = preds.cpu().numpy()  # [B, seq_len]
+            conf_override = conf.clone()
+            for b in range(B):
+                for pos in range(min(_N_PHYSICS_CHECK, seq_len)):
+                    action = int(preds_np[b, pos])
+                    if _check_hazard(local_np[b], action):
+                        conf_override[b, pos] = 0.001
+            conf = conf_override
+
         is_masked = seq == mask_token  # [B, seq_len]
 
         if k < K:
-            # MaskGIT progressive unmasking
-            n_unmask = max(1, int(seq_len * ratio))
+            # MaskGIT progressive unmasking with min-keep guarantee
+            n_unmask = max(min_keep, max(1, int(seq_len * ratio)))
 
-            # Set confidence of non-masked positions to -inf so they
+            # Set confidence of non-masked positions to -1 so they
             # are not selected for unmasking
             unmask_scores = conf.clone()
             unmask_scores[~is_masked] = -1.0
@@ -173,9 +248,23 @@ def remdm_sample(
             # Final step: commit all remaining MASK tokens
             seq = torch.where(is_masked, preds, seq)
 
+        # Analytics tracking
+        if return_analytics:
+            path_per_step.append(seq[0].cpu().numpy().copy())
+            still_masked = (seq[0] == mask_token)
+            unmasked_conf = conf[0][~still_masked]
+            avg_conf = (
+                unmasked_conf.mean().item()
+                if unmasked_conf.numel() > 0 else 0.0
+            )
+            tracking_confidence.append(avg_conf)
+            tracking_masked_count.append(int(still_masked.sum().item()))
+
     assert (seq != mask_token).all(), (
         "remdm_sample produced MASK tokens in final output"
     )
+    if return_analytics:
+        return seq, path_per_step, tracking_confidence, tracking_masked_count
     return seq
 
 
@@ -185,6 +274,8 @@ def select_action(
     global_obs: Tensor,
     cfg: SimpleNamespace,
     device: torch.device | str,
+    physics_aware: bool = True,
+    blind_global: bool = False,
 ) -> int:
     """Sample a single action from a length-1 batch.
 
@@ -194,6 +285,8 @@ def select_action(
         global_obs: Shape ``[21, 79]`` or ``[1, 21, 79]``.
         cfg: Config namespace.
         device: Torch device.
+        physics_aware: Forward to ``remdm_sample``.
+        blind_global: Forward to ``remdm_sample``.
 
     Returns:
         The first action of the generated plan (int).
@@ -202,5 +295,8 @@ def select_action(
         local_obs = local_obs.unsqueeze(0)
     if global_obs.ndim == 2:
         global_obs = global_obs.unsqueeze(0)
-    seq = remdm_sample(model, local_obs, global_obs, cfg, device)
+    seq = remdm_sample(
+        model, local_obs, global_obs, cfg, device,
+        physics_aware=physics_aware, blind_global=blind_global,
+    )
     return seq[0, 0].item()
