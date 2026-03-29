@@ -65,9 +65,9 @@ checkpoint_eval_episodes: 20
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
 save_policy: true
-use_wandb: false
+use_wandb: true
 wandb_project: remdm-minihack
-wandb_entity: ""
+wandb_entity: "mathis-weil-university-college-london-ucl-"
 wandb_run_name: null
 offline_log_every: 10
 seed: null

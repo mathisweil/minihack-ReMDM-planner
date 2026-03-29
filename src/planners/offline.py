@@ -21,6 +21,7 @@ from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
 from src.models.denoiser import ModelEMA, make_model
+from src.planners.logging import Logger
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         buffer: ReplayBuffer,
         cfg: SimpleNamespace,
         device: torch.device | str,
+        log: Logger | None = None,
     ) -> dict:
         """Run offline BC training.
 
@@ -51,6 +53,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             buffer: Replay buffer with offline data.
             cfg: Config namespace.
             device: Torch device.
+            log: Optional Logger for wandb and stdout metrics.
 
         Returns:
             Dict with ``"final_loss"`` and ``"loss_history"``.
@@ -122,10 +125,29 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 loss_history.append(loss.item())
                 step += 1
 
+                if log is not None and step % cfg.offline_log_every == 0:
+                    log.log(
+                        {
+                            "diffusion/loss": loss.item(),
+                            "diffusion/loss_diff": loss_diff.item(),
+                            "diffusion/loss_aux": loss_aux.item(),
+                            "train/lr": scheduler.get_last_lr()[0],
+                            "train/epoch": epoch,
+                        },
+                        step=step,
+                    )
+
             logger.info(
                 f"Epoch {epoch + 1}/{cfg.offline_epochs} "
                 f"loss={loss_history[-1]:.4f}"
             )
+
+        if log is not None:
+            log.log_summary({
+                "offline/final_loss": loss_history[-1] if loss_history else 0.0,
+                "offline/total_steps": step,
+                "offline/epochs": cfg.offline_epochs,
+            })
 
         return {
             "final_loss": loss_history[-1] if loss_history else 0.0,
@@ -182,8 +204,9 @@ def run_offline(cfg, data_path: str | None) -> None:
     model = make_model(cfg).to(device)
     ema = ModelEMA(model, decay=cfg.ema_decay)
 
+    log = Logger(cfg)
     train_fn = make_offline_trainer(cfg)
-    result = train_fn(model, ema, buffer, cfg, device)
+    result = train_fn(model, ema, buffer, cfg, device, log=log)
     logger.info(f"Offline training done. Final loss: {result['final_loss']:.4f}")
 
     # Save checkpoint
@@ -198,3 +221,4 @@ def run_offline(cfg, data_path: str | None) -> None:
         path,
     )
     logger.info(f"Saved offline checkpoint: {path}")
+    log.finish()
