@@ -176,3 +176,5 @@ texture_cache*.pbz2
 .claude/
 CLAUDE.md
 claude_code_prompt.md
+
+minihack_reference
