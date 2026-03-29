@@ -31,18 +31,22 @@ class DynamicCurriculum:
     _WEIGHT_HIGH = 0.1
 
     def __init__(
-        self, env_ids: list[str], queue_size: int = 100,
+        self,
+        env_ids: list[str],
+        queue_size: int = 100,
+        preseed: bool = True,
     ) -> None:
         self._env_ids = list(env_ids)
         self._queue_size = queue_size
-        # Seed with 50/50 prior
         self._queues: dict[str, deque[bool]] = {}
         for eid in self._env_ids:
             q: deque[bool] = deque(maxlen=queue_size)
-            for _ in range(50):
-                q.append(True)
-            for _ in range(50):
-                q.append(False)
+            if preseed:
+                # 50/50 prior for uniform early sampling
+                for _ in range(50):
+                    q.append(True)
+                for _ in range(50):
+                    q.append(False)
             self._queues[eid] = q
 
     def update(self, env_id: str, won: bool) -> None:

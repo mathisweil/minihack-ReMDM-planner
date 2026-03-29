@@ -22,6 +22,9 @@ n_layer: 4
 n_global_tokens: 8
 seq_len: 192
 global_gate_init: -3.0
+# Transformer dropout. 0.0 is deliberate — discrete diffusion forward masking
+# already regularises; dropout on top is redundant.
+dropout: 0.0
 ema_decay: 0.999
 
 # ── Diffusion (MDLM) ─────────────────────────────────────────────────
@@ -29,16 +32,24 @@ noise_schedule: linear
 num_diffusion_steps: 100
 loss_weight_clip: 1000.0
 label_smoothing: 0.0
+# Use SUBS importance weighting w(t) in loss. Off by default (flat average
+# matching reference). Enable for MDLM ELBO experiments.
+use_importance_weighting: false
 # ReMDM stochastic remask base fraction
 eta: 0.15
 # Remasking strategy: rescale | cap | conf
 remask_strategy: conf
 
 # ── Inference ─────────────────────────────────────────────────────────
-diffusion_steps_eval: 30
+# Number of reverse denoising steps at inference.
+# Reference uses 5 (aggressive). Higher = better quality, slower.
+diffusion_steps_eval: 10
 temperature: 0.5
 top_k: 4
 replan_every: 16
+# Soft-penalise hazardous cardinal actions during stochastic sampling.
+# Not active in the reference evaluation pipeline; off by default.
+physics_aware_sampling: false
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
@@ -51,11 +62,14 @@ aux_loss_weight: 0.5
 dagger_lr: 0.00003
 dagger_batch_size: 1024
 dagger_grad_clip: 1.0
+weight_decay: 0.0001
 buffer_capacity: 10000
 episodes_per_iteration: 10
 grad_steps_per_iteration: 100
-efficiency_multiplier: 2.0
+efficiency_multiplier: 1.5
 curriculum_queue_size: 100
+# Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
+curriculum_preseed: true
 max_iterations: 8000
 id_eval_every: 100
 ood_eval_every: 500

@@ -157,7 +157,7 @@ class ReplayBuffer:
 
     def sample(
         self, batch_size: int,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Random sample from offline + online combined.
 
         Args:
@@ -165,8 +165,10 @@ class ReplayBuffer:
 
         Returns:
             ``(local [B,9,9], global [B,21,79], actions [B,seq_len])``
-            as numpy arrays.
+            as numpy arrays, or ``None`` if the buffer is empty.
         """
+        if len(self) == 0:
+            return None
         combined = self._offline + self._online
         n = len(combined)
         indices = np.random.randint(0, n, size=batch_size)

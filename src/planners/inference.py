@@ -84,6 +84,7 @@ class Evaluator:
                         model, env_id, cfg, device, seed,
                         des_file=des_content,
                         blind_global=blind_global,
+                        stochastic=True,
                     )
                     if ep_result["won"]:
                         wins += 1

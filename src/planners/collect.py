@@ -15,7 +15,7 @@ import torch
 
 from src.buffer import ReplayBuffer
 from src.curriculum import DynamicCurriculum, efficiency_filter
-from src.diffusion.sampling import remdm_sample
+from src.diffusion.sampling import greedy_sample, remdm_sample
 from src.envs.minihack_env import collect_oracle_trajectory, make_env
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ def run_model_episode(
     max_steps: int = 500,
     des_file: str | None = None,
     blind_global: bool = False,
+    stochastic: bool = False,
 ) -> dict:
     """Roll out the diffusion model on a single episode.
 
@@ -46,6 +47,8 @@ def run_model_episode(
         max_steps: Maximum episode length.
         des_file: Optional ``.des`` file content for custom scenarios.
         blind_global: If ``True``, zero out global map (local-only ablation).
+        stochastic: If ``True``, use stochastic ReMDM sampling (evaluation).
+            If ``False`` (default), use greedy argmax (DAgger collection).
 
     Returns:
         Dict with ``"local"`` ``[T,9,9]``, ``"global"`` ``[T,21,79]``,
@@ -54,6 +57,8 @@ def run_model_episode(
     """
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
+
+    _use_stochastic = stochastic
 
     env = make_env(env_id, des_file, cfg)
     (local, glb), _info = env.reset(seed=seed)
@@ -76,10 +81,19 @@ def run_model_episode(
             glb_t = torch.from_numpy(
                 glb[np.newaxis]
             ).long().to(device)  # [1, 21, 79]
-            plan = remdm_sample(
-                model, local_t, glb_t, cfg, device,
-                blind_global=blind_global,
-            )  # [1, seq_len]
+            if _use_stochastic:
+                plan = remdm_sample(
+                    model, local_t, glb_t, cfg, device,
+                    physics_aware=getattr(
+                        cfg, "physics_aware_sampling", False,
+                    ),
+                    blind_global=blind_global,
+                )
+            else:
+                plan = greedy_sample(
+                    model, local_t, glb_t, cfg, device,
+                    blind_global=blind_global,
+                )  # [1, seq_len]
             step_in_plan = 0
 
         action = plan[0, step_in_plan].item()
@@ -122,8 +136,12 @@ class DataCollector:
     model, run the oracle on the same seed, apply efficiency filter, and
     optionally add the oracle trajectory to the buffer.
 
+    Uses a live reference to the ``ModelEMA`` object so the collector
+    always uses the latest EMA weights (synced before each rollout).
+
     Args:
-        ema_model: EMA model for inference.
+        ema: EMA tracker holding shadow weights.
+        model: Training model (architecture template for EMA snapshot).
         buffer: Replay buffer to populate.
         curriculum: Dynamic environment curriculum.
         cfg: Config namespace.
@@ -132,17 +150,26 @@ class DataCollector:
 
     def __init__(
         self,
-        ema_model: torch.nn.Module,
+        ema: "ModelEMA",
+        model: torch.nn.Module,
         buffer: ReplayBuffer,
         curriculum: DynamicCurriculum,
         cfg: SimpleNamespace,
         device: torch.device | str,
     ) -> None:
-        self.ema_model = ema_model
+        self._ema = ema
+        self._model_template = model
+        # Materialise an eval-mode copy; refreshed before each rollout
+        self.ema_model = ema.make_eval_model(model)
         self.buffer = buffer
         self.curriculum = curriculum
         self.cfg = cfg
         self.device = device
+
+    def _sync_ema(self) -> None:
+        """Copy latest EMA shadow weights into the eval model."""
+        self._ema.apply_to(self.ema_model)
+        self.ema_model.eval()
 
     def collect_one_iteration(self) -> dict:
         """Run one DAgger collection iteration.
@@ -152,6 +179,7 @@ class DataCollector:
             ``"model_steps"``, ``"oracle_steps"``,
             ``"added_to_buffer"`` keys.
         """
+        self._sync_ema()
         env_id = self.curriculum.sample_env()
         seed = random.randint(0, 2**31 - 1)
 

@@ -61,6 +61,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         model.train()
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=cfg.offline_lr,
+            weight_decay=cfg.weight_decay,
         )
 
         total_steps = cfg.offline_epochs * max(
@@ -77,9 +78,10 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         for epoch in range(cfg.offline_epochs):
             n_batches = max(1, len(buffer) // cfg.offline_batch_size)
             for _ in range(n_batches):
-                local_np, global_np, actions_np = buffer.sample(
-                    cfg.offline_batch_size,
-                )
+                batch = buffer.sample(cfg.offline_batch_size)
+                if batch is None:
+                    continue
+                local_np, global_np, actions_np = batch
                 local_t = torch.from_numpy(local_np).long().to(device)
                 global_t = torch.from_numpy(global_np).long().to(device)
                 actions_t = torch.from_numpy(actions_np).long().to(device)
@@ -93,8 +95,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     schedule_fn,
                 )
                 t_discrete = (
-                    t * (cfg.num_diffusion_steps - 1)
-                ).long()  # [B]
+                    t * cfg.num_diffusion_steps
+                ).long().clamp(0, cfg.num_diffusion_steps - 1)  # [B]
 
                 out = model(local_t, global_t, zt, t_discrete)
 
@@ -103,6 +105,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     cfg.mask_token, cfg.pad_token, schedule_fn,
                     weight_clip=cfg.loss_weight_clip,
                     label_smoothing=cfg.label_smoothing,
+                    use_importance_weighting=cfg.use_importance_weighting,
                 )
 
                 loss_aux = torch.tensor(0.0, device=device)

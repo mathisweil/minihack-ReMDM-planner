@@ -29,8 +29,13 @@ def mdlm_loss(
     schedule_fn: Callable[[Tensor], Tensor],
     weight_clip: float = _MAX_WEIGHT,
     label_smoothing: float = 0.0,
+    use_importance_weighting: bool = False,
 ) -> Tensor:
-    """Compute the MDLM ELBO loss (SUBS parameterisation).
+    """Compute masked diffusion loss.
+
+    By default uses a simple masked cross-entropy average (matching the
+    reference implementation).  When ``use_importance_weighting=True``,
+    applies SUBS weighting ``w(t) = -alpha'(t) / (1 - alpha_t)``.
 
     Args:
         logits: Model output. Shape ``[B, L, vocab]``.
@@ -42,18 +47,12 @@ def mdlm_loss(
         schedule_fn: Noise schedule returning alpha(t).
         weight_clip: Upper clamp for SUBS weight (default 1000).
         label_smoothing: Smoothing epsilon for cross-entropy.
+        use_importance_weighting: If ``True``, apply SUBS w(t) per sample.
 
     Returns:
-        Scalar batch-mean loss. Returns ``0.0`` when no masked positions
-        exist in the batch.
+        Scalar loss. Returns ``0.0`` when no masked positions exist.
     """
     B, L, V = logits.shape
-
-    # SUBS weight: w_t = -alpha'(t) / (1 - alpha_t + eps)
-    alpha_t = schedule_fn(t)  # [B]
-    d_alpha = alpha_prime(t, schedule_fn)  # [B]  (negative for decreasing schedules)
-    w_t = (-d_alpha) / (1.0 - alpha_t + 1e-8)  # [B]
-    w_t = w_t.clamp(0.0, weight_clip)  # [B]
 
     # Mask: compute loss only on masked, non-PAD positions
     is_masked = (zt == mask_token) & (x0 != pad_token)  # [B, L]
@@ -76,13 +75,23 @@ def mdlm_loss(
     # Zero out non-masked positions
     ce = ce * is_masked.float()  # [B, L]
 
-    # Per-sample mean over masked positions
-    n_masked = is_masked.float().sum(dim=1).clamp(min=1.0)  # [B]
-    per_sample_loss = ce.sum(dim=1) / n_masked  # [B]
+    # Global average over all masked positions (matches reference)
+    n_masked_total = is_masked.float().sum().clamp(min=1.0)
+    loss = ce.sum() / n_masked_total
 
-    # Weight by SUBS weight and reduce to batch mean
-    weighted = per_sample_loss * w_t  # [B]
-    return weighted.mean()
+    if use_importance_weighting:
+        # SUBS weight: w_t = -alpha'(t) / (1 - alpha_t + eps)
+        alpha_t = schedule_fn(t)  # [B]
+        d_alpha = alpha_prime(t, schedule_fn)  # [B]
+        w_t = (-d_alpha) / (1.0 - alpha_t + 1e-8)  # [B]
+        w_t = w_t.clamp(0.0, weight_clip)  # [B]
+
+        # Per-sample weighted loss (needed for SUBS)
+        n_masked_per = is_masked.float().sum(dim=1).clamp(min=1.0)  # [B]
+        per_sample = ce.sum(dim=1) / n_masked_per  # [B]
+        loss = (per_sample * w_t).mean()
+
+    return loss
 
 
 def auxiliary_goal_loss(
