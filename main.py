@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from src.config import load_config
+from src.planners.logging import Logger
 from src.planners.offline import run_offline
 from src.planners.online import run_dagger
 from src.planners.inference import run_inference
@@ -120,6 +121,7 @@ def run_mode(mode: str, cfg, args) -> None:
         run_dagger(cfg, args.checkpoint, args.no_warm_start)
 
     elif mode == "inference":
+        log = Logger(cfg)
         run_inference(
             cfg,
             args.checkpoint,
@@ -127,7 +129,9 @@ def run_mode(mode: str, cfg, args) -> None:
             args.episodes,
             args.output,
             not args.no_ema,
+            log=log,
         )
+        log.finish()
 
 
 # =============================================================================

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import torch
 
 from src.models.denoiser import ModelEMA, make_model
+from src.planners.logging import Logger
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,7 @@ def run_inference(
     episodes: int,
     output_path: str | None,
     use_ema: bool,
+    log: Logger | None = None,
 ) -> None:
     """Evaluate a checkpoint on specified environments."""
 
@@ -172,6 +174,13 @@ def run_inference(
     results = evaluator.evaluate(env_ids, model, episodes, cfg, device)
 
     print(format_eval_results(results, label="Inference"))
+
+    if log is not None:
+        log.log_eval(results, step=0, prefix="inference")
+        log.log_summary(
+            {f"inference/{env_id}/win_rate": stats["win_rate"]
+             for env_id, stats in results.items()}
+        )
 
     if output_path:
         save_eval_json(results, output_path)

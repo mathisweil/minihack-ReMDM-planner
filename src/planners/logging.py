@@ -29,11 +29,24 @@ class Logger:
                 self._run = wandb.init(
                     project=cfg.wandb_project,
                     entity=cfg.wandb_entity or None,
+                    name=getattr(cfg, "wandb_run_name", None) or None,
                     config=vars(cfg),
                 )
             except Exception:
                 logger.error("W&B init failed", exc_info=True)
                 self._use_wandb = False
+
+    def log_summary(self, metrics: dict) -> None:
+        """Write key/value pairs to the wandb run summary (final aggregates).
+
+        Args:
+            metrics: Flat ``{key: value}`` dict.
+        """
+        if self._use_wandb and self._run is not None:
+            try:
+                self._run.summary.update(metrics)
+            except Exception:
+                pass
 
     def log(self, metrics: dict, step: int) -> None:
         """Log a dict of metrics.

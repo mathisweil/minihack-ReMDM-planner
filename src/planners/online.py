@@ -95,14 +95,26 @@ class Trainer:
 
             # 4. Log
             avg_loss = sum(losses) / len(losses) if losses else 0.0
+            current_lr = (
+                self.scheduler.get_last_lr()[0]
+                if self.scheduler is not None
+                else self.cfg.dagger_lr
+            )
             self.log.log(
                 {
                     "diffusion/loss": avg_loss,
                     "train/buffer_size": len(self.buffer),
-                    "train/model_win": int(collect_stats["model_won"]),
+                    "train/model_won": int(collect_stats["model_won"]),
                     "train/added_to_buffer": int(
                         collect_stats["added_to_buffer"]
                     ),
+                    "train/model_steps": collect_stats["model_steps"],
+                    "train/oracle_steps": collect_stats["oracle_steps"],
+                    "train/efficiency_ratio": (
+                        collect_stats["model_steps"]
+                        / max(collect_stats["oracle_steps"], 1)
+                    ),
+                    "train/lr": current_lr,
                 },
                 step=iteration,
             )
@@ -122,6 +134,14 @@ class Trainer:
                     self.device,
                 )
                 self.log.log_eval(results, step=iteration, prefix="eval_id")
+                self.log.log(
+                    {
+                        f"curriculum/{env_id}/win_rate":
+                            self.collector.curriculum.win_rate(env_id)
+                        for env_id in self.cfg.id_envs
+                    },
+                    step=iteration,
+                )
 
             # 6. OOD eval
             if (
