@@ -18,6 +18,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Suppress noisy NLE INFO spam ("Not saving any NLE data." on every env create)
+logging.getLogger("nle.env.base").setLevel(logging.WARNING)
+
 
 # ── Staircase detection ──────────────────────────────────────────────
 
