@@ -61,7 +61,8 @@ minihack-ReMDM-planner/
 │       ├── smoke.py                   # smoke-test runner
 │       └── logging.py                 # centralised W&B + stdout logging
 ├── scripts/
-│   └── hf_upload.py                   # HuggingFace Hub upload utility
+│   ├── hf_upload.py                   # HuggingFace Hub upload utility
+│   └── profile_dagger.py             # DAgger iteration profiler (Phase 1)
 ├── main.py                            # unified CLI entry point
 ├── environment.yaml                   # conda environment spec
 └── README.md                          # full project documentation
@@ -159,3 +160,36 @@ Before considering any task complete:
 - [ ] `minihack_reference/` untouched
 - [ ] `CLAUDE.md` codebase map updated if files were added or removed
 - [ ] Relevant `.claude/rules/` file updated if a new convention was established
+
+---
+
+## Performance tuning
+
+Three config keys control performance optimisations. All default to off (safe, reference-matching behaviour).
+
+### Mixed precision (`use_amp: true`)
+
+Wraps training forward/backward in `torch.amp.autocast("cuda")` with `GradScaler`. Active in both offline BC and DAgger training.
+
+- **Measured speedup:** 2.2x on gradient steps, 1.7x on full smoke test wall-clock
+- **Memory:** peak GPU stays ~16 GB at B=1024 (same as FP32 due to embedding-heavy model)
+- **Correctness:** loss trajectory and win rates statistically equivalent to FP32
+- **When to use:** always on GPU. No effect on CPU (autocast is a no-op)
+
+### torch.compile (`torch_compile: true`)
+
+Applies `torch.compile(model, mode="reduce-overhead")` before training.
+
+- **Measured speedup:** none beyond AMP alone. The dynamic `t_discrete` argument causes recompilation (cache_size_limit hit). Not recommended.
+- **When to use:** experimental only. May help on future PyTorch versions with better dynamic shape support.
+
+### Parallel collection (`num_collection_workers: N`)
+
+Runs DAgger episode collection in parallel using `ThreadPoolExecutor`. Each thread gets a CPU copy of the model. NLE and PyTorch CPU release the GIL.
+
+- **Measured speedup:** marginal. CPU model inference is slower than GPU, offsetting parallelism gains. Best avoided unless CPU-only.
+- **When to use:** set to 0 (default) for GPU training. May help on CPU-only machines with many cores.
+
+### Profiling
+
+Run `python scripts/profile_dagger.py [key=value ...]` to profile DAgger iteration components. Supports all config overrides (e.g., `use_amp=true`).

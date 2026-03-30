@@ -69,6 +69,11 @@ class Trainer:
         self.cfg = cfg
         self.device = device
         self._schedule_fn = get_schedule(cfg.noise_schedule)
+        # AMP scaler: enabled only when use_amp=true and on CUDA
+        self._use_amp = (
+            getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
+        )
+        self._scaler = torch.amp.GradScaler("cuda", enabled=self._use_amp)
 
     # ── Main loop ────────────────────────────────────────────────
 
@@ -82,13 +87,25 @@ class Trainer:
         for iteration in range(start_iter, cfg.max_iterations):
             # 1. Collect N episodes per iteration
             n_eps = getattr(cfg, "episodes_per_iteration", 1)
+            num_workers = getattr(cfg, "num_collection_workers", 0)
             model_wins = 0
             added_total = 0
             last_stats: dict = {}
-            for _ in range(n_eps):
-                last_stats = self.collector.collect_one_iteration()
-                model_wins += int(last_stats["model_won"])
-                added_total += int(last_stats["added_to_buffer"])
+
+            if num_workers > 0 and n_eps > 1:
+                # Parallel collection (Candidate A)
+                batch_stats = self.collector.collect_batch_parallel(n_eps)
+                for s in batch_stats:
+                    model_wins += int(s["model_won"])
+                    added_total += int(s["added_to_buffer"])
+                    last_stats = s
+            else:
+                # Sequential collection (reference behaviour)
+                for _ in range(n_eps):
+                    last_stats = self.collector.collect_one_iteration()
+                    model_wins += int(last_stats["model_won"])
+                    added_total += int(last_stats["added_to_buffer"])
+
             collect_stats = {
                 **last_stats,
                 "model_won": model_wins,
@@ -199,6 +216,9 @@ class Trainer:
     def _train_step(self) -> float:
         """One gradient step on a buffer sample.
 
+        Uses AMP (mixed precision) when ``cfg.use_amp`` is ``True``
+        and training on CUDA.
+
         Returns:
             Scalar loss value.
         """
@@ -222,28 +242,31 @@ class Trainer:
             0, cfg.num_diffusion_steps - 1,
         )
 
-        out = self.model(local_t, global_t, zt, t_discrete)
-
-        loss_diff = mdlm_loss(
-            out["actions"], actions_t, zt, t,
-            cfg.mask_token, cfg.pad_token, self._schedule_fn,
-            weight_clip=cfg.loss_weight_clip,
-            label_smoothing=cfg.label_smoothing,
-            use_importance_weighting=cfg.use_importance_weighting,
-        )
-
-        loss_aux = torch.tensor(0.0, device=self.device)
-        if "goal_pred" in out:
-            loss_aux = auxiliary_goal_loss(out["goal_pred"], global_t)
-
-        loss = loss_diff + cfg.aux_loss_weight * loss_aux
-
         self.optimizer.zero_grad()
-        loss.backward()
+        with torch.amp.autocast("cuda", enabled=self._use_amp):
+            out = self.model(local_t, global_t, zt, t_discrete)
+
+            loss_diff = mdlm_loss(
+                out["actions"], actions_t, zt, t,
+                cfg.mask_token, cfg.pad_token, self._schedule_fn,
+                weight_clip=cfg.loss_weight_clip,
+                label_smoothing=cfg.label_smoothing,
+                use_importance_weighting=cfg.use_importance_weighting,
+            )
+
+            loss_aux = torch.tensor(0.0, device=self.device)
+            if "goal_pred" in out:
+                loss_aux = auxiliary_goal_loss(out["goal_pred"], global_t)
+
+            loss = loss_diff + cfg.aux_loss_weight * loss_aux
+
+        self._scaler.scale(loss).backward()
+        self._scaler.unscale_(self.optimizer)
         nn.utils.clip_grad_norm_(
             self.model.parameters(), cfg.dagger_grad_clip,
         )
-        self.optimizer.step()
+        self._scaler.step(self.optimizer)
+        self._scaler.update()
         if self.scheduler is not None:
             self.scheduler.step()
 
@@ -442,6 +465,12 @@ def run_dagger(
     logger.info(f"DAgger training on {device}")
 
     model = make_model(cfg).to(device)
+
+    # torch.compile (Candidate E)
+    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
+        logger.info("Compiling model with torch.compile (reduce-overhead)")
+        model = torch.compile(model, mode="reduce-overhead")
+
     ema = ModelEMA(model, decay=cfg.ema_decay)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.dagger_lr,
