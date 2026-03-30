@@ -72,6 +72,13 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             eta_min=cfg.offline_lr * 0.1,
         )
 
+        # AMP: enabled when use_amp=true and on CUDA
+        _use_amp = (
+            getattr(cfg, "use_amp", False)
+            and str(device).startswith("cuda")
+        )
+        scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
+
         loss_history: list[float] = []
         step = 0
 
@@ -98,30 +105,33 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     t * cfg.num_diffusion_steps
                 ).long().clamp(0, cfg.num_diffusion_steps - 1)  # [B]
 
-                out = model(local_t, global_t, zt, t_discrete)
+                optimizer.zero_grad()
+                with torch.amp.autocast("cuda", enabled=_use_amp):
+                    out = model(local_t, global_t, zt, t_discrete)
 
-                loss_diff = mdlm_loss(
-                    out["actions"], actions_t, zt, t,
-                    cfg.mask_token, cfg.pad_token, schedule_fn,
-                    weight_clip=cfg.loss_weight_clip,
-                    label_smoothing=cfg.label_smoothing,
-                    use_importance_weighting=cfg.use_importance_weighting,
-                )
-
-                loss_aux = torch.tensor(0.0, device=device)
-                if "goal_pred" in out:
-                    loss_aux = auxiliary_goal_loss(
-                        out["goal_pred"], global_t,
+                    loss_diff = mdlm_loss(
+                        out["actions"], actions_t, zt, t,
+                        cfg.mask_token, cfg.pad_token, schedule_fn,
+                        weight_clip=cfg.loss_weight_clip,
+                        label_smoothing=cfg.label_smoothing,
+                        use_importance_weighting=cfg.use_importance_weighting,
                     )
 
-                loss = loss_diff + cfg.aux_loss_weight * loss_aux
+                    loss_aux = torch.tensor(0.0, device=device)
+                    if "goal_pred" in out:
+                        loss_aux = auxiliary_goal_loss(
+                            out["goal_pred"], global_t,
+                        )
 
-                optimizer.zero_grad()
-                loss.backward()
+                    loss = loss_diff + cfg.aux_loss_weight * loss_aux
+
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
                 nn.utils.clip_grad_norm_(
                     model.parameters(), cfg.offline_grad_clip,
                 )
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 scheduler.step()
 
                 ema_model.update(model)
@@ -205,6 +215,12 @@ def run_offline(cfg, data_path: str | None) -> None:
         sys.exit(1)
 
     model = make_model(cfg).to(device)
+
+    # torch.compile (Candidate E)
+    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
+        logger.info("Compiling model with torch.compile (reduce-overhead)")
+        model = torch.compile(model, mode="reduce-overhead")
+
     ema = ModelEMA(model, decay=cfg.ema_decay)
 
     log = Logger(cfg)
