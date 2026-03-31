@@ -38,14 +38,14 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return base
 
 
-def _cast_value(value: str) -> int | float | bool | str:
+def _cast_value(value: str) -> int | float | bool | str | None:
     """Best-effort cast of a CLI string to a Python scalar.
 
     Args:
         value: Raw string from the command line.
 
     Returns:
-        Parsed Python value (int, float, bool, or str).
+        Parsed Python value (int, float, bool, str, or None).
     """
     if value.lower() in ("true", "yes"):
         return True

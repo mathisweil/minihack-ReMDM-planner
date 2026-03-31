@@ -151,7 +151,7 @@ def remdm_sample(
         global_obs = torch.zeros_like(global_obs)
 
     # Pre-compute numpy local crops for physics checks (CPU, batch loop)
-    local_np: list[np.ndarray] | None = None
+    local_np: np.ndarray | None = None  # [B, crop, crop]
     if physics_aware:
         local_np = local_obs.cpu().numpy()
 
@@ -167,7 +167,11 @@ def remdm_sample(
 
     for k in range(1, K + 1):
         ratio = k / K
-        t_discrete = int(cfg.num_diffusion_steps * (1.0 - ratio))
+        # Pass as tensor (not Python int) to avoid torch.compile recompilation
+        t_discrete = torch.full(
+            (B,), int(cfg.num_diffusion_steps * (1.0 - ratio)),
+            dtype=torch.long, device=device,
+        )
 
         # Forward pass
         out = model(local_obs, global_obs, seq, t_discrete)
@@ -193,6 +197,7 @@ def remdm_sample(
 
         # Physics softener: demote hazardous cardinal actions to conf=0.001
         if physics_aware and local_np is not None:
+            assert local_np is not None  # narrowing for type checker
             preds_np = preds.cpu().numpy()  # [B, seq_len]
             conf_override = conf.clone()
             for b in range(B):
@@ -310,7 +315,10 @@ def greedy_sample(
 
     for k in range(1, K + 1):
         ratio = k / K
-        t_discrete = int(cfg.num_diffusion_steps * (1.0 - ratio))
+        t_discrete = torch.full(
+            (B,), int(cfg.num_diffusion_steps * (1.0 - ratio)),
+            dtype=torch.long, device=device,
+        )
 
         out = model(local_obs, global_obs, seq, t_discrete)
         logits = out["actions"]  # [B, seq_len, vocab]
@@ -342,7 +350,8 @@ def greedy_sample(
     # Force-commit any remaining masked tokens
     still_masked = seq == mask_token
     if still_masked.any():
-        out = model(local_obs, global_obs, seq, 0)
+        t_zero = torch.zeros(B, dtype=torch.long, device=device)
+        out = model(local_obs, global_obs, seq, t_zero)
         logits = out["actions"]
         logits[:, :, action_dim:] = float("-inf")
         preds = logits.argmax(dim=-1)

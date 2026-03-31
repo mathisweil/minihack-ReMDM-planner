@@ -2,12 +2,17 @@
 
 Implements model episode rollout with replanning and DAgger-style
 data collection using the BFS oracle and efficiency filter.
+Supports parallel episode collection via ``ThreadPoolExecutor``.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
+import os
 import random
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 from types import SimpleNamespace
 
 import numpy as np
@@ -17,6 +22,9 @@ from src.buffer import ReplayBuffer
 from src.curriculum import DynamicCurriculum, efficiency_filter
 from src.diffusion.sampling import greedy_sample, remdm_sample
 from src.envs.minihack_env import collect_oracle_trajectory, make_env
+
+if TYPE_CHECKING:
+    from src.models.denoiser import ModelEMA
 
 logger = logging.getLogger(__name__)
 
@@ -129,12 +137,58 @@ def run_model_episode(
     }
 
 
+def _collect_episode_thread(
+    model: torch.nn.Module,
+    env_id: str,
+    seed: int,
+    cfg: SimpleNamespace,
+) -> dict | None:
+    """Thread worker: run one paired (model + oracle) episode.
+
+    Both NLE (C code) and PyTorch CPU inference release the GIL,
+    so true parallelism is achieved with threads. Each call uses
+    its own model copy and env instance.
+
+    Args:
+        model: CPU-resident eval-mode model (thread's own copy).
+        env_id: MiniHack environment ID.
+        seed: RNG seed for the episode.
+        cfg: Config namespace.
+
+    Returns:
+        Stats dict or ``None`` on failure.
+    """
+    try:
+        model_result = run_model_episode(
+            model, env_id, cfg, "cpu", seed,
+        )
+        oracle_result = collect_oracle_trajectory(env_id, seed, cfg)
+        oracle_steps = (
+            len(oracle_result["actions"]) if oracle_result else 999
+        )
+        return {
+            "env_id": env_id,
+            "seed": seed,
+            "model_won": model_result["won"],
+            "model_steps": model_result["steps"],
+            "oracle_steps": oracle_steps,
+            "oracle_result": oracle_result,
+        }
+    except Exception:
+        logger.error(
+            f"Thread worker failed for {env_id} seed={seed}", exc_info=True,
+        )
+        return None
+
+
 class DataCollector:
     """DAgger-style data collector.
 
     Each iteration: sample an environment from the curriculum, run the
     model, run the oracle on the same seed, apply efficiency filter, and
     optionally add the oracle trajectory to the buffer.
+
+    Supports parallel episode collection via ``cfg.num_collection_workers``.
 
     Uses a live reference to the ``ModelEMA`` object so the collector
     always uses the latest EMA weights (synced before each rollout).
@@ -165,6 +219,17 @@ class DataCollector:
         self.curriculum = curriculum
         self.cfg = cfg
         self.device = device
+        self._num_workers = getattr(cfg, "num_collection_workers", 0)
+        self._thread_pool: ThreadPoolExecutor | None = None
+        self._thread_models: list[torch.nn.Module] = []
+        if self._num_workers > 0:
+            n = min(self._num_workers, os.cpu_count() or 4)
+            self._thread_pool = ThreadPoolExecutor(max_workers=n)
+            # Create one CPU model copy per thread
+            for _ in range(n):
+                m = copy.deepcopy(model).cpu()
+                m.eval()
+                self._thread_models.append(m)
 
     def _sync_ema(self) -> None:
         """Copy latest EMA shadow weights into the eval model."""
@@ -172,7 +237,7 @@ class DataCollector:
         self.ema_model.eval()
 
     def collect_one_iteration(self) -> dict:
-        """Run one DAgger collection iteration.
+        """Run one DAgger collection iteration (single episode).
 
         Returns:
             Stats dict with ``"env_id"``, ``"model_won"``,
@@ -216,3 +281,78 @@ class DataCollector:
             "oracle_steps": oracle_steps,
             "added_to_buffer": add and oracle_result is not None,
         }
+
+    def collect_batch_parallel(
+        self, n_episodes: int,
+    ) -> list[dict]:
+        """Collect multiple episodes in parallel using threads.
+
+        Both NLE env calls and PyTorch CPU inference release the GIL,
+        enabling true parallelism. Each thread uses a pre-allocated
+        CPU model copy. Weights are synced from EMA once per call.
+
+        Args:
+            n_episodes: Number of episodes to collect.
+
+        Returns:
+            List of per-episode stats dicts.
+        """
+        assert self._thread_pool is not None, (
+            "collect_batch_parallel requires num_collection_workers > 0"
+        )
+        self._sync_ema()
+
+        # Sync EMA weights to all thread-local CPU models
+        ema_sd = self.ema_model.state_dict()
+        cpu_sd = {k: v.cpu() for k, v in ema_sd.items()}
+        for tm in self._thread_models:
+            tm.load_state_dict(cpu_sd)
+            tm.eval()
+
+        # Build task list
+        tasks = []
+        for _ in range(n_episodes):
+            env_id = self.curriculum.sample_env()
+            seed = random.randint(0, 2**31 - 1)
+            tasks.append((env_id, seed))
+
+        # Round-robin assign models to tasks
+        n_models = len(self._thread_models)
+        futures = []
+        for i, (env_id, seed) in enumerate(tasks):
+            model = self._thread_models[i % n_models]
+            f = self._thread_pool.submit(
+                _collect_episode_thread, model, env_id, seed, self.cfg,
+            )
+            futures.append(f)
+
+        results = [f.result() for f in futures]
+
+        # Process results: efficiency filter + buffer add
+        stats_list = []
+        for res in results:
+            if res is None:
+                continue
+
+            add = efficiency_filter(
+                res["model_won"],
+                res["model_steps"],
+                res["oracle_steps"],
+                self.cfg.efficiency_multiplier,
+            )
+
+            oracle_result = res["oracle_result"]
+            if add and oracle_result is not None:
+                self.buffer.add(oracle_result)
+
+            self.curriculum.update(res["env_id"], res["model_won"])
+
+            stats_list.append({
+                "env_id": res["env_id"],
+                "model_won": res["model_won"],
+                "model_steps": res["model_steps"],
+                "oracle_steps": res["oracle_steps"],
+                "added_to_buffer": add and oracle_result is not None,
+            })
+
+        return stats_list

@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import torch
 import torch.nn as nn
+import yaml
 
 from src.buffer import ReplayBuffer
 from src.diffusion.forward import q_sample
@@ -57,8 +59,12 @@ class Trainer:
         log: Logger,
         cfg: SimpleNamespace,
         device: torch.device | str,
+        raw_model: nn.Module | None = None,
     ) -> None:
         self.model = model
+        # raw_model is the uncompiled model used for eval deep-copies.
+        # When torch.compile is off, raw_model is the same as model.
+        self._raw_model = raw_model if raw_model is not None else model
         self.ema_model = ema_model
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -69,6 +75,11 @@ class Trainer:
         self.cfg = cfg
         self.device = device
         self._schedule_fn = get_schedule(cfg.noise_schedule)
+        # AMP scaler: enabled only when use_amp=true and on CUDA
+        self._use_amp = (
+            getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
+        )
+        self._scaler = torch.amp.GradScaler("cuda", enabled=self._use_amp)
 
     # ── Main loop ────────────────────────────────────────────────
 
@@ -80,15 +91,31 @@ class Trainer:
         """
         cfg = self.cfg
         for iteration in range(start_iter, cfg.max_iterations):
+            iter_start = time.perf_counter()
+
             # 1. Collect N episodes per iteration
             n_eps = getattr(cfg, "episodes_per_iteration", 1)
+            num_workers = getattr(cfg, "num_collection_workers", 0)
             model_wins = 0
             added_total = 0
             last_stats: dict = {}
-            for _ in range(n_eps):
-                last_stats = self.collector.collect_one_iteration()
-                model_wins += int(last_stats["model_won"])
-                added_total += int(last_stats["added_to_buffer"])
+
+            collect_start = time.perf_counter()
+            if num_workers > 0 and n_eps > 1:
+                # Parallel collection (Candidate A)
+                batch_stats = self.collector.collect_batch_parallel(n_eps)
+                for s in batch_stats:
+                    model_wins += int(s["model_won"])
+                    added_total += int(s["added_to_buffer"])
+                    last_stats = s
+            else:
+                # Sequential collection (reference behaviour)
+                for _ in range(n_eps):
+                    last_stats = self.collector.collect_one_iteration()
+                    model_wins += int(last_stats["model_won"])
+                    added_total += int(last_stats["added_to_buffer"])
+            collect_time = time.perf_counter() - collect_start
+
             collect_stats = {
                 **last_stats,
                 "model_won": model_wins,
@@ -97,38 +124,64 @@ class Trainer:
 
             # 2. Gradient steps (EMA updated after each step)
             self.model.train()
-            losses: list[float] = []
+            step_metrics: list[dict[str, float]] = []
+            train_start = time.perf_counter()
             for _ in range(cfg.grad_steps_per_iteration):
-                loss_val = self._train_step()
-                losses.append(loss_val)
-                self.ema_model.update(self.model)
+                m = self._train_step()
+                step_metrics.append(m)
+                self.ema_model.update(self._raw_model)
+            train_time = time.perf_counter() - train_start
+
+            iter_time = time.perf_counter() - iter_start
 
             # 4. Log
-            avg_loss = sum(losses) / len(losses) if losses else 0.0
+            n_steps = len(step_metrics) or 1
+            avg_loss = sum(m["loss"] for m in step_metrics) / n_steps
+            avg_loss_diff = sum(m["loss_diff"] for m in step_metrics) / n_steps
+            avg_loss_aux = sum(m["loss_aux"] for m in step_metrics) / n_steps
+            avg_grad_norm = sum(m["grad_norm"] for m in step_metrics) / n_steps
             current_lr = (
                 self.scheduler.get_last_lr()[0]
                 if self.scheduler is not None
                 else self.cfg.dagger_lr
             )
-            self.log.log(
-                {
-                    "diffusion/loss": avg_loss,
-                    "train/buffer_size": len(self.buffer),
-                    "train/model_won": int(collect_stats["model_won"]),
-                    "train/added_to_buffer": int(
-                        collect_stats["added_to_buffer"]
-                    ),
-                    "train/episodes_collected": n_eps,
-                    "train/model_steps": collect_stats["model_steps"],
-                    "train/oracle_steps": collect_stats["oracle_steps"],
-                    "train/efficiency_ratio": (
-                        collect_stats["model_steps"]
-                        / max(collect_stats["oracle_steps"], 1)
-                    ),
-                    "train/lr": current_lr,
-                },
-                step=iteration,
-            )
+
+            # Global gate value (how open is the global stream)
+            gate_val = None
+            if hasattr(self._raw_model, "global_gate"):
+                gate_val = torch.sigmoid(
+                    self._raw_model.global_gate
+                ).item()
+
+            metrics = {
+                "diffusion/loss": avg_loss,
+                "diffusion/loss_diff": avg_loss_diff,
+                "diffusion/loss_aux": avg_loss_aux,
+                "train/buffer_size": len(self.buffer),
+                "train/model_won": int(collect_stats["model_won"]),
+                "train/added_to_buffer": int(
+                    collect_stats["added_to_buffer"]
+                ),
+                "train/episodes_collected": n_eps,
+                "train/model_steps": collect_stats["model_steps"],
+                "train/oracle_steps": collect_stats["oracle_steps"],
+                "train/efficiency_ratio": (
+                    collect_stats["model_steps"]
+                    / max(collect_stats["oracle_steps"], 1)
+                ),
+                "train/lr": current_lr,
+                "train/grad_norm": avg_grad_norm,
+                "perf/iter_time_s": iter_time,
+                "perf/collect_time_s": collect_time,
+                "perf/train_time_s": train_time,
+                "perf/grad_steps_per_sec": (
+                    cfg.grad_steps_per_iteration / max(train_time, 1e-6)
+                ),
+            }
+            if gate_val is not None:
+                metrics["train/global_gate"] = gate_val
+
+            self.log.log(metrics, step=iteration)
 
             # 5. ID eval
             if (
@@ -136,7 +189,7 @@ class Trainer:
                 and iteration > 0
                 and iteration % cfg.id_eval_every == 0
             ):
-                eval_model = self.ema_model.make_eval_model(self.model)
+                eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
                     cfg.id_envs,
                     eval_model,
@@ -166,7 +219,7 @@ class Trainer:
                 and iteration > 0
                 and iteration % cfg.ood_eval_every == 0
             ):
-                eval_model = self.ema_model.make_eval_model(self.model)
+                eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
                     cfg.ood_envs,
                     eval_model,
@@ -196,16 +249,21 @@ class Trainer:
 
     # ── Single gradient step ─────────────────────────────────────
 
-    def _train_step(self) -> float:
+    def _train_step(self) -> dict[str, float]:
         """One gradient step on a buffer sample.
 
+        Uses AMP (mixed precision) when ``cfg.use_amp`` is ``True``
+        and training on CUDA.
+
         Returns:
-            Scalar loss value.
+            Dict with ``"loss"``, ``"loss_diff"``, ``"loss_aux"``,
+            and ``"grad_norm"`` scalars.
         """
         cfg = self.cfg
         batch = self.buffer.sample(cfg.dagger_batch_size)
         if batch is None:
-            return 0.0
+            return {"loss": 0.0, "loss_diff": 0.0,
+                    "loss_aux": 0.0, "grad_norm": 0.0}
         local_np, global_np, actions_np = batch
         local_t = torch.from_numpy(local_np).long().to(self.device)
         global_t = torch.from_numpy(global_np).long().to(self.device)
@@ -222,32 +280,40 @@ class Trainer:
             0, cfg.num_diffusion_steps - 1,
         )
 
-        out = self.model(local_t, global_t, zt, t_discrete)
-
-        loss_diff = mdlm_loss(
-            out["actions"], actions_t, zt, t,
-            cfg.mask_token, cfg.pad_token, self._schedule_fn,
-            weight_clip=cfg.loss_weight_clip,
-            label_smoothing=cfg.label_smoothing,
-            use_importance_weighting=cfg.use_importance_weighting,
-        )
-
-        loss_aux = torch.tensor(0.0, device=self.device)
-        if "goal_pred" in out:
-            loss_aux = auxiliary_goal_loss(out["goal_pred"], global_t)
-
-        loss = loss_diff + cfg.aux_loss_weight * loss_aux
-
         self.optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(
+        with torch.amp.autocast("cuda", enabled=self._use_amp):
+            out = self.model(local_t, global_t, zt, t_discrete)
+
+            loss_diff = mdlm_loss(
+                out["actions"], actions_t, zt, t,
+                cfg.mask_token, cfg.pad_token, self._schedule_fn,
+                weight_clip=cfg.loss_weight_clip,
+                label_smoothing=cfg.label_smoothing,
+                use_importance_weighting=cfg.use_importance_weighting,
+            )
+
+            loss_aux = torch.tensor(0.0, device=self.device)
+            if "goal_pred" in out:
+                loss_aux = auxiliary_goal_loss(out["goal_pred"], global_t)
+
+            loss = loss_diff + cfg.aux_loss_weight * loss_aux
+
+        self._scaler.scale(loss).backward()
+        self._scaler.unscale_(self.optimizer)
+        grad_norm = nn.utils.clip_grad_norm_(
             self.model.parameters(), cfg.dagger_grad_clip,
         )
-        self.optimizer.step()
+        self._scaler.step(self.optimizer)
+        self._scaler.update()
         if self.scheduler is not None:
             self.scheduler.step()
 
-        return loss.item()
+        return {
+            "loss": loss.item(),
+            "loss_diff": loss_diff.item(),
+            "loss_aux": loss_aux.item(),
+            "grad_norm": grad_norm.item(),
+        }
 
     # ── Checkpointing ────────────────────────────────────────────
 
@@ -262,7 +328,7 @@ class Trainer:
         path = ckpt_dir / f"iter{iteration}.pth"
 
         state = {
-            "model_state_dict": self.model.state_dict(),
+            "model_state_dict": self._raw_model.state_dict(),
             "ema_state_dict": self.ema_model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": (
@@ -287,9 +353,22 @@ class Trainer:
                 f"Failed to save checkpoint to {path}", exc_info=True,
             )
 
+        # Save config snapshot alongside checkpoint
+        config_path = ckpt_dir / f"config_iter{iteration}.yaml"
+        try:
+            cfg_dict = {
+                k: v for k, v in vars(self.cfg).items()
+                if not k.startswith("_")
+            }
+            with open(config_path, "w") as f:
+                yaml.dump(cfg_dict, f, default_flow_style=False)
+        except Exception:
+            logger.error("Failed to save config snapshot", exc_info=True)
+            config_path = None
+
         # Run eval at checkpoint and save JSON
         try:
-            eval_model = self.ema_model.make_eval_model(self.model)
+            eval_model = self.ema_model.make_eval_model(self._raw_model)
             id_results = self.evaluator.evaluate(
                 self.cfg.id_envs, eval_model,
                 self.cfg.checkpoint_eval_episodes,
@@ -387,6 +466,17 @@ class Trainer:
         except Exception:
             logger.error("HF Hub upload failed", exc_info=True)
 
+        # W&B artifact upload
+        self.log.log_checkpoint_artifact(
+            checkpoint_path=str(path),
+            config_path=str(config_path) if config_path else None,
+            iteration=iteration,
+            metadata={
+                "iteration": iteration,
+                "buffer_size": len(self.buffer),
+            },
+        )
+
     def load_checkpoint(self, path: str) -> int:
         """Load a training checkpoint.
 
@@ -399,7 +489,7 @@ class Trainer:
         ckpt = torch.load(
             path, map_location=self.device, weights_only=False,
         )
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        self._raw_model.load_state_dict(ckpt["model_state_dict"])
         self.ema_model.load_state_dict(ckpt["ema_state_dict"])
         self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
 
@@ -441,10 +531,21 @@ def run_dagger(
     device = cfg.device
     logger.info(f"DAgger training on {device}")
 
-    model = make_model(cfg).to(device)
-    ema = ModelEMA(model, decay=cfg.ema_decay)
+    raw_model = make_model(cfg).to(device)
+
+    # EMA and eval always use the raw (uncompiled) model — deep-copying
+    # a compiled model breaks FX tracing.
+    ema = ModelEMA(raw_model, decay=cfg.ema_decay)
+
+    # torch.compile: wrap for training only; shares parameters with raw_model
+    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
+        logger.info("Compiling model with torch.compile")
+        model = torch.compile(raw_model, mode="default")
+    else:
+        model = raw_model
+
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=cfg.dagger_lr,
+        raw_model.parameters(), lr=cfg.dagger_lr,
         weight_decay=cfg.weight_decay,
     )
 
@@ -461,13 +562,14 @@ def run_dagger(
                 buffer.add(traj)
     logger.info(f"Buffer seeded with {len(buffer)} windows")
 
-    collector = DataCollector(ema, model, buffer, curriculum, cfg, device)
+    # DataCollector uses raw_model for eval copies (not compiled)
+    collector = DataCollector(ema, raw_model, buffer, curriculum, cfg, device)
     evaluator = Evaluator()
     log = Logger(cfg)
 
     trainer = Trainer(
         model, ema, optimizer, None, buffer, collector,
-        evaluator, log, cfg, device,
+        evaluator, log, cfg, device, raw_model=raw_model,
     )
 
     start_iter = 0

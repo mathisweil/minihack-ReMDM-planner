@@ -20,7 +20,7 @@ n_embd: 256
 n_head: 4
 n_layer: 4
 n_global_tokens: 8
-seq_len: 192
+seq_len: 128
 global_gate_init: -3.0
 # Transformer dropout. 0.0 is deliberate — discrete diffusion forward masking
 # already regularises; dropout on top is redundant.
@@ -53,14 +53,14 @@ physics_aware_sampling: false
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
-offline_batch_size: 1024
+offline_batch_size: 2048
 offline_grad_clip: 1.0
 offline_epochs: 30
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 1024
+dagger_batch_size: 3584
 dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
@@ -71,11 +71,22 @@ curriculum_queue_size: 100
 # Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
 curriculum_preseed: true
 max_iterations: 8000
-id_eval_every: 100
-ood_eval_every: 500
-checkpoint_every: 1000
+id_eval_every: 50
+ood_eval_every: 50
+checkpoint_every: 250
 eval_episodes_per_env: 50
-checkpoint_eval_episodes: 20
+checkpoint_eval_episodes: 50
+
+# ── Performance ──────────────────────────────────────────────────────
+# Mixed-precision (FP16) training via torch.cuda.amp.
+# Speeds up forward/backward ~1.5-2x on GPU. No effect on CPU.
+use_amp: false
+# torch.compile the model for fused kernels (experimental).
+# May cause slow first iteration due to compilation. No effect on CPU.
+torch_compile: false
+# Number of parallel workers for DAgger episode collection.
+# 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
+num_collection_workers: 8
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
