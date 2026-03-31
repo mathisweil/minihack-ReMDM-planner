@@ -214,14 +214,16 @@ def run_offline(cfg, data_path: str | None) -> None:
         )
         sys.exit(1)
 
-    model = make_model(cfg).to(device)
+    raw_model = make_model(cfg).to(device)
 
-    # torch.compile (Candidate E)
+    # torch.compile: wrap for training only; shares params with raw_model
     if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
         logger.info("Compiling model with torch.compile")
-        model = torch.compile(model, mode="default")
+        model = torch.compile(raw_model, mode="default")
+    else:
+        model = raw_model
 
-    ema = ModelEMA(model, decay=cfg.ema_decay)
+    ema = ModelEMA(raw_model, decay=cfg.ema_decay)
 
     log = Logger(cfg)
     train_fn = make_offline_trainer(cfg)
@@ -234,7 +236,7 @@ def run_offline(cfg, data_path: str | None) -> None:
     path = ckpt_dir / "offline_final.pth"
     torch.save(
         {
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": raw_model.state_dict(),
             "ema_state_dict": ema.state_dict(),
         },
         path,

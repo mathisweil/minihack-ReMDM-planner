@@ -58,8 +58,12 @@ class Trainer:
         log: Logger,
         cfg: SimpleNamespace,
         device: torch.device | str,
+        raw_model: nn.Module | None = None,
     ) -> None:
         self.model = model
+        # raw_model is the uncompiled model used for eval deep-copies.
+        # When torch.compile is off, raw_model is the same as model.
+        self._raw_model = raw_model if raw_model is not None else model
         self.ema_model = ema_model
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -154,7 +158,7 @@ class Trainer:
                 and iteration > 0
                 and iteration % cfg.id_eval_every == 0
             ):
-                eval_model = self.ema_model.make_eval_model(self.model)
+                eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
                     cfg.id_envs,
                     eval_model,
@@ -184,7 +188,7 @@ class Trainer:
                 and iteration > 0
                 and iteration % cfg.ood_eval_every == 0
             ):
-                eval_model = self.ema_model.make_eval_model(self.model)
+                eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
                     cfg.ood_envs,
                     eval_model,
@@ -326,7 +330,7 @@ class Trainer:
 
         # Run eval at checkpoint and save JSON
         try:
-            eval_model = self.ema_model.make_eval_model(self.model)
+            eval_model = self.ema_model.make_eval_model(self._raw_model)
             id_results = self.evaluator.evaluate(
                 self.cfg.id_envs, eval_model,
                 self.cfg.checkpoint_eval_episodes,
@@ -489,16 +493,21 @@ def run_dagger(
     device = cfg.device
     logger.info(f"DAgger training on {device}")
 
-    model = make_model(cfg).to(device)
+    raw_model = make_model(cfg).to(device)
 
-    # torch.compile (Candidate E)
+    # EMA and eval always use the raw (uncompiled) model — deep-copying
+    # a compiled model breaks FX tracing.
+    ema = ModelEMA(raw_model, decay=cfg.ema_decay)
+
+    # torch.compile: wrap for training only; shares parameters with raw_model
     if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
         logger.info("Compiling model with torch.compile")
-        model = torch.compile(model, mode="default")
+        model = torch.compile(raw_model, mode="default")
+    else:
+        model = raw_model
 
-    ema = ModelEMA(model, decay=cfg.ema_decay)
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=cfg.dagger_lr,
+        raw_model.parameters(), lr=cfg.dagger_lr,
         weight_decay=cfg.weight_decay,
     )
 
@@ -515,13 +524,14 @@ def run_dagger(
                 buffer.add(traj)
     logger.info(f"Buffer seeded with {len(buffer)} windows")
 
-    collector = DataCollector(ema, model, buffer, curriculum, cfg, device)
+    # DataCollector uses raw_model for eval copies (not compiled)
+    collector = DataCollector(ema, raw_model, buffer, curriculum, cfg, device)
     evaluator = Evaluator()
     log = Logger(cfg)
 
     trainer = Trainer(
         model, ema, optimizer, None, buffer, collector,
-        evaluator, log, cfg, device,
+        evaluator, log, cfg, device, raw_model=raw_model,
     )
 
     start_iter = 0
