@@ -167,7 +167,11 @@ def remdm_sample(
 
     for k in range(1, K + 1):
         ratio = k / K
-        t_discrete = int(cfg.num_diffusion_steps * (1.0 - ratio))
+        # Pass as tensor (not Python int) to avoid torch.compile recompilation
+        t_discrete = torch.full(
+            (B,), int(cfg.num_diffusion_steps * (1.0 - ratio)),
+            dtype=torch.long, device=device,
+        )
 
         # Forward pass
         out = model(local_obs, global_obs, seq, t_discrete)
@@ -310,7 +314,10 @@ def greedy_sample(
 
     for k in range(1, K + 1):
         ratio = k / K
-        t_discrete = int(cfg.num_diffusion_steps * (1.0 - ratio))
+        t_discrete = torch.full(
+            (B,), int(cfg.num_diffusion_steps * (1.0 - ratio)),
+            dtype=torch.long, device=device,
+        )
 
         out = model(local_obs, global_obs, seq, t_discrete)
         logits = out["actions"]  # [B, seq_len, vocab]
@@ -342,7 +349,8 @@ def greedy_sample(
     # Force-commit any remaining masked tokens
     still_masked = seq == mask_token
     if still_masked.any():
-        out = model(local_obs, global_obs, seq, 0)
+        t_zero = torch.zeros(B, dtype=torch.long, device=device)
+        out = model(local_obs, global_obs, seq, t_zero)
         logits = out["actions"]
         logits[:, :, action_dim:] = float("-inf")
         preds = logits.argmax(dim=-1)

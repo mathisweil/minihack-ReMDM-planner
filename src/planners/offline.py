@@ -218,8 +218,8 @@ def run_offline(cfg, data_path: str | None) -> None:
 
     # torch.compile (Candidate E)
     if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
-        logger.info("Compiling model with torch.compile (reduce-overhead)")
-        model = torch.compile(model, mode="reduce-overhead")
+        logger.info("Compiling model with torch.compile")
+        model = torch.compile(model, mode="default")
 
     ema = ModelEMA(model, decay=cfg.ema_decay)
 

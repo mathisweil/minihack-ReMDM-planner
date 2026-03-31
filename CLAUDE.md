@@ -178,9 +178,9 @@ Wraps training forward/backward in `torch.amp.autocast("cuda")` with `GradScaler
 
 ### torch.compile (`torch_compile: true`)
 
-Applies `torch.compile(model, mode="reduce-overhead")` before training.
+Applies `torch.compile(model, mode="default")` before training.
 
-- **Measured speedup:** none beyond AMP alone. The dynamic `t_discrete` argument causes recompilation (cache_size_limit hit). Not recommended.
+- **Measured speedup:** none beyond AMP alone. Not recommended.
 - **When to use:** experimental only. May help on future PyTorch versions with better dynamic shape support.
 
 ### Parallel collection (`num_collection_workers: N`)
