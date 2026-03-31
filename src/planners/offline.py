@@ -8,6 +8,7 @@ with optional auxiliary goal loss.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 import logging
 from types import SimpleNamespace
@@ -85,6 +86,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
 
         loss_history: list[float] = []
         step = 0
+        _batch_start = time.perf_counter()
 
         for epoch in range(cfg.offline_epochs):
             n_batches = max(1, len(buffer) // cfg.offline_batch_size)
@@ -131,7 +133,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
 
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
-                nn.utils.clip_grad_norm_(
+                grad_norm = nn.utils.clip_grad_norm_(
                     model.parameters(), cfg.offline_grad_clip,
                 )
                 scaler.step(optimizer)
@@ -143,16 +145,25 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 step += 1
 
                 if log is not None and step % cfg.offline_log_every == 0:
-                    log.log(
-                        {
-                            "diffusion/loss": loss.item(),
-                            "diffusion/loss_diff": loss_diff.item(),
-                            "diffusion/loss_aux": loss_aux.item(),
-                            "train/lr": scheduler.get_last_lr()[0],
-                            "train/epoch": epoch,
-                        },
-                        step=step,
-                    )
+                    step_time = time.perf_counter() - _batch_start
+                    metrics = {
+                        "diffusion/loss": loss.item(),
+                        "diffusion/loss_diff": loss_diff.item(),
+                        "diffusion/loss_aux": loss_aux.item(),
+                        "train/lr": scheduler.get_last_lr()[0],
+                        "train/epoch": epoch,
+                        "train/grad_norm": grad_norm.item(),
+                        "perf/grad_steps_per_sec": (
+                            cfg.offline_log_every / max(step_time, 1e-6)
+                        ),
+                    }
+                    _ema_source_ref = _ema_source
+                    if hasattr(_ema_source_ref, "global_gate"):
+                        metrics["train/global_gate"] = torch.sigmoid(
+                            _ema_source_ref.global_gate,
+                        ).item()
+                    log.log(metrics, step=step)
+                    _batch_start = time.perf_counter()
 
             logger.info(
                 f"Epoch {epoch + 1}/{cfg.offline_epochs} "

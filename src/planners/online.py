@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -90,6 +91,8 @@ class Trainer:
         """
         cfg = self.cfg
         for iteration in range(start_iter, cfg.max_iterations):
+            iter_start = time.perf_counter()
+
             # 1. Collect N episodes per iteration
             n_eps = getattr(cfg, "episodes_per_iteration", 1)
             num_workers = getattr(cfg, "num_collection_workers", 0)
@@ -97,6 +100,7 @@ class Trainer:
             added_total = 0
             last_stats: dict = {}
 
+            collect_start = time.perf_counter()
             if num_workers > 0 and n_eps > 1:
                 # Parallel collection (Candidate A)
                 batch_stats = self.collector.collect_batch_parallel(n_eps)
@@ -110,6 +114,7 @@ class Trainer:
                     last_stats = self.collector.collect_one_iteration()
                     model_wins += int(last_stats["model_won"])
                     added_total += int(last_stats["added_to_buffer"])
+            collect_time = time.perf_counter() - collect_start
 
             collect_stats = {
                 **last_stats,
@@ -119,38 +124,64 @@ class Trainer:
 
             # 2. Gradient steps (EMA updated after each step)
             self.model.train()
-            losses: list[float] = []
+            step_metrics: list[dict[str, float]] = []
+            train_start = time.perf_counter()
             for _ in range(cfg.grad_steps_per_iteration):
-                loss_val = self._train_step()
-                losses.append(loss_val)
+                m = self._train_step()
+                step_metrics.append(m)
                 self.ema_model.update(self._raw_model)
+            train_time = time.perf_counter() - train_start
+
+            iter_time = time.perf_counter() - iter_start
 
             # 4. Log
-            avg_loss = sum(losses) / len(losses) if losses else 0.0
+            n_steps = len(step_metrics) or 1
+            avg_loss = sum(m["loss"] for m in step_metrics) / n_steps
+            avg_loss_diff = sum(m["loss_diff"] for m in step_metrics) / n_steps
+            avg_loss_aux = sum(m["loss_aux"] for m in step_metrics) / n_steps
+            avg_grad_norm = sum(m["grad_norm"] for m in step_metrics) / n_steps
             current_lr = (
                 self.scheduler.get_last_lr()[0]
                 if self.scheduler is not None
                 else self.cfg.dagger_lr
             )
-            self.log.log(
-                {
-                    "diffusion/loss": avg_loss,
-                    "train/buffer_size": len(self.buffer),
-                    "train/model_won": int(collect_stats["model_won"]),
-                    "train/added_to_buffer": int(
-                        collect_stats["added_to_buffer"]
-                    ),
-                    "train/episodes_collected": n_eps,
-                    "train/model_steps": collect_stats["model_steps"],
-                    "train/oracle_steps": collect_stats["oracle_steps"],
-                    "train/efficiency_ratio": (
-                        collect_stats["model_steps"]
-                        / max(collect_stats["oracle_steps"], 1)
-                    ),
-                    "train/lr": current_lr,
-                },
-                step=iteration,
-            )
+
+            # Global gate value (how open is the global stream)
+            gate_val = None
+            if hasattr(self._raw_model, "global_gate"):
+                gate_val = torch.sigmoid(
+                    self._raw_model.global_gate
+                ).item()
+
+            metrics = {
+                "diffusion/loss": avg_loss,
+                "diffusion/loss_diff": avg_loss_diff,
+                "diffusion/loss_aux": avg_loss_aux,
+                "train/buffer_size": len(self.buffer),
+                "train/model_won": int(collect_stats["model_won"]),
+                "train/added_to_buffer": int(
+                    collect_stats["added_to_buffer"]
+                ),
+                "train/episodes_collected": n_eps,
+                "train/model_steps": collect_stats["model_steps"],
+                "train/oracle_steps": collect_stats["oracle_steps"],
+                "train/efficiency_ratio": (
+                    collect_stats["model_steps"]
+                    / max(collect_stats["oracle_steps"], 1)
+                ),
+                "train/lr": current_lr,
+                "train/grad_norm": avg_grad_norm,
+                "perf/iter_time_s": iter_time,
+                "perf/collect_time_s": collect_time,
+                "perf/train_time_s": train_time,
+                "perf/grad_steps_per_sec": (
+                    cfg.grad_steps_per_iteration / max(train_time, 1e-6)
+                ),
+            }
+            if gate_val is not None:
+                metrics["train/global_gate"] = gate_val
+
+            self.log.log(metrics, step=iteration)
 
             # 5. ID eval
             if (
@@ -218,19 +249,21 @@ class Trainer:
 
     # ── Single gradient step ─────────────────────────────────────
 
-    def _train_step(self) -> float:
+    def _train_step(self) -> dict[str, float]:
         """One gradient step on a buffer sample.
 
         Uses AMP (mixed precision) when ``cfg.use_amp`` is ``True``
         and training on CUDA.
 
         Returns:
-            Scalar loss value.
+            Dict with ``"loss"``, ``"loss_diff"``, ``"loss_aux"``,
+            and ``"grad_norm"`` scalars.
         """
         cfg = self.cfg
         batch = self.buffer.sample(cfg.dagger_batch_size)
         if batch is None:
-            return 0.0
+            return {"loss": 0.0, "loss_diff": 0.0,
+                    "loss_aux": 0.0, "grad_norm": 0.0}
         local_np, global_np, actions_np = batch
         local_t = torch.from_numpy(local_np).long().to(self.device)
         global_t = torch.from_numpy(global_np).long().to(self.device)
@@ -267,7 +300,7 @@ class Trainer:
 
         self._scaler.scale(loss).backward()
         self._scaler.unscale_(self.optimizer)
-        nn.utils.clip_grad_norm_(
+        grad_norm = nn.utils.clip_grad_norm_(
             self.model.parameters(), cfg.dagger_grad_clip,
         )
         self._scaler.step(self.optimizer)
@@ -275,7 +308,12 @@ class Trainer:
         if self.scheduler is not None:
             self.scheduler.step()
 
-        return loss.item()
+        return {
+            "loss": loss.item(),
+            "loss_diff": loss_diff.item(),
+            "loss_aux": loss_aux.item(),
+            "grad_norm": grad_norm.item(),
+        }
 
     # ── Checkpointing ────────────────────────────────────────────
 
