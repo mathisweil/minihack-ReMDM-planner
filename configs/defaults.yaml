@@ -73,7 +73,7 @@ curriculum_preseed: true
 max_iterations: 8000
 id_eval_every: 100
 ood_eval_every: 500
-checkpoint_every: 1000
+checkpoint_every: 500
 eval_episodes_per_env: 50
 checkpoint_eval_episodes: 20
 
@@ -86,7 +86,7 @@ use_amp: false
 torch_compile: false
 # Number of parallel workers for DAgger episode collection.
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
-num_collection_workers: 0
+num_collection_workers: 4
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints

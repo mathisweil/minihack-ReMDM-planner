@@ -12,6 +12,44 @@ from types import SimpleNamespace
 logger = logging.getLogger(__name__)
 
 
+def download_artifact(
+    artifact_ref: str, dst_dir: str = "artifacts",
+) -> str | None:
+    """Download a W&B artifact via the public API (no active run needed).
+
+    Args:
+        artifact_ref: Fully qualified artifact reference, e.g.
+            ``"entity/project/checkpoint-iter1000:latest"``.
+        dst_dir: Local directory to download into.
+
+    Returns:
+        Path to the ``.pth`` file inside the downloaded artifact
+        directory, or ``None`` on failure.
+    """
+    try:
+        import wandb
+        from pathlib import Path
+
+        api = wandb.Api()
+        artifact = api.artifact(artifact_ref)
+        artifact_dir = artifact.download(root=dst_dir)
+        pth_files = list(Path(artifact_dir).glob("*.pth"))
+        if not pth_files:
+            logger.error(
+                f"No .pth file found in artifact {artifact_ref}"
+            )
+            return None
+        path = str(pth_files[0])
+        logger.info(f"Downloaded artifact {artifact_ref} -> {path}")
+        return path
+    except Exception:
+        logger.error(
+            f"Failed to download artifact {artifact_ref}",
+            exc_info=True,
+        )
+        return None
+
+
 class Logger:
     """Centralised logger for W&B and stdout.
 
@@ -91,6 +129,41 @@ class Logger:
                 if isinstance(val, (int, float)):
                     flat[f"{prefix}/{env_id}/{key}"] = val
         self.log(flat, step=step)
+
+    def log_checkpoint_artifact(
+        self,
+        checkpoint_path: str,
+        config_path: str | None,
+        iteration: int,
+        metadata: dict | None = None,
+    ) -> None:
+        """Upload a checkpoint as a W&B artifact with config attached.
+
+        Args:
+            checkpoint_path: Path to the ``.pth`` checkpoint file.
+            config_path: Path to the YAML config snapshot to attach.
+                If ``None``, only the checkpoint is uploaded.
+            iteration: Iteration number (used in artifact name).
+            metadata: Optional metadata dict stored on the artifact.
+        """
+        if not self._use_wandb or self._run is None:
+            return
+        try:
+            import wandb
+
+            name = f"checkpoint-iter{iteration}"
+            artifact = wandb.Artifact(
+                name=name,
+                type="model",
+                metadata=metadata or {},
+            )
+            artifact.add_file(checkpoint_path)
+            if config_path is not None:
+                artifact.add_file(config_path, name="config.yaml")
+            self._run.log_artifact(artifact)
+            logger.info(f"W&B artifact logged: {name}")
+        except Exception:
+            logger.error("W&B artifact upload failed", exc_info=True)
 
     def finish(self) -> None:
         """Close the W&B run if active."""
