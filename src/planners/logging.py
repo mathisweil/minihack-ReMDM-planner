@@ -7,7 +7,11 @@ Mirrors the Craftax logging conventions with metric namespaces:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from types import SimpleNamespace
+
+if TYPE_CHECKING:
+    import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +93,7 @@ class Logger:
 
     def __init__(self, cfg: SimpleNamespace) -> None:
         self._use_wandb = cfg.use_wandb
-        self._run = None
+        self._run: wandb.sdk.wandb_run.Run | None = None
         if self._use_wandb:
             try:
                 import wandb

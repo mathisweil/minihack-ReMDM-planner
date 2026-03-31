@@ -12,6 +12,7 @@ import logging
 import os
 import random
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 from types import SimpleNamespace
 
 import numpy as np
@@ -21,6 +22,9 @@ from src.buffer import ReplayBuffer
 from src.curriculum import DynamicCurriculum, efficiency_filter
 from src.diffusion.sampling import greedy_sample, remdm_sample
 from src.envs.minihack_env import collect_oracle_trajectory, make_env
+
+if TYPE_CHECKING:
+    from src.models.denoiser import ModelEMA
 
 logger = logging.getLogger(__name__)
 
