@@ -151,7 +151,7 @@ def remdm_sample(
         global_obs = torch.zeros_like(global_obs)
 
     # Pre-compute numpy local crops for physics checks (CPU, batch loop)
-    local_np: list[np.ndarray] | None = None
+    local_np: np.ndarray | None = None  # [B, crop, crop]
     if physics_aware:
         local_np = local_obs.cpu().numpy()
 
@@ -197,6 +197,7 @@ def remdm_sample(
 
         # Physics softener: demote hazardous cardinal actions to conf=0.001
         if physics_aware and local_np is not None:
+            assert local_np is not None  # narrowing for type checker
             preds_np = preds.cpu().numpy()  # [B, seq_len]
             conf_override = conf.clone()
             for b in range(B):

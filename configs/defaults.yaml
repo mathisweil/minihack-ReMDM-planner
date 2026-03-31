@@ -72,10 +72,10 @@ curriculum_queue_size: 100
 curriculum_preseed: true
 max_iterations: 8000
 id_eval_every: 50
-ood_eval_every: 500
-checkpoint_every: 500
+ood_eval_every: 50
+checkpoint_every: 250
 eval_episodes_per_env: 50
-checkpoint_eval_episodes: 20
+checkpoint_eval_episodes: 50
 
 # ── Performance ──────────────────────────────────────────────────────
 # Mixed-precision (FP16) training via torch.cuda.amp.
