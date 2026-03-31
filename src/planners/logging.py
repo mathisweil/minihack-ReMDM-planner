@@ -67,7 +67,10 @@ class Logger:
             parts = [f"step={step}"]
             for k, v in metrics.items():
                 if isinstance(v, float):
-                    parts.append(f"{k}={v:.4f}")
+                    if abs(v) < 1e-3 and v != 0.0:
+                        parts.append(f"{k}={v:.2e}")
+                    else:
+                        parts.append(f"{k}={v:.4f}")
                 else:
                     parts.append(f"{k}={v}")
             logger.info("  ".join(parts))
