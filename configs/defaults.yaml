@@ -71,7 +71,7 @@ curriculum_queue_size: 100
 # Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
 curriculum_preseed: true
 max_iterations: 8000
-id_eval_every: 100
+id_eval_every: 50
 ood_eval_every: 500
 checkpoint_every: 500
 eval_episodes_per_env: 50
