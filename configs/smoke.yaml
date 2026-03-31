@@ -1,5 +1,7 @@
 # Smoke test overrides — fast iteration for sanity checking.
 buffer_capacity: 50
+dagger_batch_size: 256
+offline_batch_size: 256
 max_iterations: 30
 eval_episodes_per_env: 5
 checkpoint_eval_episodes: 5
