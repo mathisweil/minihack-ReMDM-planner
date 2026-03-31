@@ -70,6 +70,13 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
 
     parser.add_argument("--data", default=None)
     parser.add_argument("--checkpoint", default=None)
+    parser.add_argument(
+        "--wandb-artifact", default=None,
+        help=(
+            "W&B artifact reference to download as checkpoint, e.g. "
+            "'entity/project/checkpoint-iter1000:latest'"
+        ),
+    )
     parser.add_argument("--no-warm-start", action="store_true")
     parser.add_argument("--no-ema", action="store_true")
 
@@ -110,13 +117,31 @@ def build_config(args, extras):
 # =============================================================================
 
 def validate(args) -> None:
-    if args.mode == "inference" and not args.checkpoint:
-        raise ValueError("--checkpoint required for inference mode")
+    if args.mode == "inference" and not args.checkpoint and not args.wandb_artifact:
+        raise ValueError(
+            "--checkpoint or --wandb-artifact required for inference mode"
+        )
 
 
 # =============================================================================
 # Dispatch (no lambdas, cleaner)
 # =============================================================================
+
+def _resolve_checkpoint(args, cfg) -> str | None:
+    """Return a local checkpoint path from --checkpoint or --wandb-artifact."""
+    if args.checkpoint:
+        return args.checkpoint
+    artifact_ref = args.wandb_artifact
+    if artifact_ref:
+        from src.planners.logging import download_artifact
+        path = download_artifact(artifact_ref)
+        if path is None:
+            raise RuntimeError(
+                f"Failed to download W&B artifact: {artifact_ref}"
+            )
+        return path
+    return None
+
 
 def run_mode(mode: str, cfg, args) -> None:
     if mode == "smoke":
@@ -126,13 +151,19 @@ def run_mode(mode: str, cfg, args) -> None:
         run_offline(cfg, args.data)
 
     elif mode == "dagger":
-        run_dagger(cfg, args.checkpoint, args.no_warm_start)
+        ckpt = _resolve_checkpoint(args, cfg)
+        run_dagger(cfg, ckpt, args.no_warm_start)
 
     elif mode == "inference":
+        ckpt = _resolve_checkpoint(args, cfg)
+        if ckpt is None:
+            raise ValueError(
+                "--checkpoint or --wandb-artifact required for inference"
+            )
         log = Logger(cfg)
         run_inference(
             cfg,
-            args.checkpoint,
+            ckpt,
             args.envs,
             args.episodes,
             args.output,

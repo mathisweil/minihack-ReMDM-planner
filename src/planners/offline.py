@@ -8,6 +8,7 @@ with optional auxiliary goal loss.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 import logging
 from types import SimpleNamespace
@@ -44,20 +45,24 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         cfg: SimpleNamespace,
         device: torch.device | str,
         log: Logger | None = None,
+        raw_model: nn.Module | None = None,
     ) -> dict:
         """Run offline BC training.
 
         Args:
-            model: Denoising model.
+            model: Denoising model (may be torch.compiled).
             ema_model: EMA tracker.
             buffer: Replay buffer with offline data.
             cfg: Config namespace.
             device: Torch device.
             log: Optional Logger for wandb and stdout metrics.
+            raw_model: Uncompiled model for EMA updates. If ``None``,
+                uses *model* directly.
 
         Returns:
             Dict with ``"final_loss"`` and ``"loss_history"``.
         """
+        _ema_source = raw_model if raw_model is not None else model
         model.train()
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=cfg.offline_lr,
@@ -72,8 +77,16 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             eta_min=cfg.offline_lr * 0.1,
         )
 
+        # AMP: enabled when use_amp=true and on CUDA
+        _use_amp = (
+            getattr(cfg, "use_amp", False)
+            and str(device).startswith("cuda")
+        )
+        scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
+
         loss_history: list[float] = []
         step = 0
+        _batch_start = time.perf_counter()
 
         for epoch in range(cfg.offline_epochs):
             n_batches = max(1, len(buffer) // cfg.offline_batch_size)
@@ -98,47 +111,59 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     t * cfg.num_diffusion_steps
                 ).long().clamp(0, cfg.num_diffusion_steps - 1)  # [B]
 
-                out = model(local_t, global_t, zt, t_discrete)
+                optimizer.zero_grad()
+                with torch.amp.autocast("cuda", enabled=_use_amp):
+                    out = model(local_t, global_t, zt, t_discrete)
 
-                loss_diff = mdlm_loss(
-                    out["actions"], actions_t, zt, t,
-                    cfg.mask_token, cfg.pad_token, schedule_fn,
-                    weight_clip=cfg.loss_weight_clip,
-                    label_smoothing=cfg.label_smoothing,
-                    use_importance_weighting=cfg.use_importance_weighting,
-                )
-
-                loss_aux = torch.tensor(0.0, device=device)
-                if "goal_pred" in out:
-                    loss_aux = auxiliary_goal_loss(
-                        out["goal_pred"], global_t,
+                    loss_diff = mdlm_loss(
+                        out["actions"], actions_t, zt, t,
+                        cfg.mask_token, cfg.pad_token, schedule_fn,
+                        weight_clip=cfg.loss_weight_clip,
+                        label_smoothing=cfg.label_smoothing,
+                        use_importance_weighting=cfg.use_importance_weighting,
                     )
 
-                loss = loss_diff + cfg.aux_loss_weight * loss_aux
+                    loss_aux = torch.tensor(0.0, device=device)
+                    if "goal_pred" in out:
+                        loss_aux = auxiliary_goal_loss(
+                            out["goal_pred"], global_t,
+                        )
 
-                optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(
+                    loss = loss_diff + cfg.aux_loss_weight * loss_aux
+
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                grad_norm = nn.utils.clip_grad_norm_(
                     model.parameters(), cfg.offline_grad_clip,
                 )
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 scheduler.step()
 
-                ema_model.update(model)
+                ema_model.update(_ema_source)
                 loss_history.append(loss.item())
                 step += 1
 
                 if log is not None and step % cfg.offline_log_every == 0:
-                    log.log(
-                        {
-                            "diffusion/loss": loss.item(),
-                            "diffusion/loss_diff": loss_diff.item(),
-                            "diffusion/loss_aux": loss_aux.item(),
-                            "train/lr": scheduler.get_last_lr()[0],
-                            "train/epoch": epoch,
-                        },
-                        step=step,
-                    )
+                    step_time = time.perf_counter() - _batch_start
+                    metrics = {
+                        "diffusion/loss": loss.item(),
+                        "diffusion/loss_diff": loss_diff.item(),
+                        "diffusion/loss_aux": loss_aux.item(),
+                        "train/lr": scheduler.get_last_lr()[0],
+                        "train/epoch": epoch,
+                        "train/grad_norm": grad_norm.item(),
+                        "perf/grad_steps_per_sec": (
+                            cfg.offline_log_every / max(step_time, 1e-6)
+                        ),
+                    }
+                    _ema_source_ref = _ema_source
+                    if hasattr(_ema_source_ref, "global_gate"):
+                        metrics["train/global_gate"] = torch.sigmoid(
+                            _ema_source_ref.global_gate,
+                        ).item()
+                    log.log(metrics, step=step)
+                    _batch_start = time.perf_counter()
 
             logger.info(
                 f"Epoch {epoch + 1}/{cfg.offline_epochs} "
@@ -204,12 +229,21 @@ def run_offline(cfg, data_path: str | None) -> None:
         )
         sys.exit(1)
 
-    model = make_model(cfg).to(device)
-    ema = ModelEMA(model, decay=cfg.ema_decay)
+    raw_model = make_model(cfg).to(device)
+
+    # torch.compile: wrap for training only; shares params with raw_model
+    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
+        logger.info("Compiling model with torch.compile")
+        model = torch.compile(raw_model, mode="default")
+    else:
+        model = raw_model
+
+    ema = ModelEMA(raw_model, decay=cfg.ema_decay)
 
     log = Logger(cfg)
     train_fn = make_offline_trainer(cfg)
-    result = train_fn(model, ema, buffer, cfg, device, log=log)
+    result = train_fn(model, ema, buffer, cfg, device, log=log,
+                       raw_model=raw_model)
     logger.info(f"Offline training done. Final loss: {result['final_loss']:.4f}")
 
     # Save checkpoint
@@ -218,7 +252,7 @@ def run_offline(cfg, data_path: str | None) -> None:
     path = ckpt_dir / "offline_final.pth"
     torch.save(
         {
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": raw_model.state_dict(),
             "ema_state_dict": ema.state_dict(),
         },
         path,

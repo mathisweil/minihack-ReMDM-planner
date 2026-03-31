@@ -7,9 +7,80 @@ Mirrors the Craftax logging conventions with metric namespaces:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from types import SimpleNamespace
 
+if TYPE_CHECKING:
+    import wandb
+
 logger = logging.getLogger(__name__)
+
+
+def download_artifact(
+    artifact_ref: str, dst_dir: str = "artifacts",
+) -> str | None:
+    """Download a W&B artifact via the public API (no active run needed).
+
+    Args:
+        artifact_ref: Fully qualified artifact reference, e.g.
+            ``"entity/project/checkpoint-iter1000:latest"``.
+        dst_dir: Local directory to download into.
+
+    Returns:
+        Path to the ``.pth`` file inside the downloaded artifact
+        directory, or ``None`` on failure.
+    """
+    try:
+        import wandb
+        from pathlib import Path
+
+        api = wandb.Api()
+        artifact = api.artifact(artifact_ref)
+        artifact_dir = artifact.download(root=dst_dir)
+        pth_files = list(Path(artifact_dir).glob("*.pth"))
+        if not pth_files:
+            logger.error(
+                f"No .pth file found in artifact {artifact_ref}"
+            )
+            return None
+        path = str(pth_files[0])
+        logger.info(f"Downloaded artifact {artifact_ref} -> {path}")
+        return path
+    except Exception:
+        logger.error(
+            f"Failed to download artifact {artifact_ref}",
+            exc_info=True,
+        )
+        return None
+
+
+def _auto_run_name(cfg: SimpleNamespace) -> str:
+    """Generate a descriptive W&B run name from key hyperparameters.
+
+    Format: ``seq{seq_len}_d{n_embd}_L{n_layer}_lr{dagger_lr}_bs{batch}_eta{eta}_{remask}``
+
+    Args:
+        cfg: Config namespace.
+
+    Returns:
+        A concise, human-readable run name.
+    """
+    parts = [
+        f"seq{cfg.seq_len}",
+        f"d{cfg.n_embd}",
+        f"L{cfg.n_layer}",
+        f"lr{cfg.dagger_lr:.0e}",
+        f"bs{cfg.dagger_batch_size}",
+        f"eta{cfg.eta}",
+        f"{cfg.remask_strategy}",
+    ]
+    if cfg.use_importance_weighting:
+        parts.append("subs")
+    if getattr(cfg, "physics_aware_sampling", False):
+        parts.append("phys")
+    if cfg.seed is not None:
+        parts.append(f"s{cfg.seed}")
+    return "_".join(parts)
 
 
 class Logger:
@@ -22,14 +93,17 @@ class Logger:
 
     def __init__(self, cfg: SimpleNamespace) -> None:
         self._use_wandb = cfg.use_wandb
-        self._run = None
+        self._run: wandb.sdk.wandb_run.Run | None = None
         if self._use_wandb:
             try:
                 import wandb
+                run_name = getattr(cfg, "wandb_run_name", None)
+                if not run_name:
+                    run_name = _auto_run_name(cfg)
                 self._run = wandb.init(
                     project=cfg.wandb_project,
                     entity=cfg.wandb_entity or None,
-                    name=getattr(cfg, "wandb_run_name", None) or None,
+                    name=run_name,
                     config=vars(cfg),
                 )
             except Exception:
@@ -67,7 +141,10 @@ class Logger:
             parts = [f"step={step}"]
             for k, v in metrics.items():
                 if isinstance(v, float):
-                    parts.append(f"{k}={v:.4f}")
+                    if abs(v) < 1e-3 and v != 0.0:
+                        parts.append(f"{k}={v:.2e}")
+                    else:
+                        parts.append(f"{k}={v:.4f}")
                 else:
                     parts.append(f"{k}={v}")
             logger.info("  ".join(parts))
@@ -88,6 +165,41 @@ class Logger:
                 if isinstance(val, (int, float)):
                     flat[f"{prefix}/{env_id}/{key}"] = val
         self.log(flat, step=step)
+
+    def log_checkpoint_artifact(
+        self,
+        checkpoint_path: str,
+        config_path: str | None,
+        iteration: int,
+        metadata: dict | None = None,
+    ) -> None:
+        """Upload a checkpoint as a W&B artifact with config attached.
+
+        Args:
+            checkpoint_path: Path to the ``.pth`` checkpoint file.
+            config_path: Path to the YAML config snapshot to attach.
+                If ``None``, only the checkpoint is uploaded.
+            iteration: Iteration number (used in artifact name).
+            metadata: Optional metadata dict stored on the artifact.
+        """
+        if not self._use_wandb or self._run is None:
+            return
+        try:
+            import wandb
+
+            name = f"checkpoint-iter{iteration}"
+            artifact = wandb.Artifact(
+                name=name,
+                type="model",
+                metadata=metadata or {},
+            )
+            artifact.add_file(checkpoint_path)
+            if config_path is not None:
+                artifact.add_file(config_path, name="config.yaml")
+            self._run.log_artifact(artifact)
+            logger.info(f"W&B artifact logged: {name}")
+        except Exception:
+            logger.error("W&B artifact upload failed", exc_info=True)
 
     def finish(self) -> None:
         """Close the W&B run if active."""

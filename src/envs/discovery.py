@@ -10,7 +10,6 @@ import logging
 import time
 from types import SimpleNamespace
 
-import numpy as np
 import torch
 
 logger = logging.getLogger(__name__)
@@ -78,7 +77,7 @@ def check_action_consistency_with_fixed_ref(
     import minihack  # noqa: F401
 
     ref_env = gym.make(_REFERENCE_ENV_ID)
-    reference_actions = ref_env.unwrapped.actions
+    reference_actions = ref_env.unwrapped.actions  # type: ignore[attr-defined]
     ref_env.close()
 
     results: list[tuple[str, str, int]] = []
@@ -88,7 +87,7 @@ def check_action_consistency_with_fixed_ref(
             continue
         try:
             env = gym.make(env_id)
-            env_actions = env.unwrapped.actions
+            env_actions = env.unwrapped.actions  # type: ignore[attr-defined]
             limit = min(len(reference_actions), len(env_actions))
             is_match = all(
                 reference_actions[i] == env_actions[i] for i in range(limit)

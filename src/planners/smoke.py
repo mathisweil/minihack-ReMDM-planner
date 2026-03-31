@@ -28,28 +28,34 @@ def run_smoke(cfg) -> None:
             buffer.add(traj)
     logger.info(f"Buffer seeded with {len(buffer)} windows")
 
-    model = make_model(cfg).to(device)
-    ema = ModelEMA(model, decay=cfg.ema_decay)
+    raw_model = make_model(cfg).to(device)
+
+    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
+        model = torch.compile(raw_model, mode="default")
+    else:
+        model = raw_model
+
+    ema = ModelEMA(raw_model, decay=cfg.ema_decay)
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=cfg.dagger_lr,
+        raw_model.parameters(), lr=cfg.dagger_lr,
         weight_decay=cfg.weight_decay,
     )
     curriculum = DynamicCurriculum(
         cfg.id_envs, cfg.curriculum_queue_size, cfg.curriculum_preseed,
     )
 
-    collector = DataCollector(ema, model, buffer, curriculum, cfg, device)
+    collector = DataCollector(ema, raw_model, buffer, curriculum, cfg, device)
     evaluator = Evaluator()
     log = Logger(cfg)
 
     trainer = Trainer(
         model, ema, optimizer, None, buffer, collector,
-        evaluator, log, cfg, device,
+        evaluator, log, cfg, device, raw_model=raw_model,
     )
     trainer.train(start_iter=0)
 
     # Final eval
-    eval_model = ema.make_eval_model(model)
+    eval_model = ema.make_eval_model(raw_model)
     results = evaluator.evaluate(
         cfg.id_envs, eval_model, cfg.eval_episodes_per_env, cfg, device,
     )
