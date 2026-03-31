@@ -103,8 +103,12 @@ Full DAgger loop: collect with model, label with BFS oracle, filter by efficienc
 # From scratch (seeds buffer with oracle data automatically)
 python main.py --mode dagger
 
-# Resume from checkpoint
+# Resume from local checkpoint
 python main.py --mode dagger --checkpoint checkpoints/iter3000.pth
+
+# Resume from a W&B artifact
+python main.py --mode dagger \
+    --wandb-artifact entity/project/checkpoint-iter3000:latest
 
 # Override hyperparameters
 python main.py --mode dagger max_iterations=4000 dagger_lr=0.0001
@@ -112,11 +116,15 @@ python main.py --mode dagger max_iterations=4000 dagger_lr=0.0001
 
 ### Inference
 
-Evaluate a checkpoint on specified environments.
+Evaluate a checkpoint on specified environments. Accepts either `--checkpoint` (local path) or `--wandb-artifact` (W&B artifact reference).
 
 ```bash
 # All ID + OOD environments
 python main.py --mode inference --checkpoint checkpoints/iter8000.pth
+
+# From a W&B artifact
+python main.py --mode inference \
+    --wandb-artifact entity/project/checkpoint-iter8000:latest
 
 # Specific environments, save JSON
 python main.py --mode inference \
@@ -331,6 +339,24 @@ remdm_minihack/
 ```
 
 Inference uses EMA weights by default. Pass `--no-ema` to use training weights.
+
+### W&B Artifacts
+
+Checkpoints are automatically uploaded as versioned W&B artifacts (type `"model"`) at each checkpoint save. Each artifact contains the `.pth` weights and a `config.yaml` snapshot of all hyperparameters used.
+
+To resume from an artifact:
+
+```bash
+# DAgger resume
+python main.py --mode dagger \
+    --wandb-artifact entity/project/checkpoint-iter3000:latest
+
+# Inference
+python main.py --mode inference \
+    --wandb-artifact entity/project/checkpoint-iter8000:v2
+```
+
+The artifact reference format is `entity/project/artifact-name:version` where version is `latest`, `v0`, `v1`, etc.
 
 ---
 

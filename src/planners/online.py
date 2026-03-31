@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 import torch.nn as nn
+import yaml
 
 from src.buffer import ReplayBuffer
 from src.diffusion.forward import q_sample
@@ -310,6 +311,19 @@ class Trainer:
                 f"Failed to save checkpoint to {path}", exc_info=True,
             )
 
+        # Save config snapshot alongside checkpoint
+        config_path = ckpt_dir / f"config_iter{iteration}.yaml"
+        try:
+            cfg_dict = {
+                k: v for k, v in vars(self.cfg).items()
+                if not k.startswith("_")
+            }
+            with open(config_path, "w") as f:
+                yaml.dump(cfg_dict, f, default_flow_style=False)
+        except Exception:
+            logger.error("Failed to save config snapshot", exc_info=True)
+            config_path = None
+
         # Run eval at checkpoint and save JSON
         try:
             eval_model = self.ema_model.make_eval_model(self.model)
@@ -409,6 +423,17 @@ class Trainer:
             )
         except Exception:
             logger.error("HF Hub upload failed", exc_info=True)
+
+        # W&B artifact upload
+        self.log.log_checkpoint_artifact(
+            checkpoint_path=str(path),
+            config_path=str(config_path) if config_path else None,
+            iteration=iteration,
+            metadata={
+                "iteration": iteration,
+                "buffer_size": len(self.buffer),
+            },
+        )
 
     def load_checkpoint(self, path: str) -> int:
         """Load a training checkpoint.
