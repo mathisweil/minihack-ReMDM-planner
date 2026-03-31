@@ -50,6 +50,35 @@ def download_artifact(
         return None
 
 
+def _auto_run_name(cfg: SimpleNamespace) -> str:
+    """Generate a descriptive W&B run name from key hyperparameters.
+
+    Format: ``seq{seq_len}_d{n_embd}_L{n_layer}_lr{dagger_lr}_bs{batch}_eta{eta}_{remask}``
+
+    Args:
+        cfg: Config namespace.
+
+    Returns:
+        A concise, human-readable run name.
+    """
+    parts = [
+        f"seq{cfg.seq_len}",
+        f"d{cfg.n_embd}",
+        f"L{cfg.n_layer}",
+        f"lr{cfg.dagger_lr:.0e}",
+        f"bs{cfg.dagger_batch_size}",
+        f"eta{cfg.eta}",
+        f"{cfg.remask_strategy}",
+    ]
+    if cfg.use_importance_weighting:
+        parts.append("subs")
+    if getattr(cfg, "physics_aware_sampling", False):
+        parts.append("phys")
+    if cfg.seed is not None:
+        parts.append(f"s{cfg.seed}")
+    return "_".join(parts)
+
+
 class Logger:
     """Centralised logger for W&B and stdout.
 
@@ -64,10 +93,13 @@ class Logger:
         if self._use_wandb:
             try:
                 import wandb
+                run_name = getattr(cfg, "wandb_run_name", None)
+                if not run_name:
+                    run_name = _auto_run_name(cfg)
                 self._run = wandb.init(
                     project=cfg.wandb_project,
                     entity=cfg.wandb_entity or None,
-                    name=getattr(cfg, "wandb_run_name", None) or None,
+                    name=run_name,
                     config=vars(cfg),
                 )
             except Exception:
