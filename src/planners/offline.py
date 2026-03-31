@@ -44,20 +44,24 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         cfg: SimpleNamespace,
         device: torch.device | str,
         log: Logger | None = None,
+        raw_model: nn.Module | None = None,
     ) -> dict:
         """Run offline BC training.
 
         Args:
-            model: Denoising model.
+            model: Denoising model (may be torch.compiled).
             ema_model: EMA tracker.
             buffer: Replay buffer with offline data.
             cfg: Config namespace.
             device: Torch device.
             log: Optional Logger for wandb and stdout metrics.
+            raw_model: Uncompiled model for EMA updates. If ``None``,
+                uses *model* directly.
 
         Returns:
             Dict with ``"final_loss"`` and ``"loss_history"``.
         """
+        _ema_source = raw_model if raw_model is not None else model
         model.train()
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=cfg.offline_lr,
@@ -134,7 +138,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 scaler.update()
                 scheduler.step()
 
-                ema_model.update(model)
+                ema_model.update(_ema_source)
                 loss_history.append(loss.item())
                 step += 1
 
@@ -227,7 +231,8 @@ def run_offline(cfg, data_path: str | None) -> None:
 
     log = Logger(cfg)
     train_fn = make_offline_trainer(cfg)
-    result = train_fn(model, ema, buffer, cfg, device, log=log)
+    result = train_fn(model, ema, buffer, cfg, device, log=log,
+                       raw_model=raw_model)
     logger.info(f"Offline training done. Final loss: {result['final_loss']:.4f}")
 
     # Save checkpoint

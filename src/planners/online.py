@@ -123,7 +123,7 @@ class Trainer:
             for _ in range(cfg.grad_steps_per_iteration):
                 loss_val = self._train_step()
                 losses.append(loss_val)
-                self.ema_model.update(self.model)
+                self.ema_model.update(self._raw_model)
 
             # 4. Log
             avg_loss = sum(losses) / len(losses) if losses else 0.0
@@ -290,7 +290,7 @@ class Trainer:
         path = ckpt_dir / f"iter{iteration}.pth"
 
         state = {
-            "model_state_dict": self.model.state_dict(),
+            "model_state_dict": self._raw_model.state_dict(),
             "ema_state_dict": self.ema_model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": (
@@ -451,7 +451,7 @@ class Trainer:
         ckpt = torch.load(
             path, map_location=self.device, weights_only=False,
         )
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        self._raw_model.load_state_dict(ckpt["model_state_dict"])
         self.ema_model.load_state_dict(ckpt["ema_state_dict"])
         self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
 
