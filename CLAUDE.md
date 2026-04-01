@@ -60,11 +60,31 @@ minihack-ReMDM-planner/
 │       ├── inference.py               # Evaluator + result formatting
 │       ├── smoke.py                   # smoke-test runner
 │       └── logging.py                 # centralised W&B + stdout logging
+├── experiments/
+│   └── rl_finetuning/                 # Stage 3: RL fine-tuning ablation suite
+│       ├── run_ablations.py           # CLI entry point (--list, --all, --fast, --analyze_only)
+│       ├── configs/
+│       │   ├── ablations_default.yaml # ablation-specific hyperparameters
+│       │   └── ablations_fast.yaml    # fast smoke-test overrides (50 iters)
+│       ├── ablations/
+│       │   ├── losses.py              # 16 loss factory functions (return-weighted ELBO variants)
+│       │   ├── optimizers.py          # AdamW, LLRD, LoRA, frozen params, PCGrad
+│       │   ├── registry.py            # REGISTRY: 25 AblationSpec entries (5 groups)
+│       │   └── training.py            # run_ablation loop, data collection, AblationHistory
+│       ├── diagnostics/
+│       │   ├── gradient.py            # grad alignment, per-layer norms, surgery metrics
+│       │   ├── representation.py      # KL drift, CKA, activation norms
+│       │   └── timestep.py            # t-bin gradient norms, per-bin losses
+│       └── analysis/
+│           ├── plots.py               # 8 matplotlib figure generators
+│           ├── tables.py              # polars summary tables (CSV + LaTeX)
+│           └── report.py              # hypothesis attribution + diagnosis.md
 ├── scripts/
 │   ├── hf_upload.py                   # HuggingFace Hub upload utility
 │   └── profile_dagger.py             # DAgger iteration profiler (Phase 1)
 ├── main.py                            # unified CLI entry point
-├── environment.yaml                   # conda environment spec
+├── pyproject.toml                     # uv/PEP 621 project metadata + dependencies
+├── uv.lock                            # deterministic lockfile (committed)
 └── README.md                          # full project documentation
 ```
 
@@ -128,6 +148,7 @@ Defined in `configs/defaults.yaml` as `mask_token: 12` and `pad_token: 13`. Alwa
 | Config parsing | PyYAML |
 | Checkpointing | `torch.save` / `torch.load` |
 | Hub uploads | `huggingface_hub` |
+| Package management | `uv` (PEP 621 `pyproject.toml` + `uv.lock`) |
 
 **Device:** CUDA 12 recommended for full training; CPU sufficient for smoke tests. Always set via `cfg.device`.
 
