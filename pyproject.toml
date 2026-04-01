@@ -8,6 +8,7 @@ dependencies = [
     "huggingface-hub>=1.8.0",
     "matplotlib>=3.10.8",
     "minihack>=1.0.2",
+    "nle>=1.2.0",
     "numpy>=2.4.4",
     "orjson>=3.11.8",
     "polars>=1.39.3",

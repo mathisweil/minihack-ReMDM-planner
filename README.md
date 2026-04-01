@@ -46,28 +46,41 @@ A `--mode smoke` is provided for quick end-to-end sanity checks (~30 seconds on 
 
 ## Installation
 
-### 1. Create the conda environment
+### Prerequisites
+
+**macOS (arm64):** Install cmake via Homebrew (needed to compile `nle` from source):
 
 ```bash
-conda env create -f environment.yaml
-conda activate minihack
+brew install cmake
 ```
 
-### 2. GPU support (optional)
+**Linux (x86_64):** Pre-built wheels are available, but if building from source:
+
+```bash
+sudo apt-get install build-essential cmake bison flex libbz2-dev
+```
+
+### Setup
+
+```bash
+uv sync
+```
+
+This installs all dependencies from the lockfile, including `nle>=1.2.0` (from the maintained [NetHack-LE](https://github.com/NetHack-LE/nle) fork) and `minihack`.
+
+### GPU support (optional)
 
 By default PyTorch runs on CPU. For NVIDIA CUDA 12:
 
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
-verify GPU is detected:
+Verify GPU is detected:
 
 ```bash
-python -c "import torch; print(torch.cuda.is_available())"
+uv run python -c "import torch; print(torch.cuda.is_available())"
 ```
-
-MiniHack requires the [NetHack Learning Environment](https://github.com/facebookresearch/nle). See the NLE docs if the `pip install nle` step fails on your platform.
 
 ---
 
@@ -307,7 +320,8 @@ remdm_minihack/
 ├── scripts/
 │   └── hf_upload.py               HuggingFace Hub upload utility
 ├── main.py                        CLI entry point (smoke/offline/dagger/inference)
-├── environment.yaml               Conda environment spec
+├── pyproject.toml                 PEP 621 project metadata + dependencies
+├── uv.lock                        Deterministic lockfile
 └── README.md
 ```
 

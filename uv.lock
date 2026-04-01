@@ -382,28 +382,8 @@ wheels = [
 ]
 
 [[package]]
-name = "gym"
-version = "0.23.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cloudpickle" },
-    { name = "gym-notices" },
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/66/17/b4ec403562c0e8c56f1ce095dcf6d65b7faeabff87f46b6097ab45e6001a/gym-0.23.0.tar.gz", hash = "sha256:dbd3d0c50fc1260b57e6f12ba792152b73551730512623b7653d6dfb2f7a105d", size = 624422, upload-time = "2022-03-07T22:01:56.3Z" }
-
-[[package]]
-name = "gym-notices"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a2/4d/035922b950b224ee4b65a9a4550a22eac8985a3f0e1ef42546d9047e7a72/gym_notices-0.1.0.tar.gz", hash = "sha256:9f9477ef68a8c15e42625d4fa53631237e3e6ae947f325b5c149c081499adc1b", size = 3084, upload-time = "2025-07-27T10:12:41.534Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/55/55d157aa8693090954fc9639bf27218240517c3bc7afa6e97412da6ebfd9/gym_notices-0.1.0-py3-none-any.whl", hash = "sha256:a943af4446cb619d04fd1e470b9272b4473e08a06d1c7cc9005755a4a0b8c905", size = 3349, upload-time = "2025-07-27T10:12:40.039Z" },
-]
-
-[[package]]
 name = "gymnasium"
-version = "1.2.3"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -411,9 +391,9 @@ dependencies = [
     { name = "numpy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/76/59/653a9417d98ed3e29ef9734ba52c3495f6c6823b8d5c0c75369f25111708/gymnasium-1.2.3.tar.gz", hash = "sha256:2b2cb5b5fbbbdf3afb9f38ca952cc48aa6aa3e26561400d940747fda3ad42509", size = 829230, upload-time = "2025-12-18T16:51:10.234Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/12/1047b8fdbfcdce74022048d916e844ad7e6e1114d81d26a7aed657e3a76d/gymnasium-1.0.0.tar.gz", hash = "sha256:9d2b66f30c1b34fe3c2ce7fae65ecf365d0e9982d2b3d860235e773328a3b403", size = 821389, upload-time = "2024-10-08T10:01:02.49Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/d3/ea5f088e3638dbab12e5c20d6559d5b3bdaeaa1f2af74e526e6815836285/gymnasium-1.2.3-py3-none-any.whl", hash = "sha256:e6314bba8f549c7fdcc8677f7cd786b64908af6e79b57ddaa5ce1825bffb5373", size = 952113, upload-time = "2025-12-18T16:51:08.445Z" },
+    { url = "https://files.pythonhosted.org/packages/de/85/f5039ce2df5f0789ff1240f08a59f3e8c92e4c5f99543b7aad7388532f7c/gymnasium-1.0.0-py3-none-any.whl", hash = "sha256:b6f40e1e24c5bd419361e1a5b86a9117d2499baecc3a660d44dfff4c465393ad", size = 958120, upload-time = "2024-10-08T10:01:00.337Z" },
 ]
 
 [[package]]
@@ -770,6 +750,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "matplotlib" },
     { name = "minihack" },
+    { name = "nle" },
     { name = "numpy" },
     { name = "orjson" },
     { name = "polars" },
@@ -784,6 +765,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=1.8.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "minihack", specifier = ">=1.0.2" },
+    { name = "nle", specifier = ">=1.2.0" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "orjson", specifier = ">=3.11.8" },
     { name = "polars", specifier = ">=1.39.3" },
@@ -813,14 +795,18 @@ wheels = [
 
 [[package]]
 name = "nle"
-version = "0.9.1"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "gym" },
+    { name = "gymnasium" },
     { name = "numpy" },
     { name = "pybind11" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8a/98/20ee44a1687cb2817f4afea95e3cfff5d8aeb6d673517bcc1e4f2d021ae0/nle-0.9.1.tar.gz", hash = "sha256:7ce0dd7ea098b5044e8f0d7376fb7a00992a0ee6569c8bc8c6131ad1c593803e", size = 7073979, upload-time = "2024-05-03T19:58:19.79Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/65/e7/b1a358b46e0f293ff1575855b4a1ad35782dcf4a2aa2c3e4d721e1c26878/nle-1.2.0.tar.gz", hash = "sha256:3d033f8f8bc3dfa819886f620f0bc22aa6d09faa25d9aa1e0b09e047a1a9c450", size = 7438688, upload-time = "2025-05-14T07:51:07.843Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/b1/8e87d1ef99978369e4b9b337ff1d6073cd7daeb2fba4ba28d898d4c33056/nle-1.2.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4e200b20e7666ecc799e126b1d168a88764bc67ed7d6235f5f39b362f266e5d5", size = 3046338, upload-time = "2025-05-14T07:50:57.385Z" },
+    { url = "https://files.pythonhosted.org/packages/75/8f/e89e963cbfd75c07b09e987c334fef04a45a887f9b3ecb61135758415e1a/nle-1.2.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9afea4baf34a229fb30335537f91a1f5e973ac038b3ac4fe24028beacf928492", size = 3097901, upload-time = "2025-05-14T07:50:59.223Z" },
+]
 
 [[package]]
 name = "numpy"
