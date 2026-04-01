@@ -131,6 +131,7 @@ experiments/rl_finetuning/outputs/{run_id}/
 ├── repr_drift.png                  # KL divergence drift by t-range
 ├── cka_similarity.png              # CKA similarity vs pretrained over training
 ├── t_bin_norms.png                 # Heatmap of per-t-bin gradient norms
+├── t_ratio.png                     # High-t / low-t gradient norm ratio over training
 ├── win_rate.png                    # Online win rate over training
 ├── group_comparison.png            # Boxplot of scores by ablation group
 ├── main_results.{csv,tex}          # Main results table
