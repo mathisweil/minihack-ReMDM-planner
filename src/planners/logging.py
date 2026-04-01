@@ -196,8 +196,9 @@ class Logger:
             artifact.add_file(checkpoint_path)
             if config_path is not None:
                 artifact.add_file(config_path, name="config.yaml")
-            self._run.log_artifact(artifact)
-            logger.info(f"W&B artifact logged: {name}")
+            logged = self._run.log_artifact(artifact)
+            logged.wait()
+            logger.info("W&B artifact uploaded: %s", name)
         except Exception:
             logger.error("W&B artifact upload failed", exc_info=True)
 
