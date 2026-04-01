@@ -241,7 +241,7 @@ def _evaluate_pretrained(
     Returns:
         Mean ID win rate.
     """
-    from src.models.denoiser import ModelEMA, make_model
+    from src.models.denoiser import make_model
     from src.planners.inference import Evaluator
 
     model = make_model(cfg).to(device)
@@ -375,7 +375,6 @@ def main(argv: list[str] | None = None) -> None:
         selected = args.ablations
     else:
         parser.error("Specify --all or --ablations NAME [NAME ...]")
-        return
 
     logger.info("Selected ablations (%d): %s", len(selected), selected)
 
@@ -384,19 +383,21 @@ def main(argv: list[str] | None = None) -> None:
     pretrained_score = _evaluate_pretrained(checkpoint_path, cfg, device)
     logger.info("Pretrained baseline ID win rate: %.4f", pretrained_score)
 
-    # W&B
+    # W&B (optional dependency)
     wandb_run = None
     if args.use_wandb:
         try:
             import wandb
+        except ImportError:
+            wandb = None
+            logger.warning("wandb not installed; skipping.")
+        else:
             wandb_run = wandb.init(
                 project=args.wandb_project or "remdm-minihack-ablations",
                 name=run_id,
                 config=vars(cfg),
                 tags=["ablations"] + selected,
             )
-        except ImportError:
-            logger.warning("wandb not installed; skipping.")
 
     # Run ablations
     num_seeds = args.num_seeds or getattr(cfg, "num_seeds", 1)
@@ -407,6 +408,7 @@ def main(argv: list[str] | None = None) -> None:
         spec = REGISTRY[abl_name]
         seed_scores: list[float] = []
         seed_histories: list[AblationHistory] = []
+        trained_model: torch.nn.Module | None = None
 
         for seed_idx in range(num_seeds):
             abl_seed = base_seed + seed_idx * 1000
@@ -450,9 +452,10 @@ def main(argv: list[str] | None = None) -> None:
         )
 
         # Per-ablation model checkpoint (last seed)
-        ckpt_path = output_dir / f"checkpoint_{abl_name}.pth"
-        torch.save(trained_model.state_dict(), ckpt_path)
-        logger.info("Saved model checkpoint to %s", ckpt_path)
+        if trained_model is not None:
+            ckpt_path = output_dir / f"checkpoint_{abl_name}.pth"
+            torch.save(trained_model.state_dict(), ckpt_path)
+            logger.info("Saved model checkpoint to %s", ckpt_path)
 
         # Intermediate analysis (regenerates after each ablation)
         logger.info("Generating plots, tables, and report...")

@@ -399,7 +399,7 @@ def generate_mixing_plots(
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     ax.set_xlim(-5, 105)
-    y_ceil = min(100, known_100 * 100 * 1.3)
+    y_ceil = min(100.0, known_100 * 100 * 1.3)
     ax.set_ylim(0, max(y_ceil, 10))
     ax.invert_xaxis()
 

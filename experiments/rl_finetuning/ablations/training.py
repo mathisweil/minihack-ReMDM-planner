@@ -21,7 +21,6 @@ import logging
 import random
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Callable
 
 import numpy as np
 import torch
@@ -48,13 +47,11 @@ from experiments.rl_finetuning.diagnostics.gradient import (
     compute_surgery_metrics,
 )
 from experiments.rl_finetuning.diagnostics.representation import (
-    compute_activation_norms,
     compute_cka,
     compute_repr_drift,
 )
 from experiments.rl_finetuning.diagnostics.timestep import (
     compute_t_analysis,
-    compute_t_bin_losses,
 )
 from src.diffusion.schedules import get_schedule
 from src.models.denoiser import ModelEMA, make_model
@@ -478,7 +475,7 @@ def run_ablation(
     checkpoint_path: str,
     device: torch.device,
     seed: int = 0,
-) -> tuple[AblationHistory, float, dict]:
+) -> tuple[AblationHistory, float, nn.Module]:
     """Run one complete ablation experiment.
 
     Loads a pretrained checkpoint, sets up the ablation-specific loss
@@ -590,19 +587,19 @@ def run_ablation(
 
     # Mixed replay buffer
     replay_buf = None
+    replay_ratio = getattr(cfg, "mixed_replay_ratio", 0.25)
     if spec.mixed_replay:
         buf_size = getattr(cfg, "mixed_replay_buffer_size", 10000)
         replay_buf = MixedReplayBuffer(buf_size, cfg.seq_len, device)
-        replay_ratio = getattr(cfg, "mixed_replay_ratio", 0.25)
 
     # Reward model
     rm = None
     rm_optim = None
+    rm_steps = getattr(cfg, "reward_model_train_steps", 50)
     if spec.reward_model_weighting:
         rm_width = getattr(cfg, "reward_model_width", 64)
         rm_depth = getattr(cfg, "reward_model_depth", 2)
         rm_lr = getattr(cfg, "reward_model_lr", 1e-3)
-        rm_steps = getattr(cfg, "reward_model_train_steps", 50)
         obs_dim = 21 * 79
         rm = RewardModel(obs_dim, rm_width, rm_depth).to(device)
         rm_optim = torch.optim.Adam(rm.parameters(), lr=rm_lr)
@@ -704,6 +701,9 @@ def run_ablation(
 
         # -- Gradient steps --
         model.train()
+        g_rl: dict[str, Tensor] = {}
+        g_proj: dict[str, Tensor] = {}
+        loss_val = 0.0
         for _ in range(grad_steps):
             if spec.gradient_surgery:
                 # PCGrad: compute RL grad, BC grad, project

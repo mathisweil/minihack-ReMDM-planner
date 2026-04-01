@@ -154,7 +154,7 @@ def plot_score_comparison(
     colors = [_group_color(n) for n in names]
 
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(max(10, len(names) * 0.6), 5))
+        fig, ax = plt.subplots(figsize=(max(10.0, len(names) * 0.6), 5))
         bars = ax.bar(range(len(names)), scores, color=colors)
         ax.axhline(pretrained_score, ls="--", color="black", label="Pretrained")
         ax.set_xticks(range(len(names)))
@@ -312,7 +312,7 @@ def plot_t_bin_norms(
             matrix[i] = row
 
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(10, max(4, len(names) * 0.35)))
+        fig, ax = plt.subplots(figsize=(10, max(4.0, len(names) * 0.35)))
         im = ax.imshow(matrix, aspect="auto", cmap="YlOrRd")
         ax.set_yticks(range(len(names)))
         ax.set_yticklabels(names, fontsize=8)
@@ -426,7 +426,7 @@ def plot_group_comparison(
 
     with plt.rc_context(_STYLE):
         fig, ax = plt.subplots(figsize=(8, 5))
-        bp = ax.boxplot(data, labels=labels, patch_artist=True)
+        bp = ax.boxplot(data, tick_labels=labels, patch_artist=True)
         for patch, c in zip(bp["boxes"], colors):
             patch.set_facecolor(c)
             patch.set_alpha(0.6)

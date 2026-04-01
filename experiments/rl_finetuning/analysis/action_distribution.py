@@ -144,7 +144,7 @@ def compute_entropy(probs: np.ndarray) -> float:
         Entropy in bits. Zero-probability entries are ignored.
     """
     p = probs[probs > 0]
-    return float(-np.sum(p * np.log2(p)))
+    return float(np.sum(-p * np.log2(p)))
 
 
 def compute_kl(p: np.ndarray, q: np.ndarray) -> float:
