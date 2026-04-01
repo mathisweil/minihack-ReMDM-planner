@@ -241,9 +241,92 @@ def generate_diagnosis_report(
             f"{sign}{delta:.4f} |"
         )
 
+    # Per-ablation verdicts (reference thresholds)
+    lines.append("")
+    lines.append("| Ablation | Score | Delta vs Baseline | Verdict |")
+    lines.append("|---|---|---|---|")
+
+    for name in sorted(results.keys()):
+        res = results[name]
+        delta_bl = res["score"] - baseline_score
+        if delta_bl > 0.05:
+            verdict = "IMPROVEMENT"
+        elif delta_bl < -0.1:
+            verdict = "COLLAPSE"
+        else:
+            verdict = "NEUTRAL"
+        sign = "+" if delta_bl >= 0 else ""
+        lines.append(
+            f"| {name} | {res['score']:.4f} | "
+            f"{sign}{delta_bl:.4f} | {verdict} |"
+        )
+
     lines.append("")
     lines.append(f"*Pretrained score: {pretrained_score:.4f}*")
     lines.append(f"*Baseline RL score: {baseline_score:.4f}*")
+
+    # Aggregate verdict logic (from reference rl_ablations.py)
+    lines.append("")
+    lines.append("## Aggregate Verdict")
+    lines.append("")
+
+    # Check if ALL RL ablations collapse
+    rl_ablation_names = [
+        n for n in results if n != "baseline_rl"
+    ]
+    all_collapse = bool(rl_ablation_names) and all(
+        results[n]["score"] < pretrained_score - 0.1
+        for n in rl_ablation_names
+    )
+
+    if all_collapse:
+        lines.append(
+            "**ALL RL ablations collapse** "
+            "(all ID win rates > 10% below pretrained)."
+        )
+        lines.append(
+            "Infrastructure is likely fine -- self-generated data "
+            "distribution is the root cause. "
+            "**H1 SUPPORTED**: model cannot improve from its own "
+            "rollouts."
+        )
+    elif rl_ablation_names:
+        n_collapse = sum(
+            1 for n in rl_ablation_names
+            if results[n]["score"] < pretrained_score - 0.1
+        )
+        lines.append(
+            f"Mixed results: {n_collapse}/{len(rl_ablation_names)} "
+            f"ablations collapsed. Check individual verdicts above."
+        )
+
+    # Gradient alignment interpretation
+    grad_aligns: list[float] = []
+    for res in results.values():
+        h: AblationHistory = res["history"]
+        if h.grad_align:
+            grad_aligns.extend(h.grad_align)
+
+    if grad_aligns:
+        mean_align = float(np.mean(grad_aligns))
+        lines.append("")
+        if mean_align < -0.01:
+            lines.append(
+                f"**Gradient alignment** = {mean_align:+.4f}: "
+                f"RL gradient **ACTIVELY WRONG** direction. "
+                f"Direct evidence the gradient is not a valid "
+                f"policy gradient surrogate."
+            )
+        elif abs(mean_align) < 0.05:
+            lines.append(
+                f"**Gradient alignment** = {mean_align:+.4f}: "
+                f"RL gradient is **NOISE** (no consistent signal)."
+            )
+        else:
+            lines.append(
+                f"**Gradient alignment** = {mean_align:+.4f}: "
+                f"RL gradient has useful signal."
+            )
 
     report_path = out_dir / "diagnosis.md"
     report_path.write_text("\n".join(lines))

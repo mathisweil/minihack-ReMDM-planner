@@ -76,9 +76,11 @@ minihack-ReMDM-planner/
 │       │   ├── representation.py      # KL drift, CKA, activation norms
 │       │   └── timestep.py            # t-bin gradient norms, per-bin losses
 │       └── analysis/
-│           ├── plots.py               # 8 matplotlib figure generators
+│           ├── plots.py               # 9 matplotlib figure generators
 │           ├── tables.py              # polars summary tables (CSV + LaTeX)
-│           └── report.py              # hypothesis attribution + diagnosis.md
+│           ├── report.py              # hypothesis attribution + diagnosis.md
+│           ├── action_distribution.py # pre/post-RL action distribution analysis
+│           └── mixing_experiment.py   # data quality degradation curve experiment
 ├── scripts/
 │   ├── hf_upload.py                   # HuggingFace Hub upload utility
 │   └── profile_dagger.py             # DAgger iteration profiler (Phase 1)

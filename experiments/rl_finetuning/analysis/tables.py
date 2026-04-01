@@ -113,12 +113,12 @@ def make_main_results_table(
         delta_pre = score - pretrained_score
         delta_bl = score - baseline_score
 
-        if delta_bl > 0.02:
-            verdict = "Improved"
-        elif delta_bl < -0.02:
-            verdict = "Degraded"
+        if delta_bl > 0.05:
+            verdict = "IMPROVEMENT"
+        elif delta_bl < -0.1:
+            verdict = "COLLAPSE"
         else:
-            verdict = "Neutral"
+            verdict = "NEUTRAL"
 
         rows.append({
             "Method": name,
