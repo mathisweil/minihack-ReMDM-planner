@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from types import SimpleNamespace
 
 if TYPE_CHECKING:
-    import wandb
+    from wandb.sdk.wandb_run import Run as _WandbRun
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class Logger:
 
     def __init__(self, cfg: SimpleNamespace) -> None:
         self._use_wandb = cfg.use_wandb
-        self._run: wandb.sdk.wandb_run.Run | None = None
+        self._run: _WandbRun | None = None
         if self._use_wandb:
             try:
                 import wandb
@@ -196,8 +196,8 @@ class Logger:
             artifact.add_file(checkpoint_path)
             if config_path is not None:
                 artifact.add_file(config_path, name="config.yaml")
-            logged = self._run.log_artifact(artifact)
-            logged.wait()
+            logged = self._run.log_artifact(artifact)  # type: ignore[union-attr]
+            logged.wait()  # block until upload completes
             logger.info("W&B artifact uploaded: %s", name)
         except Exception:
             logger.error("W&B artifact upload failed", exc_info=True)
