@@ -3,6 +3,7 @@ wandb/
 res/
 runs/
 data/
+checkpoints/
 
 play_data
 
@@ -175,6 +176,5 @@ texture_cache*.pbz2
 #Claude specific
 .claude/
 CLAUDE.md
-claude_code_prompt.md
 
-minihack_reference
+reference/
