@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Callable
 
 import torch
 import torch.nn.functional as F
@@ -28,7 +28,6 @@ from torch import Tensor, nn
 
 from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss
-from src.diffusion.schedules import alpha_prime
 
 # Loss signature: (model, local_obs, global_obs, x0, advantages, cfg, device)
 #   -> scalar loss
@@ -38,7 +37,6 @@ LossFn = Callable[
 ]
 
 _EPS: float = 1e-5
-_MAX_WEIGHT: float = 1000.0
 
 
 @dataclass

@@ -15,6 +15,7 @@ import random
 import sys
 import time
 from types import SimpleNamespace
+from typing import Callable
 
 import numpy as np
 import torch
@@ -32,7 +33,6 @@ from src.diffusion.sampling import greedy_sample
 from src.diffusion.schedules import get_schedule
 from src.envs.minihack_env import collect_oracle_trajectory, make_env
 from src.models.denoiser import ModelEMA, make_model
-from src.planners.collect import run_model_episode
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -158,7 +158,8 @@ def profile_model_rollout_detailed(
                 )
             step_in_plan = 0
 
-        action = plan[0, step_in_plan].item()
+        assert plan is not None
+        action: int = plan[0, step_in_plan].item()  # type: ignore[union-attr]
         action = max(0, min(action, cfg.action_dim - 1))
         step_in_plan += 1
 
@@ -179,7 +180,7 @@ def profile_gradient_step(
     ema: ModelEMA,
     cfg: SimpleNamespace,
     device: torch.device | str,
-    schedule_fn: callable,
+    schedule_fn: Callable,
     scaler: torch.amp.GradScaler | None = None,
     use_amp: bool = False,
 ) -> dict[str, Timer]:

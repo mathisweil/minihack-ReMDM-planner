@@ -157,7 +157,7 @@ def _plot_decision_tree(
     scores = [s["evidence_score"] for s in scored_sorted]
 
     with plt.rc_context({"figure.facecolor": "white"}):
-        fig, ax = plt.subplots(figsize=(8, max(3, len(names) * 0.5)))
+        fig, ax = plt.subplots(figsize=(8, max(3.0, len(names) * 0.5)))
         colors = plt.cm.RdYlGn(np.array(scores))  # type: ignore[attr-defined]
         ax.barh(range(len(names)), scores, color=colors)
         ax.set_yticks(range(len(names)))

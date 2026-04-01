@@ -15,6 +15,8 @@ Key differences:
 
 from __future__ import annotations
 
+import torch
+
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Callable

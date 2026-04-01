@@ -104,7 +104,7 @@ class AdvancedObservationEnv(gym.Env):
             shape=(cfg.crop_size, cfg.crop_size),
             dtype=np.int16,
         )
-        self.action_space = gym.spaces.Discrete(cfg.action_dim)
+        self.action_space: gym.spaces.Discrete = gym.spaces.Discrete(cfg.action_dim)
 
         self._visited: set[tuple[int, int]] = set()
         self._prev_bfs_dist: int | None = None
@@ -150,11 +150,12 @@ class AdvancedObservationEnv(gym.Env):
         Returns:
             ``(obs, shaped_reward, terminated, truncated, info)``
         """
-        if action >= self._inner.action_space.n:
+        if action >= self.action_space.n:
             action = 0
 
-        obs, reward, terminated, truncated, info = self._inner.step(action)
+        obs, raw_reward, terminated, truncated, info = self._inner.step(action)
         self.last_raw_obs = obs
+        reward = float(raw_reward)
 
         # Win bonus
         if terminated and reward > 0:
@@ -316,8 +317,8 @@ class AdvancedObservationEnv(gym.Env):
         # BFS to gather reachable tiles + check staircase
         queue: collections.deque = collections.deque([(start, [])])
         visited = {start}
-        reachable: list[tuple[tuple[int, int], list]] = []
-        target_path: list | None = None
+        reachable: list[tuple[tuple[int, int], list[tuple[int, int]]]] = []
+        target_path: list[tuple[int, int]] | None = None
 
         while queue:
             (r, c), path = queue.popleft()
@@ -345,7 +346,7 @@ class AdvancedObservationEnv(gym.Env):
             return self._DIR_MAP.get(target_path[0], 0)
 
         # 3. Frontier exploration — tiles adjacent to unexplored space
-        frontier: list[list] = []
+        frontier: list[list[tuple[int, int]]] = []
         for (r, c), path in reachable:
             if not path:
                 continue

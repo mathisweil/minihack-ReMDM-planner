@@ -197,13 +197,13 @@ def remdm_sample(
 
         # Physics softener: demote hazardous cardinal actions to conf=0.001
         if physics_aware and local_np is not None:
-            assert local_np is not None  # narrowing for type checker
             preds_np = preds.cpu().numpy()  # [B, seq_len]
             conf_override = conf.clone()
             for b in range(B):
+                crop_b = np.asarray(local_np[b])  # [crop, crop]
                 for pos in range(min(_N_PHYSICS_CHECK, seq_len)):
                     action = int(preds_np[b, pos])
-                    if _check_hazard(local_np[b], action):
+                    if _check_hazard(crop_b, action):
                         conf_override[b, pos] = 0.001
             conf = conf_override
 
