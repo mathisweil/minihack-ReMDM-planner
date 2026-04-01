@@ -16,6 +16,11 @@ Usage::
         --checkpoint path/to/dagger_checkpoint.pth \\
         --ablations baseline_rl kl_penalty --fast
 
+    # Use a W&B artifact as checkpoint
+    python experiments/rl_finetuning/run_ablations.py \\
+        --checkpoint wandb://entity/project/artifact:version \\
+        --ablations baseline_rl kl_penalty --fast
+
     # List registered ablations
     python experiments/rl_finetuning/run_ablations.py --list
 
@@ -94,6 +99,7 @@ def _merge_to_namespace(*dicts: dict) -> SimpleNamespace:
     return SimpleNamespace(**merged)
 
 
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -124,7 +130,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--checkpoint", type=str, default=None,
-        help="Pretrained DAgger checkpoint (.pth).",
+        help=(
+            "Pretrained DAgger checkpoint. Accepts a local .pth path "
+            "or a W&B artifact reference: "
+            "wandb://entity/project/artifact:version"
+        ),
     )
 
     p.add_argument("--all", action="store_true", help="Run all ablations.")
@@ -360,10 +370,20 @@ def main(argv: list[str] | None = None) -> None:
         cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(cfg.device)
 
-    # Checkpoint
-    checkpoint_path = args.checkpoint
-    if not checkpoint_path:
+    # Checkpoint (resolve W&B artifact if needed)
+    if not args.checkpoint:
         parser.error("--checkpoint is required for training mode.")
+    if args.checkpoint.startswith("wandb://"):
+        from src.planners.logging import download_artifact
+        artifact_ref = args.checkpoint[len("wandb://"):]
+        resolved = download_artifact(artifact_ref)
+        if resolved is None:
+            parser.error(
+                f"Failed to download W&B artifact: {artifact_ref}"
+            )
+        checkpoint_path = resolved
+    else:
+        checkpoint_path = str(Path(args.checkpoint).resolve())
 
     # Select ablations
     if args.all:

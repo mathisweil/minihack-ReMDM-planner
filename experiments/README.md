@@ -25,9 +25,11 @@ rl_finetuning/
 │   ├── representation.py     # KL drift, CKA similarity, activation norms
 │   └── timestep.py           # t-bin gradient norms, per-t loss decomposition
 ├── analysis/
-│   ├── plots.py              # 8 matplotlib figure generators
+│   ├── plots.py              # 9 matplotlib figure generators
 │   ├── tables.py             # Summary tables as polars DataFrames + LaTeX export
-│   └── report.py             # diagnosis.md + decision tree figure
+│   ├── report.py             # diagnosis.md + decision tree figure
+│   ├── action_distribution.py  # Pre/post-RL action distribution analysis
+│   └── mixing_experiment.py    # Data quality degradation curve experiment
 └── configs/
     ├── ablations_default.yaml   # Full-run hyperparameters
     └── ablations_fast.yaml      # Smoke-test overrides (50 iterations)
@@ -44,6 +46,14 @@ python experiments/rl_finetuning/run_ablations.py --list
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint path/to/dagger_checkpoint.pth \
+    --ablations baseline_rl kl_penalty \
+    --fast
+```
+
+**Using a W&B artifact as checkpoint:**
+```bash
+python experiments/rl_finetuning/run_ablations.py \
+    --checkpoint wandb://entity/project/checkpoint-iter8000:latest \
     --ablations baseline_rl kl_penalty \
     --fast
 ```
