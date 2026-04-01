@@ -855,4 +855,4 @@ def run_ablation(
     if spec.use_lora:
         remove_lora_from_model(model)
 
-    return history, final_score, model.state_dict()
+    return history, final_score, model

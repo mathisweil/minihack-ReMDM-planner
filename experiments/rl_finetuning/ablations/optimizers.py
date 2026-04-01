@@ -49,6 +49,7 @@ def make_optimizer_standard(
     return torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=getattr(cfg, "lr", 3e-4),
+        weight_decay=getattr(cfg, "weight_decay", 1e-4),
         eps=1e-5,
     )
 
@@ -132,7 +133,8 @@ def make_optimizer_llrd(
             "lr": base_lr * (decay ** (n_layers + 1)),
         })
 
-    return torch.optim.AdamW(param_groups, eps=1e-5)
+    wd = getattr(cfg, "weight_decay", 1e-4)
+    return torch.optim.AdamW(param_groups, weight_decay=wd, eps=1e-5)
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +174,10 @@ def make_optimizer_frozen(
         return torch.optim.AdamW([dummy], lr=0.0)
 
     return torch.optim.AdamW(
-        trainable, lr=getattr(cfg, "lr", 3e-4), eps=1e-5,
+        trainable,
+        lr=getattr(cfg, "lr", 3e-4),
+        weight_decay=getattr(cfg, "weight_decay", 1e-4),
+        eps=1e-5,
     )
 
 
@@ -371,7 +376,10 @@ def make_optimizer_lora(
         AdamW for LoRA parameters only.
     """
     return torch.optim.AdamW(
-        lora_params, lr=getattr(cfg, "lr", 3e-4), eps=1e-5,
+        lora_params,
+        lr=getattr(cfg, "lr", 3e-4),
+        weight_decay=getattr(cfg, "weight_decay", 1e-4),
+        eps=1e-5,
     )
 
 

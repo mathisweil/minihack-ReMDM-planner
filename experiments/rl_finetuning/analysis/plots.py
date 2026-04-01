@@ -325,6 +325,46 @@ def plot_t_bin_norms(
 
 
 # ---------------------------------------------------------------------------
+# High-t / low-t gradient norm ratio
+# ---------------------------------------------------------------------------
+
+
+def plot_t_ratio(
+    results: dict[str, dict],
+    out_dir: Path,
+) -> None:
+    """High-t / low-t gradient norm ratio over training.
+
+    Ratio >> 1 indicates high-t gradients dominate (t-bias hypothesis).
+
+    Args:
+        results: Full results dict.
+        out_dir: Output directory.
+    """
+    with plt.rc_context(_STYLE):
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for name, res in sorted(results.items()):
+            h: AblationHistory = res["history"]
+            if h.t_analysis_iters and h.norm_low_t and h.norm_high_t:
+                ratios = [
+                    hi / (lo + 1e-10)
+                    for hi, lo in zip(h.norm_high_t, h.norm_low_t)
+                ]
+                ax.plot(
+                    h.t_analysis_iters, _ema(ratios),
+                    "D-", label=name, color=_group_color(name),
+                    alpha=0.8, markersize=4, linewidth=1.5,
+                )
+        ax.axhline(1.0, ls="--", color="black", alpha=0.5, label="Equal")
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Ratio (>1 = high-t dominates)")
+        ax.set_title("High-t / Low-t Gradient Norm Ratio")
+        ax.legend(ncol=2, fontsize=7)
+        fig.tight_layout()
+        _save(fig, out_dir / "t_ratio.png")
+
+
+# ---------------------------------------------------------------------------
 # Win rate evolution
 # ---------------------------------------------------------------------------
 
@@ -428,6 +468,7 @@ def generate_all_plots(
     plot_repr_drift(results, out_dir)
     plot_cka(results, out_dir)
     plot_t_bin_norms(results, out_dir)
+    plot_t_ratio(results, out_dir)
     plot_win_rate(results, out_dir)
     plot_group_comparison(results, pretrained_score, out_dir)
 
