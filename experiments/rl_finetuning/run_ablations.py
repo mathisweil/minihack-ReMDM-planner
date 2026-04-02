@@ -418,6 +418,13 @@ def main(argv: list[str] | None = None) -> None:
                 config=vars(cfg),
                 tags=["ablations"] + selected,
             )
+            # Define metric x-axes
+            wandb.define_metric("iteration")
+            for ns in (
+                "train/*", "speed/*", "online/*", "eval/*",
+                "model/*", "diag/*",
+            ):
+                wandb.define_metric(ns, step_metric="iteration")
 
     # Run ablations
     num_seeds = args.num_seeds or getattr(cfg, "num_seeds", 1)
@@ -467,6 +474,14 @@ def main(argv: list[str] | None = None) -> None:
             "all_scores": seed_scores,
         }
 
+        # W&B summary for this ablation
+        if wandb_run is not None:
+            try:
+                wandb_run.summary[f"{abl_name}/final_score"] = mean_score
+                wandb_run.summary[f"{abl_name}/score_std"] = std_score
+            except Exception:
+                pass
+
         # Incremental save
         results_path = output_dir / "results.json"
         results_path.write_bytes(
@@ -490,6 +505,11 @@ def main(argv: list[str] | None = None) -> None:
         generate_diagnosis_report(results, pretrained_score, output_dir)
 
     if wandb_run is not None:
+        try:
+            wandb_run.summary["pretrained_baseline"] = pretrained_score
+            wandb_run.summary["n_ablations_completed"] = len(results)
+        except Exception:
+            pass
         wandb_run.finish()
 
     logger.info("=" * 60)

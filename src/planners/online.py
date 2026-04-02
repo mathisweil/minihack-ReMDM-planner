@@ -24,7 +24,10 @@ from src.diffusion.schedules import get_schedule
 from src.models.denoiser import ModelEMA, make_model
 from src.planners.collect import DataCollector
 from src.planners.inference import Evaluator, save_eval_json
-from src.planners.logging import Logger
+from src.planners.logging import (
+    Logger, gpu_memory_mb, reset_gpu_memory_stats,
+    compute_param_norm, compute_param_drift,
+)
 from src.curriculum import DynamicCurriculum
 from src.envs.minihack_env import collect_oracle_trajectory
 
@@ -75,6 +78,11 @@ class Trainer:
         self.cfg = cfg
         self.device = device
         self._schedule_fn = get_schedule(cfg.noise_schedule)
+        # Snapshot of initial weights for param drift tracking
+        self._init_state = {
+            k: v.clone() for k, v in self._raw_model.state_dict().items()
+            if v.is_floating_point()
+        }
         # AMP scaler: enabled only when use_amp=true and on CUDA
         self._use_amp = (
             getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
@@ -91,6 +99,7 @@ class Trainer:
         """
         cfg = self.cfg
         for iteration in range(start_iter, cfg.max_iterations):
+            reset_gpu_memory_stats()
             iter_start = time.perf_counter()
 
             # 1. Collect N episodes per iteration
@@ -153,11 +162,31 @@ class Trainer:
                     self._raw_model.global_gate
                 ).item()
 
+            # Buffer online fraction
+            buf_total = len(self.buffer)
+            buf_online_frac = (
+                (buf_total - self.buffer.offline_size) / max(buf_total, 1)
+                if hasattr(self.buffer, "offline_size")
+                else 0.0
+            )
+
+            # Samples per second
+            total_samples = n_steps * cfg.dagger_batch_size
+            samples_per_sec = total_samples / max(train_time, 1e-6)
+
+            # Env steps per second
+            total_env_steps = (
+                collect_stats.get("model_steps", 0)
+                + collect_stats.get("oracle_steps", 0)
+            )
+            env_steps_per_sec = total_env_steps / max(collect_time, 1e-6)
+
             metrics = {
                 "diffusion/loss": avg_loss,
                 "diffusion/loss_diff": avg_loss_diff,
                 "diffusion/loss_aux": avg_loss_aux,
-                "train/buffer_size": len(self.buffer),
+                "train/buffer_size": buf_total,
+                "train/buffer_online_frac": buf_online_frac,
                 "train/model_won": int(collect_stats["model_won"]),
                 "train/added_to_buffer": int(
                     collect_stats["added_to_buffer"]
@@ -171,6 +200,13 @@ class Trainer:
                 ),
                 "train/lr": current_lr,
                 "train/grad_norm": avg_grad_norm,
+                "speed/iter_time_sec": iter_time,
+                "speed/collect_time_sec": collect_time,
+                "speed/train_step_time_sec": train_time,
+                "speed/samples_per_sec": samples_per_sec,
+                "speed/env_steps_per_sec": env_steps_per_sec,
+                "speed/gpu_memory_mb": gpu_memory_mb(),
+                # Keep old perf/ keys for backward compat
                 "perf/iter_time_s": iter_time,
                 "perf/collect_time_s": collect_time,
                 "perf/train_time_s": train_time,
@@ -180,6 +216,16 @@ class Trainer:
             }
             if gate_val is not None:
                 metrics["train/global_gate"] = gate_val
+                metrics["model/ema_gate_value"] = gate_val
+
+            # Model health (every 10 iters to avoid overhead)
+            if iteration % 10 == 0:
+                metrics["model/param_norm"] = compute_param_norm(
+                    self._raw_model
+                )
+                metrics["model/param_drift_from_init"] = compute_param_drift(
+                    self._raw_model, self._init_state
+                )
 
             self.log.log(metrics, step=iteration)
 
