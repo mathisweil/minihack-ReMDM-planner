@@ -9,11 +9,15 @@ CNN + auxiliary goal head).
 from __future__ import annotations
 
 import copy
+import logging
+import shutil
 from types import SimpleNamespace
 
 import torch
 import torch.nn as nn
 from torch import Tensor
+
+logger = logging.getLogger(__name__)
 
 
 class LocalDiffusionPlannerWithGlobal(nn.Module):
@@ -286,6 +290,34 @@ def make_model(cfg: SimpleNamespace) -> nn.Module:
         ``LocalDiffusionPlannerWithGlobal`` instance.
     """
     return LocalDiffusionPlannerWithGlobal(cfg)
+
+
+def try_compile(model: nn.Module, cfg: SimpleNamespace) -> nn.Module:
+    """Wrap *model* with ``torch.compile`` if enabled and a C compiler exists.
+
+    Falls back to the uncompiled model when ``torch.compile`` is
+    unavailable or Triton cannot find a C compiler (common on managed
+    GPU nodes that lack ``gcc``/``cc``).
+
+    Args:
+        model: The raw (uncompiled) model.
+        cfg: Config namespace; reads ``torch_compile`` bool.
+
+    Returns:
+        Compiled model, or *model* unchanged on fallback.
+    """
+    if not getattr(cfg, "torch_compile", False):
+        return model
+    if not hasattr(torch, "compile"):
+        return model
+    if shutil.which("cc") is None and shutil.which("gcc") is None:
+        logger.warning(
+            "torch.compile requested but no C compiler found (cc/gcc); "
+            "falling back to eager mode"
+        )
+        return model
+    logger.info("Compiling model with torch.compile")
+    return torch.compile(model, mode="default")  # type: ignore[return-value]
 
 
 # ── EMA ──────────────────────────────────────────────────────────────

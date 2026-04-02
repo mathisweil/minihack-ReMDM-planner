@@ -5,7 +5,7 @@ import torch
 from src.buffer import ReplayBuffer
 from src.curriculum import DynamicCurriculum
 from src.envs.minihack_env import collect_oracle_trajectory
-from src.models.denoiser import ModelEMA, make_model
+from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import DataCollector
 from src.planners.inference import Evaluator, format_eval_results
 from src.planners.logging import Logger
@@ -30,10 +30,7 @@ def run_smoke(cfg) -> None:
 
     raw_model = make_model(cfg).to(device)
 
-    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
-        model = torch.compile(raw_model, mode="default")
-    else:
-        model = raw_model
+    model = try_compile(raw_model, cfg)
 
     ema = ModelEMA(raw_model, decay=cfg.ema_decay)
     optimizer = torch.optim.AdamW(
