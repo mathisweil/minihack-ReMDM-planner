@@ -65,7 +65,7 @@ dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
 episodes_per_iteration: 30
-grad_steps_per_iteration: 150
+grad_steps_per_iteration: 300
 efficiency_multiplier: 1.5
 curriculum_queue_size: 100
 # Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
@@ -86,7 +86,7 @@ use_amp: true
 torch_compile: true
 # Number of parallel workers for DAgger episode collection.
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
-num_collection_workers: 30
+num_collection_workers: 10
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
