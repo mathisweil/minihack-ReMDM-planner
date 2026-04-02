@@ -543,6 +543,8 @@ def run_ablation(
         lora_rank = getattr(cfg, "lora_rank", 8)
         lora_alpha = getattr(cfg, "lora_alpha", 16.0)
         lora_params = apply_lora_to_model(model, lora_rank, lora_alpha)
+        # Re-initialize EMA after LoRA changes the model's state_dict keys
+        ema = ModelEMA(model, decay=getattr(cfg, "ema_decay", 0.999))
         optimizer = make_optimizer_lora(cfg, lora_params)
     else:
         optimizer = spec.optimizer_factory(cfg, model)

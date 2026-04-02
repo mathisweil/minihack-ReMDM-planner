@@ -327,13 +327,14 @@ def apply_lora_to_model(
 
         # in_proj_weight: [3*d_model, d_model]
         d_out_in, d_in_in = attn.in_proj_weight.shape
-        lora_in = _LoRAParametrization(d_out_in, d_in_in, rank, alpha)
+        device = attn.in_proj_weight.device
+        lora_in = _LoRAParametrization(d_out_in, d_in_in, rank, alpha).to(device)
         parametrize.register_parametrization(attn, "in_proj_weight", lora_in)
         lora_params.extend([lora_in.A, lora_in.B])
 
         # out_proj.weight: [d_model, d_model]
         d_out_out, d_in_out = attn.out_proj.weight.shape
-        lora_out = _LoRAParametrization(d_out_out, d_in_out, rank, alpha)
+        lora_out = _LoRAParametrization(d_out_out, d_in_out, rank, alpha).to(device)
         parametrize.register_parametrization(attn.out_proj, "weight", lora_out)
         lora_params.extend([lora_out.A, lora_out.B])
 
