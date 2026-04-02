@@ -53,14 +53,14 @@ physics_aware_sampling: false
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
-offline_batch_size: 3584
+offline_batch_size: 2048
 offline_grad_clip: 1.0
 offline_epochs: 30
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 3584
+dagger_batch_size: 2048
 dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
@@ -80,7 +80,7 @@ checkpoint_eval_episodes: 50
 # ── Performance ──────────────────────────────────────────────────────
 # Mixed-precision (FP16) training via torch.cuda.amp.
 # Speeds up forward/backward ~1.5-2x on GPU. No effect on CPU.
-use_amp: false
+use_amp: true
 # torch.compile the model for fused kernels (experimental).
 # May cause slow first iteration due to compilation. No effect on CPU.
 torch_compile: true
