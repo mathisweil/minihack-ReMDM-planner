@@ -1,2 +1,0 @@
-Method,KL_mean,KL_low_t,KL_mid_t,KL_high_t
-frozen_backbone,0.0001,0.0001,0.0,0.0001

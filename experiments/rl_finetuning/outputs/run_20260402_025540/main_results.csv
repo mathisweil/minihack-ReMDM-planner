@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-entropy_bonus,B,0.7,0.15,0.15,IMPROVEMENT

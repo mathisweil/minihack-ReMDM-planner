@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-lora,A,0.8,0.2,0.2,IMPROVEMENT

@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-ffn_only,C,0.7,0.1,0.1,IMPROVEMENT

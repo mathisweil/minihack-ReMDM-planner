@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-layer_ablation_top3,C,0.55,0.0,0.0,NEUTRAL

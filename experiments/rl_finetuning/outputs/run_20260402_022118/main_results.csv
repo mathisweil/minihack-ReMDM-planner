@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-trust_region_kl,A,0.65,0.15,0.15,IMPROVEMENT
