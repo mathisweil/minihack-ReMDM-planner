@@ -292,6 +292,19 @@ def make_model(cfg: SimpleNamespace) -> nn.Module:
     return LocalDiffusionPlannerWithGlobal(cfg)
 
 
+def _has_c_compiler() -> bool:
+    """Check whether a C compiler is reachable by Triton.
+
+    Checks the ``CC`` env var (set by conda activation scripts),
+    then falls back to ``cc`` and ``gcc`` on ``PATH``.
+    """
+    import os
+    cc_env = os.environ.get("CC")
+    if cc_env and shutil.which(cc_env):
+        return True
+    return shutil.which("cc") is not None or shutil.which("gcc") is not None
+
+
 def try_compile(model: nn.Module, cfg: SimpleNamespace) -> nn.Module:
     """Wrap *model* with ``torch.compile`` if enabled and a C compiler exists.
 
@@ -310,10 +323,10 @@ def try_compile(model: nn.Module, cfg: SimpleNamespace) -> nn.Module:
         return model
     if not hasattr(torch, "compile"):
         return model
-    if shutil.which("cc") is None and shutil.which("gcc") is None:
+    if not _has_c_compiler():
         logger.warning(
-            "torch.compile requested but no C compiler found (cc/gcc); "
-            "falling back to eager mode"
+            "torch.compile requested but no C compiler found "
+            "(CC env var, cc, gcc); falling back to eager mode"
         )
         return model
     logger.info("Compiling model with torch.compile")
