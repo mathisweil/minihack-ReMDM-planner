@@ -19,6 +19,7 @@ import copy
 import dataclasses
 import logging
 import random
+import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -61,6 +62,21 @@ from src.planners.inference import Evaluator
 logger = logging.getLogger(__name__)
 
 _EPS: float = 1e-5
+
+
+def _wandb_log(metrics: dict[str, float], step: int) -> None:
+    """Log metrics to wandb if available, guarded against import/init failure.
+
+    Args:
+        metrics: Flat ``{namespace/key: value}`` dict.
+        step: Global iteration index.
+    """
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.log(metrics, step=step)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +512,19 @@ def run_ablation(
     logger.info("  %s", spec.description)
     logger.info("=" * 60)
 
+    # Log ablation metadata to wandb config
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.config.update({
+                "ablation_name": spec.name,
+                "ablation_group": spec.group,
+                "ablation_description": spec.description,
+                "seed": seed,
+            }, allow_val_change=True)
+    except Exception:
+        pass
+
     # Seed
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -543,6 +572,8 @@ def run_ablation(
         lora_rank = getattr(cfg, "lora_rank", 8)
         lora_alpha = getattr(cfg, "lora_alpha", 16.0)
         lora_params = apply_lora_to_model(model, lora_rank, lora_alpha)
+        # Re-initialize EMA after LoRA changes the model's state_dict keys
+        ema = ModelEMA(model, decay=getattr(cfg, "ema_decay", 0.999))
         optimizer = make_optimizer_lora(cfg, lora_params)
     else:
         optimizer = spec.optimizer_factory(cfg, model)
@@ -608,17 +639,41 @@ def run_ablation(
     running_std = 1.0
     history = AblationHistory()
 
+    # Snapshot initial state for param drift tracking
+    _init_state = {
+        k: v.clone() for k, v in model.state_dict().items()
+        if v.is_floating_point()
+    }
+
+    # Log model param counts to wandb
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(
+        p.numel() for p in model.parameters() if p.requires_grad
+    )
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.config.update({
+                "model_total_params": total_params,
+                "model_trainable_params": trainable_params,
+            }, allow_val_change=True)
+    except Exception:
+        pass
+
     # -------------------------------------------------------------------
     # Training loop
     # -------------------------------------------------------------------
     for iteration in range(1, max_iter + 1):
+        iter_start = time.perf_counter()
         cfg._current_iter = iteration
 
         # -- Collect episodes --
+        collect_start = time.perf_counter()
         eval_model = ema.make_eval_model(model)
         local_obs, global_obs, x0, returns = collect_training_data(
             eval_model, cfg, device, episodes_per_iter,
         )
+        collect_time = time.perf_counter() - collect_start
 
         if local_obs.shape[0] == 0:
             logger.warning("  Iter %d: no data collected, skipping.", iteration)
@@ -700,10 +755,12 @@ def run_ablation(
             adv_b = advantages[:batch_size]
 
         # -- Gradient steps --
+        train_start = time.perf_counter()
         model.train()
         g_rl: dict[str, Tensor] = {}
         g_proj: dict[str, Tensor] = {}
         loss_val = 0.0
+        grad_norm_val = 0.0
         for _ in range(grad_steps):
             if spec.gradient_surgery:
                 # PCGrad: compute RL grad, BC grad, project
@@ -723,10 +780,10 @@ def run_ablation(
 
                 g_proj = gradient_surgery(g_rl, g_bc)
                 apply_gradients(model, g_proj)
-                torch.nn.utils.clip_grad_norm_(
+                grad_norm_val = torch.nn.utils.clip_grad_norm_(
                     [p for p in model.parameters() if p.requires_grad],
                     max_grad_norm,
-                )
+                ).item()
                 optimizer.step()
                 loss_val = rl_loss.item()
             else:
@@ -735,25 +792,68 @@ def run_ablation(
                     model, local_b, global_b, x0_b, adv_b, cfg, device,
                 )
                 loss_val_t.backward()
-                torch.nn.utils.clip_grad_norm_(
+                grad_norm_val = torch.nn.utils.clip_grad_norm_(
                     [p for p in model.parameters() if p.requires_grad],
                     max_grad_norm,
-                )
+                ).item()
                 optimizer.step()
                 loss_val = loss_val_t.item()
 
             ema.update(model)
 
         # -- Metrics --
+        train_time = time.perf_counter() - train_start
+        iter_time = time.perf_counter() - iter_start
         wr = (returns_perm > win_thresh).float().mean().item()
         eff_bs = _effective_batch_size(adv_b)
+        mean_return = returns_perm.mean().item()
 
         history.iters.append(iteration)
         history.loss.append(loss_val)
         history.env_score_iters.append(iteration)
-        history.env_score.append(returns_perm.mean().item())
+        history.env_score.append(mean_return)
         history.win_rate.append(wr)
         history.effective_batch_size.append(eff_bs)
+
+        # Current LR
+        current_lr = optimizer.param_groups[0]["lr"]
+
+        # Build wandb metrics dict for this iteration
+        wb_metrics: dict[str, float] = {
+            "train/loss": loss_val,
+            "train/learning_rate": current_lr,
+            "train/grad_norm": grad_norm_val,
+            "train/effective_batch_size": eff_bs,
+            "online/win_rate": wr,
+            "online/mean_return": mean_return,
+            "speed/iter_time_sec": iter_time,
+            "speed/collect_time_sec": collect_time,
+            "speed/train_step_time_sec": train_time,
+        }
+
+        # GPU memory
+        if torch.cuda.is_available():
+            wb_metrics["speed/gpu_memory_mb"] = (
+                torch.cuda.max_memory_allocated() / (1024 * 1024)
+            )
+
+        # Global gate value
+        if hasattr(model, "global_gate"):
+            gate_val = torch.sigmoid(model.global_gate).item()
+            wb_metrics["model/ema_gate_value"] = gate_val
+
+        # Model health (every 10 iters)
+        if iteration % 10 == 0:
+            p_norm = sum(
+                p.data.norm(2).item() ** 2 for p in model.parameters()
+            ) ** 0.5
+            wb_metrics["model/param_norm"] = p_norm
+            drift = sum(
+                (p.data - _init_state[n]).norm(2).item() ** 2
+                for n, p in model.named_parameters()
+                if n in _init_state
+            ) ** 0.5
+            wb_metrics["model/param_drift_from_init"] = drift
 
         # -- Gradient alignment --
         if iteration % grad_align_every == 0:
@@ -765,12 +865,16 @@ def run_ablation(
             history.grad_align.append(cos)
             history.rl_grad_norm.append(rl_n)
             history.bc_grad_norm.append(bc_n)
+            wb_metrics["diag/grad_alignment_cos"] = cos
+            wb_metrics["diag/grad_alignment_rl_norm"] = rl_n
+            wb_metrics["diag/grad_alignment_bc_norm"] = bc_n
 
             if spec.gradient_surgery:
                 frac, n_conf = compute_surgery_metrics(g_rl, g_proj)
                 history.surgery_iters.append(iteration)
                 history.surgery_fraction.append(frac)
                 history.surgery_n_conflicting.append(n_conf)
+                wb_metrics["diag/surgery_frac"] = frac
 
         # -- Per-layer gradient norms --
         if iteration % per_layer_every == 0:
@@ -795,6 +899,7 @@ def run_ablation(
             history.repr_drift_kl_low_t.append(kl_l)
             history.repr_drift_kl_mid_t.append(kl_mid)
             history.repr_drift_kl_high_t.append(kl_h)
+            wb_metrics["diag/repr_drift_kl"] = kl_m
 
         # -- CKA --
         if iteration % cka_every == 0:
@@ -803,6 +908,7 @@ def run_ablation(
             )
             history.cka_iters.append(iteration)
             history.cka_similarity.append(cka_val)
+            wb_metrics["diag/cka_similarity"] = cka_val
 
         # -- t-analysis --
         if iteration % t_analysis_every == 0:
@@ -820,6 +926,9 @@ def run_ablation(
             history.norm_low_t.append(n_low)
             history.norm_high_t.append(n_high)
             history.lowhigh_cos.append(lh_cos)
+            wb_metrics["diag/t_grad_norm_low"] = n_low
+            wb_metrics["diag/t_grad_norm_high"] = n_high
+            wb_metrics["diag/t_grad_cos_lohi"] = lh_cos
 
         # -- Evaluation --
         if iteration % eval_every == 0:
@@ -835,10 +944,21 @@ def run_ablation(
             history.per_env_win_rates.append({
                 k: v["win_rate"] for k, v in results.items()
             })
+            wb_metrics["eval/id_win_rate"] = float(id_wr)
+            for env_name, env_stats in results.items():
+                short = env_name.replace("MiniHack-", "").replace("-v0", "")
+                wb_metrics[f"eval/per_env/{short}/win_rate"] = env_stats["win_rate"]
+                if "avg_steps" in env_stats:
+                    wb_metrics[f"eval/per_env/{short}/avg_steps"] = env_stats["avg_steps"]
+                if "avg_reward" in env_stats:
+                    wb_metrics[f"eval/per_env/{short}/avg_reward"] = env_stats["avg_reward"]
             logger.info(
                 "  [%s] iter=%d  loss=%.4f  id_win_rate=%.3f",
                 spec.name, iteration, loss_val, id_wr,
             )
+
+        # -- Emit all metrics to wandb --
+        _wandb_log(wb_metrics, step=iteration)
 
     # -- Final evaluation --
     final_model = ema.make_eval_model(model)

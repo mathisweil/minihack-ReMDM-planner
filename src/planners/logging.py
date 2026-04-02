@@ -7,6 +7,7 @@ Mirrors the Craftax logging conventions with metric namespaces:
 from __future__ import annotations
 
 import logging
+import torch
 from typing import TYPE_CHECKING
 from types import SimpleNamespace
 
@@ -106,6 +107,16 @@ class Logger:
                     name=run_name,
                     config=vars(cfg),
                 )
+                # Define custom metric x-axes
+                wandb.define_metric("iteration")
+                for ns in (
+                    "diffusion/*", "train/*", "perf/*", "speed/*",
+                    "online/*", "model/*",
+                    "eval_id/*", "eval_ood/*",
+                    "curriculum/*",
+                    "ckpt_eval_id/*", "ckpt_eval_ood/*", "ckpt_eval/*",
+                ):
+                    wandb.define_metric(ns, step_metric="iteration")
             except Exception:
                 logger.error("W&B init failed", exc_info=True)
                 self._use_wandb = False
@@ -210,3 +221,60 @@ class Logger:
                 wandb.finish()
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Metric helper functions (used by both src/ and experiments/)
+# ---------------------------------------------------------------------------
+
+
+def gpu_memory_mb() -> float:
+    """Return peak GPU memory allocated in MB since last reset.
+
+    Returns:
+        Peak memory in MB, or 0.0 if CUDA is unavailable.
+    """
+    if torch.cuda.is_available():
+        return torch.cuda.max_memory_allocated() / (1024 * 1024)
+    return 0.0
+
+
+def reset_gpu_memory_stats() -> None:
+    """Reset GPU peak memory stats for the current device."""
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+
+
+def compute_param_norm(model: torch.nn.Module) -> float:
+    """Compute total L2 norm of all model parameters.
+
+    Args:
+        model: The model.
+
+    Returns:
+        Total L2 norm as a float.
+    """
+    total = 0.0
+    for p in model.parameters():
+        total += p.data.norm(2).item() ** 2
+    return total ** 0.5
+
+
+def compute_param_drift(
+    model: torch.nn.Module,
+    ref_state: dict[str, torch.Tensor],
+) -> float:
+    """Compute L2 distance between current model params and a reference state.
+
+    Args:
+        model: Current model.
+        ref_state: Reference state_dict (e.g. pretrained weights).
+
+    Returns:
+        L2 distance as a float.
+    """
+    total = 0.0
+    for name, p in model.named_parameters():
+        if name in ref_state:
+            total += (p.data - ref_state[name]).norm(2).item() ** 2
+    return total ** 0.5

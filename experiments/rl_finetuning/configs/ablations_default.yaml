@@ -10,7 +10,7 @@
 # Iterations per ablation run.  Range: [50, 5000].
 max_iter: 1000
 # Gradient batch size drawn from collected rollout windows.
-batch_size: 512
+batch_size: 1024
 # Learning rate for ablation fine-tuning.  Range: [1e-5, 1e-3].
 lr: 3.0e-4
 # AdamW weight decay.  Reference uses 1e-4.  Range: [0, 0.1].
@@ -109,7 +109,7 @@ reward_model_lr: 1.0e-3
 reward_model_train_steps: 50
 
 # -- Output / Logging --------------------------------------------------------
-ablation_use_wandb: false
+ablation_use_wandb: true
 ablation_wandb_project: "remdm-minihack-ablations"
 
 # -- Multi-seed ---------------------------------------------------------------
