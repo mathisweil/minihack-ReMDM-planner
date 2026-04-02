@@ -65,7 +65,7 @@ dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
 episodes_per_iteration: 30
-grad_steps_per_iteration: 100
+grad_steps_per_iteration: 150
 efficiency_multiplier: 1.5
 curriculum_queue_size: 100
 # Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
