@@ -421,7 +421,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Run ablations
     num_seeds = args.num_seeds or getattr(cfg, "num_seeds", 1)
-    base_seed = getattr(cfg, "seed", 0) if args.seed is None else args.seed
+    base_seed = args.seed if args.seed is not None else (getattr(cfg, "seed", None) or 0)
     results: dict[str, dict] = {}
 
     for abl_name in selected:
