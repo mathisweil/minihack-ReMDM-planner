@@ -27,6 +27,11 @@ Usage::
     # Analysis only (load existing results)
     python experiments/rl_finetuning/run_ablations.py \\
         --analyze_only --results_path outputs/run_xyz/results.json
+
+    # Merge results from independent runs (spread across GPUs)
+    python experiments/rl_finetuning/run_ablations.py \\
+        --merge outputs/gpu0/results.json outputs/gpu1/results.json \\
+        --output_dir outputs/merged
 """
 
 from __future__ import annotations
@@ -150,6 +155,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fast", action="store_true", help="Fast smoke-test.")
     p.add_argument("--analyze_only", action="store_true")
     p.add_argument("--results_path", type=str, default=None)
+    p.add_argument(
+        "--merge", nargs="+", metavar="JSON",
+        help=(
+            "Merge multiple results.json files from independent runs "
+            "and regenerate analysis. E.g.:\n"
+            "  --merge outputs/gpu0/results.json outputs/gpu1/results.json"
+        ),
+    )
 
     p.add_argument("--output_dir", type=str, default=None)
     p.add_argument("--run_id", type=str, default=None)
@@ -198,6 +211,7 @@ def _results_to_json(
             name: {
                 "score": res["score"],
                 "score_std": res.get("score_std", 0.0),
+                "all_scores": res.get("all_scores", [res["score"]]),
                 "history": res["history"].to_dict(),
             }
             for name, res in results.items()
@@ -224,11 +238,60 @@ def _results_from_json(
     config = data.get("config", {})
     results: dict[str, dict] = {}
     for name, res_data in data["ablations"].items():
+        score = res_data["score"]
         results[name] = {
-            "score": res_data["score"],
+            "score": score,
+            "score_std": res_data.get("score_std", 0.0),
+            "all_scores": res_data.get("all_scores", [score]),
             "history": AblationHistory.from_dict(res_data["history"]),
         }
     return results, pretrained_score, config
+
+
+def _merge_result_files(
+    paths: list[str],
+) -> tuple[dict[str, dict], float, dict]:
+    """Merge multiple results.json files from independent runs.
+
+    When the same ablation appears in multiple files its ``all_scores``
+    lists are concatenated and ``score`` / ``score_std`` are recomputed
+    over the union.  The history from the first file encountered is kept.
+
+    Args:
+        paths: List of paths to results.json files.
+
+    Returns:
+        Tuple of (merged_results, pretrained_score, config).
+    """
+    merged: dict[str, dict] = {}
+    pretrained_scores: list[float] = []
+    config: dict = {}
+
+    for p in paths:
+        results, pt_score, cfg = _results_from_json(p)
+        pretrained_scores.append(pt_score)
+        if not config:
+            config = cfg
+
+        for name, res in results.items():
+            if name not in merged:
+                merged[name] = {
+                    "score": res["score"],
+                    "score_std": res.get("score_std", 0.0),
+                    "all_scores": list(res.get("all_scores", [res["score"]])),
+                    "history": res["history"],
+                }
+            else:
+                # Concatenate scores from this file
+                new_scores = list(res.get("all_scores", [res["score"]]))
+                merged[name]["all_scores"].extend(new_scores)
+                # Recompute mean/std over all seeds
+                all_s = merged[name]["all_scores"]
+                merged[name]["score"] = float(np.mean(all_s))
+                merged[name]["score_std"] = float(np.std(all_s))
+
+    pretrained_score = float(np.mean(pretrained_scores))
+    return merged, pretrained_score, config
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +395,41 @@ def main(argv: list[str] | None = None) -> None:
                 len(results), list(results.keys()),
             )
 
+        generate_summary_tables(results, pretrained_score, output_dir)
+        generate_all_plots(results, pretrained_score, output_dir)
+        generate_diagnosis_report(results, pretrained_score, output_dir)
+        logger.info("Analysis complete. Outputs in %s", output_dir)
+        return
+
+    # Merge mode: combine results from independent runs
+    if args.merge:
+        for p in args.merge:
+            if not Path(p).exists():
+                parser.error(f"Results file not found: {p}")
+        logger.info(
+            "Merging %d results files: %s", len(args.merge), args.merge,
+        )
+        results, pretrained_score, config = _merge_result_files(args.merge)
+        logger.info(
+            "Merged %d ablation(s): %s",
+            len(results), list(results.keys()),
+        )
+        for name, res in results.items():
+            n = len(res["all_scores"])
+            logger.info(
+                "  %s: %.4f +/- %.4f  (%d seed%s)",
+                name, res["score"], res["score_std"], n,
+                "s" if n != 1 else "",
+            )
+
+        # Save merged results
+        merged_path = output_dir / "results.json"
+        merged_path.write_bytes(
+            _results_to_json(results, pretrained_score, config),
+        )
+        logger.info("Saved merged results to %s", merged_path)
+
+        # Regenerate analysis
         generate_summary_tables(results, pretrained_score, output_dir)
         generate_all_plots(results, pretrained_score, output_dir)
         generate_diagnosis_report(results, pretrained_score, output_dir)
