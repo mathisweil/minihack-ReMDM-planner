@@ -67,6 +67,9 @@ _EPS: float = 1e-5
 def _wandb_log(metrics: dict[str, float], step: int) -> None:
     """Log metrics to wandb if available, guarded against import/init failure.
 
+    Always injects ``"iteration": step`` so that
+    ``define_metric(ns, step_metric="iteration")`` works correctly.
+
     Args:
         metrics: Flat ``{namespace/key: value}`` dict.
         step: Global iteration index.
@@ -74,7 +77,7 @@ def _wandb_log(metrics: dict[str, float], step: int) -> None:
     try:
         import wandb
         if wandb.run is not None:
-            wandb.log(metrics, step=step)
+            wandb.log({**metrics, "iteration": step}, step=step)
     except Exception:
         pass
 
@@ -491,6 +494,7 @@ def run_ablation(
     checkpoint_path: str,
     device: torch.device,
     seed: int = 0,
+    wandb_step_offset: int = 0,
 ) -> tuple[AblationHistory, float, nn.Module]:
     """Run one complete ablation experiment.
 
@@ -503,6 +507,8 @@ def run_ablation(
         checkpoint_path: Path to pretrained DAgger checkpoint.
         device: Torch device.
         seed: Random seed.
+        wandb_step_offset: Global step offset so that wandb steps are
+            monotonically increasing across ablations/seeds.
 
     Returns:
         Tuple of (history, final_score, final_state_dict).
@@ -982,7 +988,10 @@ def run_ablation(
             )
 
         # -- Emit all metrics to wandb --
-        _wandb_log(wb_metrics, step=iteration)
+        # Add ablation name prefix and use global step offset
+        wb_metrics["iteration"] = wandb_step_offset + iteration
+        wb_metrics["train/ablation_local_iter"] = iteration
+        _wandb_log(wb_metrics, step=wandb_step_offset + iteration)
 
     # -- Final evaluation --
     final_model = ema.make_eval_model(raw_model)
