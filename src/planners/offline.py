@@ -21,7 +21,7 @@ from src.buffer import ReplayBuffer
 from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
-from src.models.denoiser import ModelEMA, make_model
+from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.logging import Logger
 
 logger = logging.getLogger(__name__)
@@ -232,11 +232,7 @@ def run_offline(cfg, data_path: str | None) -> None:
     raw_model = make_model(cfg).to(device)
 
     # torch.compile: wrap for training only; shares params with raw_model
-    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
-        logger.info("Compiling model with torch.compile")
-        model = torch.compile(raw_model, mode="default")
-    else:
-        model = raw_model
+    model = try_compile(raw_model, cfg)
 
     ema = ModelEMA(raw_model, decay=cfg.ema_decay)
 

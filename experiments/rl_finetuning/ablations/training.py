@@ -55,7 +55,7 @@ from experiments.rl_finetuning.diagnostics.timestep import (
     compute_t_analysis,
 )
 from src.diffusion.schedules import get_schedule
-from src.models.denoiser import ModelEMA, make_model
+from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import run_model_episode
 from src.planners.inference import Evaluator
 
@@ -585,11 +585,7 @@ def run_ablation(
         optimizer = spec.optimizer_factory(cfg, raw_model)
 
     # torch.compile: wrap for training only; shares parameters with raw_model
-    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
-        logger.info("  Compiling model with torch.compile")
-        model = torch.compile(raw_model, mode="default")
-    else:
-        model = raw_model
+    model = try_compile(raw_model, cfg)
 
     # Loss context and function (ref_model is never compiled)
     ctx = LossContext(ref_model=ref_model, schedule_fn=schedule_fn, cfg=cfg)
