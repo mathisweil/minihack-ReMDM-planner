@@ -150,8 +150,9 @@ class AdvancedObservationEnv(gym.Env):
         Returns:
             ``(obs, shaped_reward, terminated, truncated, info)``
         """
-        if action >= self.action_space.n:
-            action = 0
+        inner_n = self._inner.action_space.n
+        if action >= inner_n:
+            action = action % inner_n
 
         obs, raw_reward, terminated, truncated, info = self._inner.step(action)
         self.last_raw_obs = obs
