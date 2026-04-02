@@ -592,6 +592,14 @@ def run_ablation(
     # Evaluator
     evaluator = Evaluator()
 
+    # AMP (mixed precision)
+    _use_amp = (
+        getattr(cfg, "use_amp", False) and device.type == "cuda"
+    )
+    scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
+    if _use_amp:
+        logger.info("  AMP enabled for ablation training.")
+
     # Config values
     max_iter = getattr(cfg, "max_iter", 1000)
     batch_size = cfg.batch_size
@@ -765,17 +773,21 @@ def run_ablation(
             if spec.gradient_surgery:
                 # PCGrad: compute RL grad, BC grad, project
                 optimizer.zero_grad()
-                rl_loss = loss_fn(
-                    model, local_b, global_b, x0_b, adv_b, cfg, device,
-                )
-                rl_loss.backward()
+                with torch.amp.autocast("cuda", enabled=_use_amp):
+                    rl_loss = loss_fn(
+                        model, local_b, global_b, x0_b, adv_b, cfg, device,
+                    )
+                scaler.scale(rl_loss).backward()
+                scaler.unscale_(optimizer)
                 g_rl = collect_gradients(model)
 
                 optimizer.zero_grad()
-                bc_loss = bc_loss_fn(
-                    model, local_b, global_b, x0_b, None, cfg, device,
-                )
-                bc_loss.backward()
+                with torch.amp.autocast("cuda", enabled=_use_amp):
+                    bc_loss = bc_loss_fn(
+                        model, local_b, global_b, x0_b, None, cfg, device,
+                    )
+                scaler.scale(bc_loss).backward()
+                scaler.unscale_(optimizer)
                 g_bc = collect_gradients(model)
 
                 g_proj = gradient_surgery(g_rl, g_bc)
@@ -784,19 +796,23 @@ def run_ablation(
                     [p for p in model.parameters() if p.requires_grad],
                     max_grad_norm,
                 ).item()
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 loss_val = rl_loss.item()
             else:
                 optimizer.zero_grad()
-                loss_val_t = loss_fn(
-                    model, local_b, global_b, x0_b, adv_b, cfg, device,
-                )
-                loss_val_t.backward()
+                with torch.amp.autocast("cuda", enabled=_use_amp):
+                    loss_val_t = loss_fn(
+                        model, local_b, global_b, x0_b, adv_b, cfg, device,
+                    )
+                scaler.scale(loss_val_t).backward()
+                scaler.unscale_(optimizer)
                 grad_norm_val = torch.nn.utils.clip_grad_norm_(
                     [p for p in model.parameters() if p.requires_grad],
                     max_grad_norm,
                 ).item()
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 loss_val = loss_val_t.item()
 
             ema.update(model)
@@ -880,9 +896,10 @@ def run_ablation(
         if iteration % per_layer_every == 0:
             model.train()
             model.zero_grad()
-            diag_loss = loss_fn(
-                model, local_b, global_b, x0_b, adv_b, cfg, device,
-            )
+            with torch.amp.autocast("cuda", enabled=_use_amp):
+                diag_loss = loss_fn(
+                    model, local_b, global_b, x0_b, adv_b, cfg, device,
+                )
             diag_loss.backward()
             norms = compute_per_layer_grad_norms(model)
             model.zero_grad()
