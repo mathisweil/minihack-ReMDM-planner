@@ -430,22 +430,28 @@ def main(argv: list[str] | None = None) -> None:
         seed_histories: list[AblationHistory] = []
         trained_model: torch.nn.Module | None = None
 
-        for seed_idx in range(num_seeds):
-            abl_seed = base_seed + seed_idx * 1000
-            logger.info(
-                "Running %s (seed %d/%d)...",
-                abl_name, seed_idx + 1, num_seeds,
-            )
+        try:
+            for seed_idx in range(num_seeds):
+                abl_seed = base_seed + seed_idx * 1000
+                logger.info(
+                    "Running %s (seed %d/%d)...",
+                    abl_name, seed_idx + 1, num_seeds,
+                )
 
-            history, final_score, trained_model = run_ablation(
-                spec=spec,
-                cfg=cfg,
-                checkpoint_path=checkpoint_path,
-                device=device,
-                seed=abl_seed,
+                history, final_score, trained_model = run_ablation(
+                    spec=spec,
+                    cfg=cfg,
+                    checkpoint_path=checkpoint_path,
+                    device=device,
+                    seed=abl_seed,
+                )
+                seed_scores.append(final_score)
+                seed_histories.append(history)
+        except Exception:
+            logger.exception(
+                "Ablation '%s' FAILED — skipping to next.", abl_name,
             )
-            seed_scores.append(final_score)
-            seed_histories.append(history)
+            continue
 
         mean_score = float(np.mean(seed_scores))
         std_score = float(np.std(seed_scores))
