@@ -46,7 +46,7 @@ remask_strategy: conf
 diffusion_steps_eval: 10
 temperature: 0.5
 top_k: 4
-replan_every: 8
+replan_every: 16
 # Soft-penalise hazardous cardinal actions during stochastic sampling.
 # Not active in the reference evaluation pipeline; off by default.
 physics_aware_sampling: false
