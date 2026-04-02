@@ -51,11 +51,13 @@ def _flat_grad_at_range(
     Returns:
         1-D flattened gradient vector.
     """
+    _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
     model.zero_grad()
-    loss = _core_loss(
-        model, local_obs, global_obs, x0, advantages, cfg, device,
-        t_min=t_min, t_max=t_max,
-    )
+    with torch.amp.autocast("cuda", enabled=_use_amp):
+        loss = _core_loss(
+            model, local_obs, global_obs, x0, advantages, cfg, device,
+            t_min=t_min, t_max=t_max,
+        )
     loss.backward()
 
     parts: list[Tensor] = []

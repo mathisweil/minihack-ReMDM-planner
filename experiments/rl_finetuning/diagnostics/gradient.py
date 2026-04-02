@@ -70,20 +70,23 @@ def compute_grad_alignment(
         Tuple of (cosine_similarity, rl_grad_norm, bc_grad_norm).
     """
     model.train()
+    _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
 
     # RL gradient
     model.zero_grad()
-    rl_loss = _core_loss(
-        model, local_obs, global_obs, x0, advantages, cfg, device,
-    )
+    with torch.amp.autocast("cuda", enabled=_use_amp):
+        rl_loss = _core_loss(
+            model, local_obs, global_obs, x0, advantages, cfg, device,
+        )
     rl_loss.backward()
     g_rl = _collect_flat_grad(model)
 
     # BC gradient (no advantage weighting)
     model.zero_grad()
-    bc_loss = _core_loss(
-        model, local_obs, global_obs, x0, None, cfg, device,
-    )
+    with torch.amp.autocast("cuda", enabled=_use_amp):
+        bc_loss = _core_loss(
+            model, local_obs, global_obs, x0, None, cfg, device,
+        )
     bc_loss.backward()
     g_bc = _collect_flat_grad(model)
 

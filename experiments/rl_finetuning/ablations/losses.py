@@ -696,6 +696,7 @@ def estimate_fisher_diagonal(
         for name, param in model.named_parameters()
     }
 
+    _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
     model.train()
     for local_obs, global_obs, x0 in batches:
         local_obs = local_obs.to(device)
@@ -703,9 +704,10 @@ def estimate_fisher_diagonal(
         x0 = x0.to(device)
 
         model.zero_grad()
-        loss = _core_loss(
-            model, local_obs, global_obs, x0, None, cfg, device
-        )
+        with torch.amp.autocast("cuda", enabled=_use_amp):
+            loss = _core_loss(
+                model, local_obs, global_obs, x0, None, cfg, device
+            )
         loss.backward()
 
         for name, param in model.named_parameters():
