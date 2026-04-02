@@ -10,7 +10,7 @@
 # Iterations per ablation run.  Range: [50, 5000].
 max_iter: 1000
 # Gradient batch size drawn from collected rollout windows.
-batch_size: 2048
+batch_size: 3072
 # Learning rate for ablation fine-tuning.  Range: [1e-5, 1e-3].
 lr: 3.0e-4
 # AdamW weight decay.  Reference uses 1e-4.  Range: [0, 0.1].
@@ -20,7 +20,7 @@ max_grad_norm: 1.0
 # Number of gradient steps per iteration.
 grad_steps_per_iter: 1
 # Episodes to collect per iteration (model self-play).  Range: [1, 50].
-episodes_per_iter: 10
+episodes_per_iter: 30
 
 # -- Evaluation ---------------------------------------------------------------
 # Evaluate ID+OOD every N iterations.  Range: [10, 200].

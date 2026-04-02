@@ -64,7 +64,7 @@ dagger_batch_size: 2048
 dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
-episodes_per_iteration: 10
+episodes_per_iteration: 30
 grad_steps_per_iteration: 100
 efficiency_multiplier: 1.5
 curriculum_queue_size: 100

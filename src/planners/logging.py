@@ -111,10 +111,11 @@ class Logger:
                 wandb.define_metric("iteration")
                 for ns in (
                     "diffusion/*", "train/*", "perf/*", "speed/*",
-                    "online/*", "model/*",
+                    "model/*",
                     "eval_id/*", "eval_ood/*",
                     "curriculum/*",
                     "ckpt_eval_id/*", "ckpt_eval_ood/*", "ckpt_eval/*",
+                    "inference/*",
                 ):
                     wandb.define_metric(ns, step_metric="iteration")
             except Exception:
@@ -143,7 +144,8 @@ class Logger:
         if self._use_wandb and self._run is not None:
             try:
                 import wandb
-                wandb.log(metrics, step=step)
+                # Include "iteration" so define_metric(step_metric="iteration") works
+                wandb.log({**metrics, "iteration": step}, step=step)
             except Exception:
                 pass
 

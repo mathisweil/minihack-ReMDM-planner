@@ -434,6 +434,8 @@ def main(argv: list[str] | None = None) -> None:
     num_seeds = args.num_seeds or getattr(cfg, "num_seeds", 1)
     base_seed = args.seed if args.seed is not None else (getattr(cfg, "seed", None) or 0)
     results: dict[str, dict] = {}
+    max_iter = getattr(cfg, "max_iter", 1000)
+    wandb_global_step = 0  # monotonically increasing across ablations/seeds
 
     for abl_name in selected:
         spec = REGISTRY[abl_name]
@@ -455,7 +457,9 @@ def main(argv: list[str] | None = None) -> None:
                     checkpoint_path=checkpoint_path,
                     device=device,
                     seed=abl_seed,
+                    wandb_step_offset=wandb_global_step,
                 )
+                wandb_global_step += max_iter
                 seed_scores.append(final_score)
                 seed_histories.append(history)
         except Exception:
