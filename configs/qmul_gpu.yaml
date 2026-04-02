@@ -53,14 +53,14 @@ physics_aware_sampling: false
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
-offline_batch_size: 2048
+offline_batch_size: 3072
 offline_grad_clip: 1.0
 offline_epochs: 30
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 2048
+dagger_batch_size: 3072
 dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
@@ -86,7 +86,7 @@ use_amp: true
 torch_compile: true
 # Number of parallel workers for DAgger episode collection.
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
-num_collection_workers: 5
+num_collection_workers: 8
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
