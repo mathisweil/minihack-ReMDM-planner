@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+llrd,A,0.55,-0.05,-0.05,NEUTRAL

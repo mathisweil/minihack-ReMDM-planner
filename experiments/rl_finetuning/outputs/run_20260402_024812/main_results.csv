@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+t_curriculum,B,0.75,0.15,0.15,IMPROVEMENT

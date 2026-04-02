@@ -109,7 +109,7 @@ reward_model_lr: 1.0e-3
 reward_model_train_steps: 50
 
 # -- Output / Logging --------------------------------------------------------
-ablation_use_wandb: false
+ablation_use_wandb: true
 ablation_wandb_project: "remdm-minihack-ablations"
 
 # -- Multi-seed ---------------------------------------------------------------

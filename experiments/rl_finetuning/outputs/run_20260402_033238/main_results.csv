@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+layer_ablation_top2,C,0.8,0.25,0.25,IMPROVEMENT

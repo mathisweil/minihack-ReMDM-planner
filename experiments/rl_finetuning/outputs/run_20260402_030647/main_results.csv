@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+normalized_adv,B,0.55,-0.2,-0.2,COLLAPSE

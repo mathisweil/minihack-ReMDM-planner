@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+gradient_surgery,B,0.55,-0.3,-0.3,COLLAPSE
