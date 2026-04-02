@@ -49,7 +49,9 @@ def _df_to_latex(
         f"\\label{{{label}}}",
         f"\\begin{{tabular}}{{{col_spec}}}",
         "\\toprule",
-        " & ".join(f"\\textbf{{{c}}}" for c in cols) + " \\\\",
+        " & ".join(
+            f"\\textbf{{{c.replace('_', chr(92) + '_')}}}" for c in cols
+        ) + " \\\\",
         "\\midrule",
     ]
     for row in df.iter_rows():
@@ -58,7 +60,7 @@ def _df_to_latex(
             if isinstance(val, float):
                 cells.append(f"{val:.4f}")
             else:
-                cells.append(str(val))
+                cells.append(str(val).replace("_", r"\_"))
         lines.append(" & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     return "\n".join(lines)

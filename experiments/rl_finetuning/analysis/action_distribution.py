@@ -50,10 +50,10 @@ MINIHACK_ACTIONS: dict[int, str] = {
     5: "SE",
     6: "SW",
     7: "NW",
-    8: "PICKUP",
-    9: "DROP",
-    10: "KICK",
-    11: "OPEN",
+    8: "UP",
+    9: "DWN",
+    10: "WAIT",
+    11: "KICK",
 }
 
 _DPI = 150
