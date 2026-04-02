@@ -6,9 +6,9 @@ wandb/
 res/
 runs/
 data/
-checkpoints/
+checkpoints/*
+!checkpoints/*.pth
 play_data/
-reference/
 texture_cache.pbz2
 texture_cache*.pbz2
 
@@ -259,3 +259,5 @@ __marimo__/
 .DS_Store
 
 #Claude specific
+.claude/
+CLAUDE.md
