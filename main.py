@@ -183,6 +183,8 @@ def main() -> None:
     args, extras = parse_args()
     validate(args)
     cfg = build_config(args, extras)
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision("high")
     run_mode(args.mode, cfg, args)
 
 
