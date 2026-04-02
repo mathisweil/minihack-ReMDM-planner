@@ -370,6 +370,10 @@ def main(argv: list[str] | None = None) -> None:
         cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(cfg.device)
 
+    # Enable TF32 for faster float32 matmuls on Ampere+ GPUs
+    if device.type == "cuda":
+        torch.set_float32_matmul_precision("high")
+
     # Checkpoint (resolve W&B artifact if needed)
     if not args.checkpoint:
         parser.error("--checkpoint is required for training mode.")

@@ -20,7 +20,7 @@ n_embd: 256
 n_head: 4
 n_layer: 4
 n_global_tokens: 8
-seq_len: 128
+seq_len: 64
 global_gate_init: -3.0
 # Transformer dropout. 0.0 is deliberate — discrete diffusion forward masking
 # already regularises; dropout on top is redundant.
@@ -60,7 +60,7 @@ aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 3584
+dagger_batch_size: 2048
 dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
