@@ -20,7 +20,7 @@ n_embd: 256
 n_head: 4
 n_layer: 4
 n_global_tokens: 8
-seq_len: 64
+seq_len: 128
 global_gate_init: -3.0
 # Transformer dropout. 0.0 is deliberate — discrete diffusion forward masking
 # already regularises; dropout on top is redundant.
@@ -80,7 +80,7 @@ checkpoint_eval_episodes: 50
 # ── Performance ──────────────────────────────────────────────────────
 # Mixed-precision (FP16) training via torch.cuda.amp.
 # Speeds up forward/backward ~1.5-2x on GPU. No effect on CPU.
-use_amp: false
+use_amp: true
 # torch.compile the model for fused kernels (experimental).
 # May cause slow first iteration due to compilation. No effect on CPU.
 torch_compile: false
