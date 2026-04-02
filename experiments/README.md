@@ -87,6 +87,54 @@ python experiments/rl_finetuning/run_ablations.py \
     --ablations baseline_rl kl_penalty ewc
 ```
 
+**Spread across GPUs, then merge:**
+
+Run independent subsets on different machines or GPUs, then combine:
+
+```bash
+# GPU 0
+CUDA_VISIBLE_DEVICES=0 python experiments/rl_finetuning/run_ablations.py \
+    --checkpoint ckpt.pth \
+    --ablations baseline_rl kl_penalty ewc llrd lora mixed_replay \
+    --output_dir outputs/gpu0
+
+# GPU 1
+CUDA_VISIBLE_DEVICES=1 python experiments/rl_finetuning/run_ablations.py \
+    --checkpoint ckpt.pth \
+    --ablations trust_region_kl low_t t_curriculum entropy_bonus \
+    --output_dir outputs/gpu1
+
+# Merge and regenerate all analysis
+python experiments/rl_finetuning/run_ablations.py \
+    --merge outputs/gpu0/results.json outputs/gpu1/results.json \
+    --output_dir outputs/combined
+```
+
+`--merge` accepts any number of `results.json` files. When the same ablation
+appears in multiple files (e.g. different seeds on different GPUs), the
+per-seed scores are concatenated and mean/std are recomputed over the union:
+
+```bash
+# Seed 0 on GPU 0
+python experiments/rl_finetuning/run_ablations.py \
+    --checkpoint ckpt.pth --ablations baseline_rl --seed 0 \
+    --output_dir outputs/seed0
+
+# Seed 1000 on GPU 1
+python experiments/rl_finetuning/run_ablations.py \
+    --checkpoint ckpt.pth --ablations baseline_rl --seed 1000 \
+    --output_dir outputs/seed1
+
+# Merge: aggregates both seeds into one entry
+python experiments/rl_finetuning/run_ablations.py \
+    --merge outputs/seed0/results.json outputs/seed1/results.json \
+    --output_dir outputs/merged
+# → baseline_rl: 0.6250 +/- 0.0250 (2 seeds)
+```
+
+The merged `results.json` is identical in format to a single-run file and can
+be used with `--analyze_only` for further filtering or re-plotting.
+
 ### Ablations
 
 | Group | Name | Tests |
@@ -150,6 +198,7 @@ experiments/rl_finetuning/outputs/{run_id}/
     "kl_penalty": {
       "score": 0.1456,
       "score_std": 0.008,
+      "all_scores": [0.14, 0.15, 0.14],
       "history": { ... }
     }
   }
@@ -157,7 +206,45 @@ experiments/rl_finetuning/outputs/{run_id}/
 ```
 
 `results.json` is written incrementally after each ablation completes -- a partial file
-with N of 25 ablations is fully valid and loadable by `--analyze_only`.
+with N of 25 ablations is fully valid and loadable by `--analyze_only` or `--merge`.
+
+### CLI reference
+
+| Flag | Description |
+|---|---|
+| `--checkpoint PATH` | Pretrained DAgger checkpoint (`.pth` or `wandb://` artifact) |
+| `--all` | Run all 25 ablations |
+| `--ablations NAME [NAME ...]` | Run specific ablations by name |
+| `--list` | Print registered ablations and exit |
+| `--fast` | Smoke-test mode (50 iterations, 20 eval episodes) |
+| `--num_seeds N` | Number of seeds per ablation (default: 1) |
+| `--seed N` | Base random seed |
+| `--output_dir DIR` | Output directory (default: auto-timestamped) |
+| `--analyze_only` | Skip training, regenerate analysis from existing results |
+| `--results_path PATH` | Explicit path to `results.json` (with `--analyze_only`) |
+| `--merge JSON [JSON ...]` | Merge multiple `results.json` files and regenerate analysis |
+| `--use_wandb` | Enable W&B logging |
+| `--wandb_project NAME` | W&B project name (default: `remdm-minihack-ablations`) |
+| `--max_iter N` | Override max training iterations |
+| `--batch_size N` | Override batch size |
+| `--eval_every N` | Override evaluation frequency |
+| `--lr FLOAT` | Override learning rate |
+| `--device DEVICE` | Torch device (default: auto-detect) |
+
+### W&B logging
+
+When `--use_wandb` is passed, all training dynamics are logged in real time:
+
+| Namespace | Metrics | Frequency |
+|---|---|---|
+| `train/` | `loss`, `learning_rate`, `grad_norm`, `effective_batch_size`, `ablation_local_iter` | Every iteration |
+| `online/` | `win_rate`, `mean_return` | Every iteration |
+| `speed/` | `iter_time_sec`, `collect_time_sec`, `train_step_time_sec`, `gpu_memory_mb` | Every iteration |
+| `model/` | `param_norm`, `param_drift_from_init`, `ema_gate_value` | Every 10 iterations |
+| `eval/` | `id_win_rate`, `per_env/{env}/win_rate` | Every `eval_every` |
+| `diag/` | `grad_alignment_cos`, `repr_drift_kl`, `cka_similarity`, `t_grad_norm_low/high` | At diagnostic intervals |
+
+Final scores per ablation are written to `wandb.summary`.
 
 ### Diagnostic metrics collected
 
