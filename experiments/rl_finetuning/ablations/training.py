@@ -531,11 +531,11 @@ def run_ablation(
     random.seed(seed)
 
     # Load pretrained model
-    model = make_model(cfg).to(device)
+    raw_model = make_model(cfg).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model.load_state_dict(ckpt["ema_state_dict"])
+    raw_model.load_state_dict(ckpt["ema_state_dict"])
 
-    ref_model = copy.deepcopy(model)
+    ref_model = copy.deepcopy(raw_model)
     ref_model.eval()
     for p in ref_model.parameters():
         p.requires_grad = False
@@ -544,8 +544,8 @@ def run_ablation(
     schedule_fn = get_schedule(cfg.noise_schedule)
     cfg._schedule_fn = schedule_fn
 
-    # EMA
-    ema = ModelEMA(model, decay=getattr(cfg, "ema_decay", 0.999))
+    # EMA (always uses raw_model; deepcopy breaks on compiled models)
+    ema = ModelEMA(raw_model, decay=getattr(cfg, "ema_decay", 0.999))
 
     # EWC Fisher estimation
     fisher = None
@@ -553,7 +553,7 @@ def run_ablation(
         n_batches = getattr(cfg, "ewc_fisher_batches", 20)
         logger.info("  Estimating Fisher diagonal (%d batches)...", n_batches)
         fisher_batches: list[tuple[Tensor, Tensor, Tensor]] = []
-        eval_model = ema.make_eval_model(model)
+        eval_model = ema.make_eval_model(raw_model)
         for _ in range(n_batches):
             lo, go, x0, _ = collect_training_data(
                 eval_model, cfg, device, n_episodes=1,
@@ -562,7 +562,7 @@ def run_ablation(
                 bs = min(lo.shape[0], cfg.batch_size)
                 fisher_batches.append((lo[:bs], go[:bs], x0[:bs]))
         fisher = estimate_fisher_diagonal(
-            model, schedule_fn, cfg, fisher_batches, device,
+            raw_model, schedule_fn, cfg, fisher_batches, device,
         )
         logger.info("  Fisher diagonal estimated.")
 
@@ -571,14 +571,21 @@ def run_ablation(
     if spec.use_lora:
         lora_rank = getattr(cfg, "lora_rank", 8)
         lora_alpha = getattr(cfg, "lora_alpha", 16.0)
-        lora_params = apply_lora_to_model(model, lora_rank, lora_alpha)
+        lora_params = apply_lora_to_model(raw_model, lora_rank, lora_alpha)
         # Re-initialize EMA after LoRA changes the model's state_dict keys
-        ema = ModelEMA(model, decay=getattr(cfg, "ema_decay", 0.999))
+        ema = ModelEMA(raw_model, decay=getattr(cfg, "ema_decay", 0.999))
         optimizer = make_optimizer_lora(cfg, lora_params)
     else:
-        optimizer = spec.optimizer_factory(cfg, model)
+        optimizer = spec.optimizer_factory(cfg, raw_model)
 
-    # Loss context and function
+    # torch.compile: wrap for training only; shares parameters with raw_model
+    if getattr(cfg, "torch_compile", False) and hasattr(torch, "compile"):
+        logger.info("  Compiling model with torch.compile")
+        model = torch.compile(raw_model, mode="default")
+    else:
+        model = raw_model
+
+    # Loss context and function (ref_model is never compiled)
     ctx = LossContext(ref_model=ref_model, schedule_fn=schedule_fn, cfg=cfg)
     extra_kwargs = {}
     if fisher is not None:
@@ -649,14 +656,14 @@ def run_ablation(
 
     # Snapshot initial state for param drift tracking
     _init_state = {
-        k: v.clone() for k, v in model.state_dict().items()
+        k: v.clone() for k, v in raw_model.state_dict().items()
         if v.is_floating_point()
     }
 
     # Log model param counts to wandb
-    total_params = sum(p.numel() for p in model.parameters())
+    total_params = sum(p.numel() for p in raw_model.parameters())
     trainable_params = sum(
-        p.numel() for p in model.parameters() if p.requires_grad
+        p.numel() for p in raw_model.parameters() if p.requires_grad
     )
     try:
         import wandb
@@ -677,7 +684,7 @@ def run_ablation(
 
         # -- Collect episodes --
         collect_start = time.perf_counter()
-        eval_model = ema.make_eval_model(model)
+        eval_model = ema.make_eval_model(raw_model)
         local_obs, global_obs, x0, returns = collect_training_data(
             eval_model, cfg, device, episodes_per_iter,
         )
@@ -815,7 +822,7 @@ def run_ablation(
                 scaler.update()
                 loss_val = loss_val_t.item()
 
-            ema.update(model)
+            ema.update(raw_model)
 
         # -- Metrics --
         train_time = time.perf_counter() - train_start
@@ -854,19 +861,19 @@ def run_ablation(
             )
 
         # Global gate value
-        if hasattr(model, "global_gate"):
-            gate_val = torch.sigmoid(model.global_gate).item()
+        if hasattr(raw_model, "global_gate"):
+            gate_val = torch.sigmoid(raw_model.global_gate).item()
             wb_metrics["model/ema_gate_value"] = gate_val
 
         # Model health (every 10 iters)
         if iteration % 10 == 0:
             p_norm = sum(
-                p.data.norm(2).item() ** 2 for p in model.parameters()
+                p.data.norm(2).item() ** 2 for p in raw_model.parameters()
             ) ** 0.5
             wb_metrics["model/param_norm"] = p_norm
             drift = sum(
                 (p.data - _init_state[n]).norm(2).item() ** 2
-                for n, p in model.named_parameters()
+                for n, p in raw_model.named_parameters()
                 if n in _init_state
             ) ** 0.5
             wb_metrics["model/param_drift_from_init"] = drift
@@ -949,7 +956,7 @@ def run_ablation(
 
         # -- Evaluation --
         if iteration % eval_every == 0:
-            eval_model = ema.make_eval_model(model)
+            eval_model = ema.make_eval_model(raw_model)
             results = evaluator.evaluate(
                 cfg.id_envs, eval_model, eval_episodes, cfg, device,
             )
@@ -978,7 +985,7 @@ def run_ablation(
         _wandb_log(wb_metrics, step=iteration)
 
     # -- Final evaluation --
-    final_model = ema.make_eval_model(model)
+    final_model = ema.make_eval_model(raw_model)
     final_results = evaluator.evaluate(
         cfg.id_envs, final_model, eval_episodes, cfg, device,
     )
@@ -990,6 +997,6 @@ def run_ablation(
 
     # Clean up LoRA
     if spec.use_lora:
-        remove_lora_from_model(model)
+        remove_lora_from_model(raw_model)
 
-    return history, final_score, model
+    return history, final_score, raw_model
