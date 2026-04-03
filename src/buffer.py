@@ -34,6 +34,12 @@ class ReplayBuffer:
         self._offline: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
         self._online: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
 
+        # Stacked array cache for fast sampling
+        self._cache_valid = False
+        self._cached_local: np.ndarray | None = None
+        self._cached_global: np.ndarray | None = None
+        self._cached_actions: np.ndarray | None = None
+
     # ── Offline data ─────────────────────────────────────────────
 
     def load_offline_data(
@@ -73,6 +79,7 @@ class ReplayBuffer:
         # Truncate to capacity
         if len(self._offline) > self._capacity:
             self._offline = self._offline[: self._capacity]
+        self._invalidate_cache()
 
     def _load_legacy_offline_data(
         self,
@@ -113,6 +120,7 @@ class ReplayBuffer:
 
         if len(self._offline) > self._capacity:
             self._offline = self._offline[: self._capacity]
+        self._invalidate_cache()
 
     @staticmethod
     def _unpack_legacy_sample(
@@ -137,6 +145,34 @@ class ReplayBuffer:
 
     # ── Online data ──────────���───────────────────────────────────
 
+    def _invalidate_cache(self) -> None:
+        """Mark the stacked array cache as stale."""
+        self._cache_valid = False
+
+    def _ensure_cache(self) -> None:
+        """Rebuild stacked arrays from offline + online windows."""
+        if self._cache_valid:
+            return
+        combined = self._offline + self._online
+        if not combined:
+            return
+        n = len(combined)
+        l0, g0, a0 = combined[0]
+        self._cached_local = np.empty(
+            (n, *l0.shape), dtype=l0.dtype,
+        )
+        self._cached_global = np.empty(
+            (n, *g0.shape), dtype=g0.dtype,
+        )
+        self._cached_actions = np.empty(
+            (n, *a0.shape), dtype=a0.dtype,
+        )
+        for i, (l, g, a) in enumerate(combined):
+            self._cached_local[i] = l
+            self._cached_global[i] = g
+            self._cached_actions[i] = a
+        self._cache_valid = True
+
     def add(self, trajectory: dict) -> None:
         """Add a trajectory, sliced into overlapping windows.
 
@@ -152,6 +188,7 @@ class ReplayBuffer:
         if len(self._online) > max_online:
             excess = len(self._online) - max_online
             self._online = self._online[excess:]
+        self._invalidate_cache()
 
     # ── Sampling ─────────────────────────────────────────────────
 
@@ -169,19 +206,14 @@ class ReplayBuffer:
         """
         if len(self) == 0:
             return None
-        combined = self._offline + self._online
-        n = len(combined)
-        indices = np.random.randint(0, n, size=batch_size)
-        locals_list, globals_list, actions_list = [], [], []
-        for i in indices:
-            l, g, a = combined[i]
-            locals_list.append(l)
-            globals_list.append(g)
-            actions_list.append(a)
+        self._ensure_cache()
+        if self._cached_local is None:
+            return None
+        indices = np.random.randint(0, len(self), size=batch_size)
         return (
-            np.stack(locals_list),
-            np.stack(globals_list),
-            np.stack(actions_list),
+            self._cached_local[indices],
+            self._cached_global[indices],
+            self._cached_actions[indices],
         )
 
     # ── Properties ─────────��─────────────────────────────────────
@@ -193,6 +225,11 @@ class ReplayBuffer:
     @property
     def n_offline(self) -> int:
         """Number of pinned offline windows."""
+        return len(self._offline)
+
+    @property
+    def offline_size(self) -> int:
+        """Number of pinned offline windows (alias)."""
         return len(self._offline)
 
     # ── Internals ───────────────────────────────────────────���────

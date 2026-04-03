@@ -281,6 +281,7 @@ def greedy_sample(
     cfg: SimpleNamespace,
     device: torch.device | str,
     blind_global: bool = False,
+    num_steps: int | None = None,
 ) -> Tensor:
     """Greedy (argmax) MaskGIT sampling — no temperature, top-K, or remasking.
 
@@ -302,7 +303,7 @@ def greedy_sample(
     seq_len = cfg.seq_len
     mask_token = cfg.mask_token
     action_dim = cfg.action_dim
-    K = cfg.diffusion_steps_eval
+    K = num_steps if num_steps is not None else cfg.diffusion_steps_eval
 
     local_obs = local_obs.to(device)
     global_obs = global_obs.to(device)
