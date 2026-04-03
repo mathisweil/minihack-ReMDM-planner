@@ -54,14 +54,14 @@ physics_aware_sampling: false
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
-offline_batch_size: 5632
+offline_batch_size: 5120
 offline_grad_clip: 1.0
 offline_epochs: 30
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 5632
+dagger_batch_size: 5120
 dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
