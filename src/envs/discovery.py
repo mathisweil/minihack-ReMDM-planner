@@ -87,22 +87,25 @@ def check_action_consistency_with_fixed_ref(
             continue
         try:
             env = gym.make(env_id)
-            env_actions = env.unwrapped.actions  # type: ignore[attr-defined]
-            limit = min(len(reference_actions), len(env_actions))
-            is_match = all(
-                reference_actions[i] == env_actions[i] for i in range(limit)
-            )
-            diff = len(env_actions) - len(reference_actions)
-            if is_match and diff == 0:
-                status = "EXACT"
-            elif diff > 0:
-                status = f"SUPERSET (+{diff})"
-            elif is_match:
-                status = f"SUBSET ({diff})"
-            else:
-                status = "CONFLICT"
-            results.append((env_id, status, len(env_actions)))
-            env.close()
+            try:
+                env_actions = env.unwrapped.actions  # type: ignore[attr-defined]
+                limit = min(len(reference_actions), len(env_actions))
+                is_match = all(
+                    reference_actions[i] == env_actions[i]
+                    for i in range(limit)
+                )
+                diff = len(env_actions) - len(reference_actions)
+                if is_match and diff == 0:
+                    status = "EXACT"
+                elif diff > 0:
+                    status = f"SUPERSET (+{diff})"
+                elif is_match:
+                    status = f"SUBSET ({diff})"
+                else:
+                    status = "CONFLICT"
+                results.append((env_id, status, len(env_actions)))
+            finally:
+                env.close()
         except Exception:
             results.append((env_id, "CRASHED", 0))
 
