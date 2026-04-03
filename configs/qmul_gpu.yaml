@@ -87,7 +87,7 @@ use_amp: true
 torch_compile: true
 # Number of parallel workers for DAgger episode collection.
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
-num_collection_workers: 8
+num_collection_workers: 30
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
