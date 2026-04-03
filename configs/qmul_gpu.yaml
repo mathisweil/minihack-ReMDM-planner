@@ -74,7 +74,7 @@ curriculum_preseed: true
 max_iterations: 8000
 id_eval_every: 50
 ood_eval_every: 50
-checkpoint_every: 250
+checkpoint_every: 200
 eval_episodes_per_env: 50
 checkpoint_eval_episodes: 50
 
