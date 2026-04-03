@@ -36,7 +36,7 @@ label_smoothing: 0.0
 # matching reference). Enable for MDLM ELBO experiments.
 use_importance_weighting: false
 # ReMDM stochastic remask base fraction
-eta: 0.15
+eta: 0.18
 # Remasking strategy: rescale | cap | conf
 remask_strategy: conf
 
@@ -44,6 +44,7 @@ remask_strategy: conf
 # Number of reverse denoising steps at inference.
 # Reference uses 5 (aggressive). Higher = better quality, slower.
 diffusion_steps_eval: 10
+diffusion_steps_collect: 5
 temperature: 0.5
 top_k: 4
 replan_every: 16

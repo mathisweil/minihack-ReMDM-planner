@@ -44,6 +44,9 @@ remask_strategy: conf
 # Number of reverse denoising steps at inference.
 # Reference uses 5 (aggressive). Higher = better quality, slower.
 diffusion_steps_eval: 10
+# Denoising steps during DAgger collection. Fewer than eval since
+# collection only needs "good enough" plans for efficiency comparison.
+diffusion_steps_collect: 5
 temperature: 0.5
 top_k: 4
 replan_every: 16

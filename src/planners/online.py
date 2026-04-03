@@ -110,9 +110,21 @@ class Trainer:
             last_stats: dict = {}
 
             collect_start = time.perf_counter()
-            if num_workers > 0 and n_eps > 1:
-                # Parallel collection (Candidate A)
-                batch_stats = self.collector.collect_batch_parallel(n_eps)
+            use_gpu_batch = (
+                str(self.device).startswith("cuda") and n_eps > 1
+            )
+            if use_gpu_batch:
+                # GPU-batched collection (all envs in lockstep)
+                batch_stats = self.collector.collect_batch_gpu(n_eps)
+                for s in batch_stats:
+                    model_wins += int(s["model_won"])
+                    added_total += int(s["added_to_buffer"])
+                    last_stats = s
+            elif num_workers > 0 and n_eps > 1:
+                # Threaded CPU collection (fallback)
+                batch_stats = self.collector.collect_batch_parallel(
+                    n_eps,
+                )
                 for s in batch_stats:
                     model_wins += int(s["model_won"])
                     added_total += int(s["added_to_buffer"])
@@ -226,6 +238,11 @@ class Trainer:
                 metrics["model/param_drift_from_init"] = compute_param_drift(
                     self._raw_model, self._init_state
                 )
+
+            # Profile breakdown from GPU-batched collection
+            _profile = getattr(self.collector, "_last_profile", {})
+            for _pk, _pv in _profile.items():
+                metrics[f"profile/{_pk}"] = _pv
 
             self.log.log(metrics, step=iteration)
 
