@@ -6,11 +6,16 @@ following the Craftax config pattern.
 
 from __future__ import annotations
 
+import logging
 import os
+import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -133,3 +138,27 @@ def load_config(
     )
 
     return ns
+
+
+def make_run_dir(cfg: SimpleNamespace, tag: str = "run") -> Path:
+    """Create a unique run subdirectory under ``cfg.checkpoint_dir``.
+
+    Generates a directory named ``{tag}_{YYYYMMDD}_{HHMMSS}_{hex4}``
+    to prevent concurrent runs from overwriting each other's
+    checkpoints. Updates ``cfg.checkpoint_dir`` in place.
+
+    Args:
+        cfg: Config namespace (``checkpoint_dir`` is mutated).
+        tag: Prefix for the directory name (e.g. ``"dagger"``,
+            ``"offline"``).
+
+    Returns:
+        The created directory path.
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    suffix = secrets.token_hex(2)
+    run_dir = Path(cfg.checkpoint_dir) / f"{tag}_{ts}_{suffix}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cfg.checkpoint_dir = str(run_dir)
+    logger.info("Checkpoint directory: %s", run_dir)
+    return run_dir

@@ -21,6 +21,8 @@ max_grad_norm: 1.0
 grad_steps_per_iter: 1
 # Episodes to collect per iteration (model self-play).  Range: [1, 50].
 episodes_per_iter: 30
+# Reduced denoising steps during collection (faster rollouts).
+diffusion_steps_collect: 5
 
 # -- Evaluation ---------------------------------------------------------------
 # Evaluate ID+OOD every N iterations.  Range: [10, 200].

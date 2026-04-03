@@ -36,7 +36,7 @@ label_smoothing: 0.0
 # matching reference). Enable for MDLM ELBO experiments.
 use_importance_weighting: false
 # ReMDM stochastic remask base fraction
-eta: 0.18
+eta: 0.15
 # Remasking strategy: rescale | cap | conf
 remask_strategy: conf
 
@@ -87,7 +87,7 @@ use_amp: true
 torch_compile: true
 # Number of parallel workers for DAgger episode collection.
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
-num_collection_workers: 16
+num_collection_workers: 32
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints

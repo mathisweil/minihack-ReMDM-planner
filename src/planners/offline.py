@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 
 from src.buffer import ReplayBuffer
+from src.config import make_run_dir
 from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
@@ -207,8 +208,9 @@ def load_offline_dataset(
         return None
 
 
-def run_offline(cfg, data_path: str | None) -> None:
+def run_offline(cfg: SimpleNamespace, data_path: str | None) -> None:
     """Offline BC training on pre-collected data."""
+    make_run_dir(cfg, tag="offline")
 
     device = cfg.device
     logger.info(f"Offline BC on {device}")
