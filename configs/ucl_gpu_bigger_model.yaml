@@ -16,8 +16,8 @@ mask_token: 12
 pad_token: 13
 
 # ── Model ─────────────────────────────────────────────────────────────
-n_embd: 256
-n_head: 4
+n_embd: 384
+n_head: 6
 n_layer: 4
 n_global_tokens: 8
 seq_len: 64
@@ -36,7 +36,7 @@ label_smoothing: 0.0
 # matching reference). Enable for MDLM ELBO experiments.
 use_importance_weighting: false
 # ReMDM stochastic remask base fraction
-eta: 0.18
+eta: 0.15
 # Remasking strategy: rescale | cap | conf
 remask_strategy: conf
 

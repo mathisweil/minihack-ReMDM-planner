@@ -54,7 +54,9 @@ from experiments.rl_finetuning.diagnostics.representation import (
 from experiments.rl_finetuning.diagnostics.timestep import (
     compute_t_analysis,
 )
+from src.diffusion.sampling import remdm_sample
 from src.diffusion.schedules import get_schedule
+from src.envs.minihack_env import make_env
 from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import run_model_episode
 from src.planners.inference import Evaluator
@@ -201,14 +203,27 @@ class MixedReplayBuffer:
             returns: ``[N]``.
         """
         n = local_obs.shape[0]
-        for i in range(n):
-            idx = self._write_idx % self.capacity
-            self._local[idx] = local_obs[i]
-            self._global[idx] = global_obs[i]
-            self._x0[idx] = x0[i]
-            self._returns[idx] = returns[i]
-            self._write_idx += 1
-            self._count = min(self._count + 1, self.capacity)
+        if n == 0:
+            return
+        start = self._write_idx % self.capacity
+        if start + n <= self.capacity:
+            self._local[start:start + n] = local_obs
+            self._global[start:start + n] = global_obs
+            self._x0[start:start + n] = x0
+            self._returns[start:start + n] = returns
+        else:
+            first = self.capacity - start
+            self._local[start:] = local_obs[:first]
+            self._global[start:] = global_obs[:first]
+            self._x0[start:] = x0[:first]
+            self._returns[start:] = returns[:first]
+            rest = n - first
+            self._local[:rest] = local_obs[first:]
+            self._global[:rest] = global_obs[first:]
+            self._x0[:rest] = x0[first:]
+            self._returns[:rest] = returns[first:]
+        self._write_idx += n
+        self._count = min(self._count + n, self.capacity)
 
     def sample(
         self, n: int,
@@ -401,6 +416,9 @@ def collect_training_data(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """Collect episodes and extract training windows.
 
+    Dispatches to GPU-batched collection when running on CUDA with
+    multiple episodes, falling back to sequential for CPU/single.
+
     Args:
         model: Eval-mode model for rollouts.
         cfg: Config namespace.
@@ -412,11 +430,32 @@ def collect_training_data(
         all windows. Returns is per-window (all windows from same
         episode share the episode return).
     """
+    if str(device).startswith("cuda") and n_episodes > 1:
+        return _collect_training_data_gpu(model, cfg, device, n_episodes)
+    return _collect_training_data_seq(model, cfg, device, n_episodes)
+
+
+def _collect_training_data_seq(
+    model: nn.Module,
+    cfg: SimpleNamespace,
+    device: torch.device,
+    n_episodes: int,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """Sequential (B=1) episode collection fallback.
+
+    Args:
+        model: Eval-mode model for rollouts.
+        cfg: Config namespace.
+        device: Torch device.
+        n_episodes: Number of episodes to collect.
+
+    Returns:
+        Tuple of (local_obs, global_obs, x0, returns).
+    """
     all_local: list[Tensor] = []
     all_global: list[Tensor] = []
     all_x0: list[Tensor] = []
     all_returns: list[Tensor] = []
-    total_wins = 0
 
     env_ids = cfg.id_envs
     for _ in range(n_episodes):
@@ -433,8 +472,6 @@ def collect_training_data(
         all_global.append(go)
         all_x0.append(x0)
         all_returns.append(torch.full((lo.shape[0],), ret))
-        if ep["won"]:
-            total_wins += 1
 
     if not all_local:
         empty = torch.empty(0)
@@ -446,6 +483,163 @@ def collect_training_data(
     returns = torch.cat(all_returns).to(device)
 
     return local_obs, global_obs, x0, returns
+
+
+@torch.no_grad()
+def _collect_training_data_gpu(
+    model: nn.Module,
+    cfg: SimpleNamespace,
+    device: torch.device,
+    n_episodes: int,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """GPU-batched episode collection for RL fine-tuning.
+
+    Runs N envs in lockstep, batching all replanning forward passes
+    into single GPU calls (B=N_active instead of B=1). Uses stochastic
+    ReMDM sampling matching the original collection behaviour.
+
+    Args:
+        model: Eval-mode model for rollouts.
+        cfg: Config namespace.
+        device: Torch device.
+        n_episodes: Number of episodes to collect.
+
+    Returns:
+        Tuple of (local_obs, global_obs, x0, returns).
+    """
+    model.eval()
+    env_ids = cfg.id_envs
+    n = n_episodes
+    max_steps = 500
+    K = getattr(cfg, "diffusion_steps_collect", cfg.diffusion_steps_eval)
+    cs = cfg.crop_size
+    physics_aware = getattr(cfg, "physics_aware_sampling", False)
+
+    tasks = [
+        (random.choice(env_ids), random.randint(0, 2**31 - 1))
+        for _ in range(n)
+    ]
+
+    # Create and reset all envs
+    envs: list = []
+    cur_local = np.zeros((n, cs, cs), dtype=np.int16)
+    cur_global = np.zeros((n, cfg.map_h, cfg.map_w), dtype=np.int16)
+    for i, (env_id, seed) in enumerate(tasks):
+        env = make_env(env_id, None, cfg)
+        (local, glb), _ = env.reset(seed=seed)
+        envs.append(env)
+        cur_local[i] = local
+        cur_global[i] = glb
+
+    # Pre-allocate history buffers
+    obs_local = np.zeros(
+        (n, max_steps + 1, cs, cs), dtype=np.int16,
+    )
+    obs_global = np.zeros(
+        (n, max_steps + 1, cfg.map_h, cfg.map_w), dtype=np.int16,
+    )
+    act_buf = np.zeros((n, max_steps), dtype=np.int64)
+    obs_local[:, 0] = cur_local
+    obs_global[:, 0] = cur_global
+
+    # Per-episode state
+    plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
+    step_in_plan = np.zeros(n, dtype=np.int32)
+    need_replan = np.ones(n, dtype=bool)
+    done = np.zeros(n, dtype=bool)
+    won = np.zeros(n, dtype=bool)
+    total_reward = np.zeros(n, dtype=np.float64)
+    n_steps = np.zeros(n, dtype=np.int32)
+
+    try:
+        for _ in range(max_steps):
+            # Batch replan on GPU (stochastic ReMDM)
+            replan_idx = np.where(need_replan & ~done)[0]
+            if len(replan_idx) > 0:
+                local_t = torch.from_numpy(
+                    cur_local[replan_idx],
+                ).long().to(device)
+                glb_t = torch.from_numpy(
+                    cur_global[replan_idx],
+                ).long().to(device)
+                batch_plans = remdm_sample(
+                    model, local_t, glb_t, cfg, device,
+                    physics_aware=physics_aware,
+                    num_steps=K,
+                ).cpu().numpy()
+                plans[replan_idx] = batch_plans
+                step_in_plan[replan_idx] = 0
+                need_replan[replan_idx] = False
+
+            # Step all active envs
+            any_active = False
+            for i in range(n):
+                if done[i]:
+                    continue
+                any_active = True
+
+                action = int(plans[i, step_in_plan[i]])
+                action = max(0, min(action, cfg.action_dim - 1))
+                act_buf[i, n_steps[i]] = action
+                step_in_plan[i] += 1
+                n_steps[i] += 1
+
+                if step_in_plan[i] >= cfg.replan_every:
+                    need_replan[i] = True
+
+                obs, reward, term, trunc, info = envs[i].step(action)
+                local, glb = obs
+                total_reward[i] += reward
+                cur_local[i] = local
+                cur_global[i] = glb
+                obs_local[i, n_steps[i]] = local
+                obs_global[i, n_steps[i]] = glb
+
+                if info.get("won", False):
+                    won[i] = True
+                if term or trunc:
+                    done[i] = True
+
+            if not any_active:
+                break
+    finally:
+        for env in envs:
+            env.close()
+
+    # Extract windows from all episodes
+    all_local: list[Tensor] = []
+    all_global: list[Tensor] = []
+    all_x0: list[Tensor] = []
+    all_returns: list[Tensor] = []
+
+    for i in range(n):
+        T = int(n_steps[i])
+        ep = {
+            "local": obs_local[i, :T],
+            "global": obs_global[i, :T],
+            "actions": act_buf[i, :T],
+            "total_reward": float(total_reward[i]),
+        }
+        lo, go, x0, ret = _extract_windows(
+            ep, cfg.seq_len, cfg.pad_token,
+        )
+        if lo.shape[0] == 0:
+            continue
+        all_local.append(lo)
+        all_global.append(go)
+        all_x0.append(x0)
+        all_returns.append(torch.full((lo.shape[0],), ret))
+
+    if not all_local:
+        empty = torch.empty(0)
+        return empty, empty, empty, empty
+
+    return (
+        torch.cat(all_local).to(device),
+        torch.cat(all_global).to(device),
+        torch.cat(all_x0).to(device),
+        torch.cat(all_returns).to(device),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +874,13 @@ def run_ablation(
     # -------------------------------------------------------------------
     # Training loop
     # -------------------------------------------------------------------
+    _gpu_collect = str(device).startswith("cuda") and episodes_per_iter > 1
+    logger.info(
+        "  Collection: %s (K=%d, episodes_per_iter=%d)",
+        "GPU-batched" if _gpu_collect else "sequential",
+        getattr(cfg, "diffusion_steps_collect", cfg.diffusion_steps_eval),
+        episodes_per_iter,
+    )
     for iteration in range(1, max_iter + 1):
         iter_start = time.perf_counter()
         cfg._current_iter = iteration

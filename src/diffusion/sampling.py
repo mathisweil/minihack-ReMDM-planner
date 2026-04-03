@@ -106,6 +106,7 @@ def remdm_sample(
     physics_aware: bool = True,
     blind_global: bool = False,
     return_analytics: bool = False,
+    num_steps: int | None = None,
 ) -> Tensor | tuple[Tensor, list, list[float], list[int]]:
     """Generate action sequences via iterative ReMDM denoising.
 
@@ -125,6 +126,8 @@ def remdm_sample(
             (local-only ablation).
         return_analytics: If ``True``, also return per-step analytics as
             ``(seq, path_per_step, tracking_confidence, tracking_masked)``.
+        num_steps: Override number of denoising steps (default uses
+            ``cfg.diffusion_steps_eval``).
 
     Returns:
         When ``return_analytics=False`` (default): fully committed action
@@ -140,7 +143,7 @@ def remdm_sample(
     seq_len = cfg.seq_len
     mask_token = cfg.mask_token
     action_dim = cfg.action_dim
-    K = cfg.diffusion_steps_eval
+    K = num_steps if num_steps is not None else cfg.diffusion_steps_eval
     schedule_fn = get_schedule(cfg.noise_schedule)
     min_keep = max(1, int(seq_len * 0.10))  # Safety Net: always unmask ≥10%
 

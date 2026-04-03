@@ -18,6 +18,7 @@ import torch.nn as nn
 import yaml
 
 from src.buffer import ReplayBuffer
+from src.config import make_run_dir
 from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
@@ -587,9 +588,12 @@ class Trainer:
 
 
 def run_dagger(
-    cfg, checkpoint_path: str | None, no_warm_start: bool,
+    cfg: SimpleNamespace,
+    checkpoint_path: str | None,
+    no_warm_start: bool,
 ) -> None:
     """DAgger online training loop."""
+    make_run_dir(cfg, tag="dagger")
 
     device = cfg.device
     logger.info(f"DAgger training on {device}")
