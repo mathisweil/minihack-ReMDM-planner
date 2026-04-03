@@ -134,42 +134,45 @@ def profile_model_rollout_detailed(
     }
 
     env = make_env(env_id, None, cfg)
-    with timers["env_reset"]:
-        (local, glb), _info = env.reset(seed=seed)
+    try:
+        with timers["env_reset"]:
+            (local, glb), _info = env.reset(seed=seed)
 
-    plan = None
-    step_in_plan = 0
-    max_steps = 500
+        plan = None
+        step_in_plan = 0
+        max_steps = 500
 
-    model.eval()
-    for step_idx in range(max_steps):
-        if plan is None or step_in_plan >= cfg.replan_every:
-            with timers["overhead"]:
-                local_t = torch.from_numpy(
-                    local[np.newaxis]
-                ).long().to(device)
-                glb_t = torch.from_numpy(
-                    glb[np.newaxis]
-                ).long().to(device)
+        model.eval()
+        for step_idx in range(max_steps):
+            if plan is None or step_in_plan >= cfg.replan_every:
+                with timers["overhead"]:
+                    local_t = torch.from_numpy(
+                        local[np.newaxis]
+                    ).long().to(device)
+                    glb_t = torch.from_numpy(
+                        glb[np.newaxis]
+                    ).long().to(device)
 
-            with timers["model_forward"]:
-                plan = greedy_sample(
-                    model, local_t, glb_t, cfg, device,
+                with timers["model_forward"]:
+                    plan = greedy_sample(
+                        model, local_t, glb_t, cfg, device,
+                    )
+                step_in_plan = 0
+
+            assert plan is not None
+            action: int = plan[0, step_in_plan].item()  # type: ignore[union-attr]
+            action = max(0, min(action, cfg.action_dim - 1))
+            step_in_plan += 1
+
+            with timers["env_step"]:
+                (local, glb), reward, terminated, truncated, info = env.step(
+                    action,
                 )
-            step_in_plan = 0
 
-        assert plan is not None
-        action: int = plan[0, step_in_plan].item()  # type: ignore[union-attr]
-        action = max(0, min(action, cfg.action_dim - 1))
-        step_in_plan += 1
-
-        with timers["env_step"]:
-            (local, glb), reward, terminated, truncated, info = env.step(action)
-
-        if info.get("won", False) or terminated or truncated:
-            break
-
-    env.close()
+            if info.get("won", False) or terminated or truncated:
+                break
+    finally:
+        env.close()
     return timers
 
 

@@ -70,57 +70,60 @@ def run_model_episode(
     _use_stochastic = stochastic
 
     env = make_env(env_id, des_file, cfg)
-    (local, glb), _info = env.reset(seed=seed)
+    try:
+        (local, glb), _info = env.reset(seed=seed)
 
-    locals_list = [local]
-    globals_list = [glb]
-    actions_list: list[int] = []
-    won = False
-    total_reward = 0.0
-    plan: torch.Tensor | None = None
-    step_in_plan = 0
+        locals_list = [local]
+        globals_list = [glb]
+        actions_list: list[int] = []
+        won = False
+        total_reward = 0.0
+        plan: torch.Tensor | None = None
+        step_in_plan = 0
 
-    model.eval()
-    for step_idx in range(max_steps):
-        # Replan when needed
-        if plan is None or step_in_plan >= cfg.replan_every:
-            local_t = torch.from_numpy(
-                local[np.newaxis]
-            ).long().to(device)  # [1, 9, 9]
-            glb_t = torch.from_numpy(
-                glb[np.newaxis]
-            ).long().to(device)  # [1, 21, 79]
-            if _use_stochastic:
-                plan = remdm_sample(
-                    model, local_t, glb_t, cfg, device,
-                    physics_aware=getattr(
-                        cfg, "physics_aware_sampling", False,
-                    ),
-                    blind_global=blind_global,
-                )
-            else:
-                plan = greedy_sample(
-                    model, local_t, glb_t, cfg, device,
-                    blind_global=blind_global,
-                )  # [1, seq_len]
-            step_in_plan = 0
+        model.eval()
+        for step_idx in range(max_steps):
+            # Replan when needed
+            if plan is None or step_in_plan >= cfg.replan_every:
+                local_t = torch.from_numpy(
+                    local[np.newaxis]
+                ).long().to(device)  # [1, 9, 9]
+                glb_t = torch.from_numpy(
+                    glb[np.newaxis]
+                ).long().to(device)  # [1, 21, 79]
+                if _use_stochastic:
+                    plan = remdm_sample(
+                        model, local_t, glb_t, cfg, device,
+                        physics_aware=getattr(
+                            cfg, "physics_aware_sampling", False,
+                        ),
+                        blind_global=blind_global,
+                    )
+                else:
+                    plan = greedy_sample(
+                        model, local_t, glb_t, cfg, device,
+                        blind_global=blind_global,
+                    )  # [1, seq_len]
+                step_in_plan = 0
 
-        action = plan[0, step_in_plan].item()
-        action = max(0, min(action, cfg.action_dim - 1))
-        actions_list.append(action)
-        step_in_plan += 1
+            action = plan[0, step_in_plan].item()
+            action = max(0, min(action, cfg.action_dim - 1))
+            actions_list.append(action)
+            step_in_plan += 1
 
-        (local, glb), reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        locals_list.append(local)
-        globals_list.append(glb)
+            (local, glb), reward, terminated, truncated, info = env.step(
+                action,
+            )
+            total_reward += reward
+            locals_list.append(local)
+            globals_list.append(glb)
 
-        if info.get("won", False):
-            won = True
-        if terminated or truncated:
-            break
-
-    env.close()
+            if info.get("won", False):
+                won = True
+            if terminated or truncated:
+                break
+    finally:
+        env.close()
 
     # Trim trailing obs
     locals_arr = np.stack(locals_list[:-1], axis=0).astype(np.int16)

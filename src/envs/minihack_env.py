@@ -415,8 +415,8 @@ def collect_oracle_trajectory(
           "actions": [T], "env_id": str}`` on success,
         or ``None`` on failure.
     """
+    env = make_env(env_id, None, cfg)
     try:
-        env = make_env(env_id, None, cfg)
         (local, glb), _info = env.reset(seed=seed)
         locals_list = [local]
         globals_list = [glb]
@@ -432,8 +432,6 @@ def collect_oracle_trajectory(
             globals_list.append(glb)
             if terminated or truncated:
                 break
-
-        env.close()
 
         # Trim trailing obs (one more obs than actions)
         locals_arr = np.stack(locals_list[:-1], axis=0).astype(np.int16)
@@ -452,3 +450,5 @@ def collect_oracle_trajectory(
             exc_info=True,
         )
         return None
+    finally:
+        env.close()
