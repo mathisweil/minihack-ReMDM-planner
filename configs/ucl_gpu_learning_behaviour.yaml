@@ -90,7 +90,7 @@ torch_compile: true
 num_collection_workers: 8
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
-checkpoint_dir: checkpoints
+checkpoint_dir: checkpoints_ucl_learning_behaviour
 save_policy: true
 hub_run_id: null
 hub_repo_id: null
