@@ -13,6 +13,7 @@ from src.planners.logging import Logger
 from src.planners.offline import run_offline
 from src.planners.online import run_dagger
 from src.planners.inference import run_inference
+from src.planners.collect_oracle import run_collect
 from src.planners.smoke import run_smoke
 
 
@@ -64,7 +65,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["smoke", "offline", "dagger", "inference"],
+        choices=["smoke", "offline", "dagger", "inference", "collect"],
     )
     parser.add_argument("--config", default="configs/defaults.yaml")
 
@@ -154,6 +155,9 @@ def run_mode(mode: str, cfg, args) -> None:
     elif mode == "dagger":
         ckpt = _resolve_checkpoint(args, cfg)
         run_dagger(cfg, ckpt, args.no_warm_start)
+
+    elif mode == "collect":
+        run_collect(cfg)
 
     elif mode == "inference":
         ckpt = _resolve_checkpoint(args, cfg)

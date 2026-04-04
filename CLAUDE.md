@@ -55,6 +55,7 @@ minihack-ReMDM-planner/
 │   │   └── minihack_env.py           # AdvancedObservationEnv + BFS oracle
 │   └── planners/
 │       ├── collect.py                 # run_model_episode, DataCollector
+│       ├── collect_oracle.py          # standalone oracle data collection (--mode collect)
 │       ├── offline.py                 # offline BC trainer
 │       ├── online.py                  # DAgger trainer + checkpointing
 │       ├── inference.py               # Evaluator + result formatting

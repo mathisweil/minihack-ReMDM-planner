@@ -32,7 +32,9 @@ rl_finetuning/
 │   └── mixing_experiment.py    # Data quality degradation curve experiment
 └── configs/
     ├── ablations_default.yaml   # Full-run hyperparameters
-    └── ablations_fast.yaml      # Smoke-test overrides (50 iterations)
+    ├── ablations_fast.yaml      # Smoke-test overrides (50 iterations)
+    ├── ablations_qmul_gpu.yaml  # QMUL GPU cluster overrides
+    └── ablations_ucl_gpu.yaml   # UCL GPU cluster overrides
 ```
 
 ### Usage
@@ -129,7 +131,7 @@ python experiments/rl_finetuning/run_ablations.py \
 python experiments/rl_finetuning/run_ablations.py \
     --merge outputs/seed0/results.json outputs/seed1/results.json \
     --output_dir outputs/merged
-# → baseline_rl: 0.6250 +/- 0.0250 (2 seeds)
+# -> baseline_rl: 0.6250 +/- 0.0250 (2 seeds)
 ```
 
 The merged `results.json` is identical in format to a single-run file and can
@@ -146,13 +148,13 @@ be used with `--analyze_only` for further filtering or re-plotting.
 | | `lora` | Low-Rank Adaptation of attention projections |
 | | `mixed_replay` | Offline data mixed into online batches |
 | | `trust_region_kl` | Hard KL trust region via quadratic barrier |
-| **B: Training Signal** | `low_t` | ELBO restricted to low-t (fine-detail) regime |
-| | `t_curriculum` | Anneal t range high-to-low over training |
+| **B: Training Signal** | `t_curriculum` | Anneal t range high-to-low over training |
 | | `entropy_bonus` | Entropy regularisation for action diversity |
 | | `gradient_surgery` | PCGrad: project conflicting RL/BC gradients |
 | | `advantage_clip` | PPO-style advantage clipping [1-eps, 1+eps] |
 | | `normalized_adv` | Std-normalised advantages (GRPO-style) |
 | | `bc_wins` | Uniform ELBO on win windows (no advantage weighting) |
+| | `low_t` | ELBO restricted to low-t (fine-detail) regime |
 | **C: Architecture** | `frozen_backbone` | Only train the output head |
 | | `head_only` | Only train the final linear projection |
 | | `attention_only` | Only train attention weights (Q/K/V/O) |
@@ -213,6 +215,8 @@ with N of 25 ablations is fully valid and loadable by `--analyze_only` or `--mer
 | Flag | Description |
 |---|---|
 | `--checkpoint PATH` | Pretrained DAgger checkpoint (`.pth` or `wandb://` artifact) |
+| `--config PATH` | Main config override (default: `configs/defaults.yaml`) |
+| `--ablations_config PATH` | Ablations-specific config (default: `ablations_default.yaml`) |
 | `--all` | Run all 25 ablations |
 | `--ablations NAME [NAME ...]` | Run specific ablations by name |
 | `--list` | Print registered ablations and exit |
@@ -220,11 +224,13 @@ with N of 25 ablations is fully valid and loadable by `--analyze_only` or `--mer
 | `--num_seeds N` | Number of seeds per ablation (default: 1) |
 | `--seed N` | Base random seed |
 | `--output_dir DIR` | Output directory (default: auto-timestamped) |
+| `--run_id ID` | Custom run ID for output directory naming |
 | `--analyze_only` | Skip training, regenerate analysis from existing results |
 | `--results_path PATH` | Explicit path to `results.json` (with `--analyze_only`) |
 | `--merge JSON [JSON ...]` | Merge multiple `results.json` files and regenerate analysis |
 | `--use_wandb` | Enable W&B logging |
 | `--wandb_project NAME` | W&B project name (default: `remdm-minihack-ablations`) |
+| `--wandb_resume_id ID` | W&B run ID for curve continuity |
 | `--max_iter N` | Override max training iterations |
 | `--batch_size N` | Override batch size |
 | `--eval_every N` | Override evaluation frequency |
