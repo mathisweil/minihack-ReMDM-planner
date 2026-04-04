@@ -8,16 +8,24 @@
 
 PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) — a dual-stream transformer that generates 64-step action-sequence plans for [MiniHack](https://github.com/facebookresearch/minihack) navigation environments by iteratively denoising masked token sequences, conditioned on a 9×9 local crop and a full 21×79 dungeon map.
 
-**Three-stage pipeline:**
+**Primary pipeline — DAgger with implicit warm-start:**
 ```
-[Stage 1]  Offline BC on oracle demos     main.py --mode offline --data dataset.pt
-                |
-                v  checkpoint
-[Stage 2]  DAgger online training          main.py --mode dagger
-                |
-                v  fine-tuned checkpoint
-[Stage 3]  Evaluate (ID + OOD)             main.py --mode inference --checkpoint iter8000.pth
+[Primary]  DAgger online training          main.py --mode dagger
+               |  (seed buffer with oracle demos on iter 0,
+               |   collect with model, label with oracle,
+               |   efficiency filter, curriculum sampling)
+               v  checkpoint
+[Evaluate] ID + OOD evaluation             main.py --mode inference --checkpoint iter8000.pth
 ```
+
+**Optional standalone modes:**
+```
+[Collect]     Collect oracle demonstrations main.py --mode collect
+[Offline BC]  Train on pre-collected data   main.py --mode offline --data dataset.pt
+[Smoke test]  Quick end-to-end check        main.py --mode smoke
+```
+
+DAgger with implicit warm-start is the recommended pipeline. The `--mode collect` + `--mode offline` path is available for explicit two-stage pre-training on oracle demonstrations before DAgger.
 
 **Primary research question:** Does a planner trained on 4 in-distribution MiniHack environments generalise zero-shot to 3 held-out OOD environments?
 
@@ -39,7 +47,12 @@ minihack-ReMDM-planner/
 ├── configs/
 │   ├── defaults.yaml                  # source of truth for ALL hyperparameters
 │   ├── smoke.yaml                     # fast smoke-test overrides
-│   └── main.yaml                      # full training (inherits defaults)
+│   ├── main.yaml                      # full training (inherits defaults)
+│   ├── qmul_gpu.yaml                 # QMUL GPU cluster config
+│   ├── ucl_gpu_bigger_model.yaml      # UCL GPU (larger model: 384D, 6 heads)
+│   ├── ucl_gpu_learning_behaviour.yaml # UCL GPU (learning study: eta=0.18, B=6144)
+│   └── ucl_gpu_no_amp.yaml           # UCL GPU (no AMP: B=3584, 32 workers)
+├── environments/                      # Custom .des scenario files
 ├── src/
 │   ├── config.py                      # YAML loader + CLI key=value override
 │   ├── buffer.py                      # ReplayBuffer: offline-pinned FIFO
@@ -50,12 +63,13 @@ minihack-ReMDM-planner/
 │   │   ├── loss.py                    # MDLM ELBO + auxiliary goal loss
 │   │   └── sampling.py               # ReMDM reverse sampling + remasking strategies
 │   ├── models/
-│   │   └── denoiser.py               # LocalDiffusionPlannerWithGlobal + ModelEMA
+│   │   └── denoiser.py               # LocalDiffusionPlannerWithGlobal + LocalDiffusionPlanner + ModelEMA
 │   ├── envs/
-│   │   └── minihack_env.py           # AdvancedObservationEnv + BFS oracle
+│   │   ├── minihack_env.py           # AdvancedObservationEnv + BFS oracle
+│   │   └── discovery.py              # Env registry scanner + inference benchmark
 │   └── planners/
 │       ├── collect.py                 # run_model_episode, DataCollector
-│       ├── collect_oracle.py          # standalone oracle data collection (--mode collect)
+│       ├── collect_oracle.py          # Standalone oracle data collection (multiprocessing)
 │       ├── offline.py                 # offline BC trainer
 │       ├── online.py                  # DAgger trainer + checkpointing
 │       ├── inference.py               # Evaluator + result formatting
@@ -63,10 +77,12 @@ minihack-ReMDM-planner/
 │       └── logging.py                 # centralised W&B + stdout logging
 ├── experiments/
 │   └── rl_finetuning/                 # Stage 3: RL fine-tuning ablation suite
-│       ├── run_ablations.py           # CLI entry point (--list, --all, --fast, --analyze_only)
+│       ├── run_ablations.py           # CLI entry point (--list, --all, --fast, --analyze_only, --merge)
 │       ├── configs/
 │       │   ├── ablations_default.yaml # ablation-specific hyperparameters
-│       │   └── ablations_fast.yaml    # fast smoke-test overrides (50 iters)
+│       │   ├── ablations_fast.yaml    # fast smoke-test overrides (50 iters)
+│       │   ├── ablations_qmul_gpu.yaml # QMUL GPU cluster overrides
+│       │   └── ablations_ucl_gpu.yaml  # UCL GPU cluster overrides
 │       ├── ablations/
 │       │   ├── losses.py              # 16 loss factory functions (return-weighted ELBO variants)
 │       │   ├── optimizers.py          # AdamW, LLRD, LoRA, frozen params, PCGrad
@@ -118,7 +134,7 @@ minihack-ReMDM-planner/
 
 ### Code style
 
-- Python 3.10+. Use `match`/`case` only where it genuinely improves clarity.
+- Python 3.12+. Use `match`/`case` only where it genuinely improves clarity.
 - Line length: 100 characters.
 - Imports: stdlib → third-party → local, separated by blank lines. No wildcard imports.
 - No `print()` in `src/` outside `__main__` blocks. Use `src/planners/logging.py`.
@@ -142,18 +158,40 @@ Defined in `configs/defaults.yaml` as `mask_token: 12` and `pad_token: 13`. Alwa
 
 | Layer | Library |
 |---|---|
-| Array computation + autograd | PyTorch |
+| Array computation + autograd | PyTorch (≥ 2.11.0) |
 | Neural networks | `torch.nn` |
 | Optimiser | AdamW (`torch.optim.AdamW`) |
 | LR scheduling | `torch.optim.lr_scheduler` (CosineAnnealingLR) |
-| Environment | MiniHack + NLE |
+| Environment | MiniHack + NLE (≥ 1.2.0, NetHack-LE fork) |
 | Experiment logging | W&B (`wandb`) |
 | Config parsing | PyYAML |
 | Checkpointing | `torch.save` / `torch.load` |
 | Hub uploads | `huggingface_hub` |
+| Data analysis | `polars`, `orjson`, `scipy` |
 | Package management | `uv` (PEP 621 `pyproject.toml` + `uv.lock`) |
 
 **Device:** CUDA 12 recommended for full training; CPU sufficient for smoke tests. Always set via `cfg.device`.
+
+---
+
+## CLI surface
+
+| Flag | Description |
+|---|---|
+| `--mode` | Required. One of `smoke`, `collect`, `offline`, `dagger`, `inference` |
+| `--config PATH` | Config file (default: `configs/defaults.yaml`) |
+| `--data PATH` | Dataset `.pt` file (offline mode) |
+| `--checkpoint PATH` | Checkpoint `.pth` file |
+| `--wandb-artifact REF` | W&B artifact reference (e.g. `entity/project/name:latest`) |
+| `--no-warm-start` | Skip model warm-start from checkpoint (DAgger) |
+| `--no-ema` | Use training weights instead of EMA for inference |
+| `--envs ENV [ENV ...]` | Override evaluation environments |
+| `--des PATH [PATH ...]` | Custom `.des` scenario files for evaluation |
+| `--episodes N` | Episodes per environment (default: 50) |
+| `--output PATH` | Save evaluation results to JSON |
+| `--blind-global` | Zero out global map observations (local-only ablation) |
+
+Any config key can also be overridden via `key=value` pairs on the command line.
 
 ---
 
@@ -189,30 +227,35 @@ Before considering any task complete:
 
 ## Performance tuning
 
-Three config keys control performance optimisations. All default to off (safe, reference-matching behaviour).
+Three config keys control performance optimisations. Defaults are set for GPU training; override for CPU or different hardware.
 
 ### Mixed precision (`use_amp: true`)
 
 Wraps training forward/backward in `torch.amp.autocast("cuda")` with `GradScaler`. Active in both offline BC and DAgger training.
 
 - **Measured speedup:** 2.2x on gradient steps, 1.7x on full smoke test wall-clock
-- **Memory:** peak GPU stays ~16 GB at B=1024 (same as FP32 due to embedding-heavy model)
+- **Memory:** peak GPU stays ~16 GB at B=3584 (same as FP32 due to embedding-heavy model)
 - **Correctness:** loss trajectory and win rates statistically equivalent to FP32
 - **When to use:** always on GPU. No effect on CPU (autocast is a no-op)
+- **Default:** `false` in `defaults.yaml`; enabled in GPU-specific configs
 
 ### torch.compile (`torch_compile: true`)
 
-Applies `torch.compile(model, mode="default")` before training.
+Applies `torch.compile(model, mode="default")` before training. Falls back gracefully if no C compiler is found (common on managed GPU nodes).
 
-- **Measured speedup:** none beyond AMP alone. Not recommended.
+- **Measured speedup:** none beyond AMP alone. Not recommended for primary training.
+- **Default:** `true` in `defaults.yaml`
 - **When to use:** experimental only. May help on future PyTorch versions with better dynamic shape support.
 
 ### Parallel collection (`num_collection_workers: N`)
 
-Runs DAgger episode collection in parallel using `ThreadPoolExecutor`. Each thread gets a CPU copy of the model. NLE and PyTorch CPU release the GIL.
+DAgger episode collection supports three strategies (auto-selected):
+1. **GPU-batched** (default on CUDA with `episodes_per_iteration > 1`): all envs in lockstep
+2. **Threaded CPU** (fallback when `num_collection_workers > 0`): `ThreadPoolExecutor` with CPU model copies
+3. **Sequential** (reference behaviour): one episode at a time
 
-- **Measured speedup:** marginal. CPU model inference is slower than GPU, offsetting parallelism gains. Best avoided unless CPU-only.
-- **When to use:** set to 0 (default) for GPU training. May help on CPU-only machines with many cores.
+- **Default:** `8` workers in `defaults.yaml`
+- **When to use:** GPU-batched is preferred; workers primarily affect the CPU fallback path
 
 ### Profiling
 
