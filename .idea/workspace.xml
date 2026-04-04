@@ -5,9 +5,6 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="477a0789-1a33-4f84-a89d-ff60247d78da" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/configs/ucl_gpu_no_amp.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/experiments/rl_finetuning/configs/ablations_qmul_gpu.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/experiments/rl_finetuning/configs/ablations_ucl_gpu.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -95,7 +92,7 @@
       <workItem from="1774799551166" duration="90774000" />
       <workItem from="1775251453414" duration="123000" />
       <workItem from="1775255446868" duration="1000" />
-      <workItem from="1775255463569" duration="4204000" />
+      <workItem from="1775255463569" duration="5890000" />
     </task>
     <servers />
   </component>
