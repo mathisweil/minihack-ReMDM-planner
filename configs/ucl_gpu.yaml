@@ -1,0 +1,102 @@
+# ── Environments ──────────────────────────────────────────────────────
+id_envs:
+  - MiniHack-Room-Random-5x5-v0
+  - MiniHack-Room-Random-15x15-v0
+  - MiniHack-Corridor-R2-v0
+  - MiniHack-MazeWalk-9x9-v0
+ood_envs:
+  - MiniHack-Room-Dark-15x15-v0
+  - MiniHack-Corridor-R5-v0
+  - MiniHack-MazeWalk-45x19-v0
+crop_size: 9
+map_h: 21
+map_w: 79
+action_dim: 12
+mask_token: 12
+pad_token: 13
+
+# ── Model ─────────────────────────────────────────────────────────────
+n_embd: 256
+n_head: 4
+n_layer: 4
+n_global_tokens: 8
+seq_len: 64
+global_gate_init: -3.0
+# Transformer dropout. 0.0 is deliberate — discrete diffusion forward masking
+# already regularises; dropout on top is redundant.
+dropout: 0.0
+ema_decay: 0.999
+
+# ── Diffusion (MDLM) ─────────────────────────────────────────────────
+noise_schedule: linear
+num_diffusion_steps: 100
+loss_weight_clip: 1000.0
+label_smoothing: 0.0
+# Use SUBS importance weighting w(t) in loss. Off by default (flat average
+# matching reference). Enable for MDLM ELBO experiments.
+use_importance_weighting: false
+# ReMDM stochastic remask base fraction
+eta: 0.15
+# Remasking strategy: rescale | cap | conf
+remask_strategy: conf
+
+# ── Inference ─────────────────────────────────────────────────────────
+# Number of reverse denoising steps at inference.
+# Reference uses 5 (aggressive). Higher = better quality, slower.
+diffusion_steps_eval: 10
+diffusion_steps_collect: 5
+temperature: 0.5
+top_k: 4
+replan_every: 16
+# Soft-penalise hazardous cardinal actions during stochastic sampling.
+# Not active in the reference evaluation pipeline; off by default.
+physics_aware_sampling: false
+
+# ── Offline BC ────────────────────────────────────────────────────────
+offline_lr: 0.00003
+offline_batch_size: 4608
+offline_grad_clip: 1.0
+offline_epochs: 300
+aux_loss_weight: 0.5
+
+# ── DAgger ────────────────────────────────────────────────────────────
+dagger_lr: 0.00003
+dagger_batch_size: 4608
+dagger_grad_clip: 1.0
+weight_decay: 0.0001
+buffer_capacity: 10000
+episodes_per_iteration: 30
+grad_steps_per_iteration: 100
+efficiency_multiplier: 1.5
+curriculum_queue_size: 100
+# Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
+curriculum_preseed: true
+max_iterations: 8000
+id_eval_every: 50
+ood_eval_every: 50
+checkpoint_every: 250
+eval_episodes_per_env: 50
+checkpoint_eval_episodes: 50
+
+# ── Performance ──────────────────────────────────────────────────────
+# Mixed-precision (FP16) training via torch.cuda.amp.
+# Speeds up forward/backward ~1.5-2x on GPU. No effect on CPU.
+use_amp: true
+# torch.compile the model for fused kernels (experimental).
+# May cause slow first iteration due to compilation. No effect on CPU.
+torch_compile: true
+# Number of parallel workers for DAgger episode collection.
+# 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
+num_collection_workers: 8
+
+# ── Checkpointing & Logging ──────────────────────────────────────────
+checkpoint_dir: checkpoints_ucl
+save_policy: true
+hub_run_id: null
+hub_repo_id: null
+use_wandb: true
+wandb_project: remdm-minihack
+wandb_entity: "mathis-weil-university-college-london-ucl-"
+wandb_run_name: null
+offline_log_every: 10
+seed: null
