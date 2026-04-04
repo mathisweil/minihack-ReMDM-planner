@@ -1,0 +1,119 @@
+# =============================================================================
+# MiniHack ReMDM RL Fine-Tuning Ablation Suite -- Default Configuration
+#
+# This file defines ablation-specific hyperparameters.  It is merged ON TOP of
+# the main configs/defaults.yaml so architecture, env IDs, token IDs, etc. are
+# inherited automatically.  Only keys that differ or are new live here.
+# =============================================================================
+
+# -- Training loop ------------------------------------------------------------
+# Iterations per ablation run.  Range: [50, 5000].
+max_iter: 500
+# Gradient batch size drawn from collected rollout windows.
+batch_size: 3072
+# Learning rate for ablation fine-tuning.  Range: [1e-5, 1e-3].
+lr: 3.0e-4
+# AdamW weight decay.  Reference uses 1e-4.  Range: [0, 0.1].
+weight_decay: 1.0e-4
+# Max gradient norm for clipping.
+max_grad_norm: 1.0
+# Number of gradient steps per iteration.
+grad_steps_per_iter: 1
+# Episodes to collect per iteration (model self-play).  Range: [1, 50].
+episodes_per_iter: 30
+# Reduced denoising steps during collection (faster rollouts).
+diffusion_steps_collect: 5
+
+# -- Evaluation ---------------------------------------------------------------
+# Evaluate ID+OOD every N iterations.  Range: [10, 200].
+eval_every: 25
+# Episodes per environment during ablation eval.  Range: [5, 100].
+eval_episodes: 20
+
+# -- Diagnostic frequencies ---------------------------------------------------
+# Gradient alignment (RL vs BC cosine similarity).  Range: [5, 100].
+grad_align_every: 25
+# KL representation drift from pretrained.  Range: [5, 100].
+repr_drift_every: 25
+# Timestep (t-bin) gradient analysis.  Range: [5, 100].
+t_analysis_every: 25
+# CKA similarity (expensive -- keep infrequent).  Range: [10, 200].
+cka_every: 50
+# Per-layer gradient norms.  Range: [5, 100].
+per_layer_every: 25
+# Number of t bins for analysis.  Range: [5, 20].
+t_analysis_n_bins: 10
+# CKA batch size (keep <= 128 for memory).
+cka_batch_size: 64
+
+# -- Return / advantage weighting --------------------------------------------
+# Minimum return to count as a "win" for win-rate tracking.
+win_threshold: 0.5
+# Lower clip bound for return-based advantage weights.  Range: [0, 1].
+return_weight_floor: 0.1
+# Upper clip bound for advantage weights.  Range: [1, 20].
+return_weight_cap: 5.0
+
+# -- Group A: Regularisation / Constraint Methods -----------------------------
+# EWC (Elastic Weight Consolidation) penalty coefficient.
+# Range: [0, inf).  0 disables EWC.  Default: 100.
+ewc_lambda: 100.0
+# Number of batches to estimate Fisher diagonal.
+ewc_fisher_batches: 20
+
+# LLRD (Layer-wise Learning Rate Decay).
+# decay^depth applied per transformer block.
+# Range: (0, 1].  1.0 = uniform LR.  Typical: 0.8-0.95.
+llrd_decay: 0.9
+
+# LoRA rank and alpha.  Effective update = (alpha / rank) * B @ A.
+lora_rank: 8
+lora_alpha: 16.0
+
+# Mixed replay: fraction of each batch drawn from offline buffer.
+# Range: [0, 1).  0 = no offline data.
+mixed_replay_ratio: 0.25
+# Buffer size for mixed replay ring buffer.
+mixed_replay_buffer_size: 10000
+
+# Trust-region KL threshold (hard constraint via quadratic barrier).
+trust_region_kl: 0.05
+
+# Soft KL penalty coefficient (for kl_penalty ablation).
+kl_coef: 0.1
+
+# -- Group B: Training Signal Modifications ----------------------------------
+# t-Curriculum: anneal t range from [t_start, 1.0] to [eps, t_end].
+t_curriculum_start: 0.8
+t_curriculum_end: 0.2
+t_curriculum_steps: 200
+
+# Low-t only upper bound.
+t_max_low: 0.2
+
+# Entropy bonus coefficient.  Range: [0, inf).
+entropy_coef: 0.01
+
+# Advantage clipping (PPO-style): clip to [1-eps, 1+eps].
+adv_clip_eps: 0.2
+
+# -- Group D: Reward / Data Quality ------------------------------------------
+# Reward filtering: only train on windows with return > percentile.
+reward_filter_percentile: 75
+
+# Running statistics EMA decay for return normalisation.
+running_stats_ema_decay: 0.99
+
+# Reward model MLP for learned reward weighting.
+reward_model_width: 64
+reward_model_depth: 2
+reward_model_lr: 1.0e-3
+reward_model_train_steps: 50
+
+# -- Output / Logging --------------------------------------------------------
+ablation_use_wandb: true
+ablation_wandb_project: "remdm-minihack-ablations"
+
+# -- Multi-seed ---------------------------------------------------------------
+# Run each ablation num_seeds times, report mean +/- std.
+num_seeds: 1
