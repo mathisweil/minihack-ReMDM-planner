@@ -589,8 +589,12 @@ class Trainer:
             )
 
         iteration = ckpt.get("iteration", 0)
-        logger.info(f"Resumed from checkpoint: {path} (iter {iteration})")
-        return iteration
+        resume_from = iteration + 1
+        logger.info(
+            f"Resumed from checkpoint: {path} (iter {iteration}), "
+            f"starting at iter {resume_from}"
+        )
+        return resume_from
 
 
 def run_dagger(
