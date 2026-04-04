@@ -1,0 +1,52 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="annotated-types" />
+          <option value="attrs" />
+          <option value="certifi" />
+          <option value="charset-normalizer" />
+          <option value="click" />
+          <option value="decorator" />
+          <option value="distrax" />
+          <option value="dm-tree" />
+          <option value="gast" />
+          <option value="gitdb" />
+          <option value="gitpython" />
+          <option value="idna" />
+          <option value="platformdirs" />
+          <option value="pydantic" />
+          <option value="pydantic-core" />
+          <option value="requests" />
+          <option value="sentry-sdk" />
+          <option value="smmap" />
+          <option value="tfp-nightly" />
+          <option value="typing-inspection" />
+          <option value="urllib3" />
+          <option value="wandb" />
+          <option value="wrapt" />
+          <option value="libnsl" />
+          <option value="libuuid" />
+          <option value="ld_impl_linux-64" />
+          <option value="sqlite" />
+          <option value="zlib" />
+          <option value="xorg-xorgproto" />
+          <option value="libxcb" />
+          <option value="libgomp" />
+          <option value="libstdcxx" />
+          <option value="libgcc-ng" />
+          <option value="xorg-libxau" />
+          <option value="xz" />
+          <option value="xorg-libxdmcp" />
+          <option value="pthread-stubs" />
+          <option value="libstdcxx-ng" />
+          <option value="xorg-libx11" />
+          <option value="libgcc" />
+          <option value="expat" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

@@ -391,6 +391,11 @@ class Trainer:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         path = ckpt_dir / f"iter{iteration}.pth"
 
+        # Capture W&B run ID for seamless resumption
+        wandb_run_id: str | None = None
+        if self.log._use_wandb and self.log._run is not None:
+            wandb_run_id = self.log._run.id
+
         state = {
             "model_state_dict": self._raw_model.state_dict(),
             "ema_state_dict": self.ema_model.state_dict(),
@@ -402,6 +407,7 @@ class Trainer:
             ),
             "curriculum_state": self.collector.curriculum.state_dict(),
             "iteration": iteration,
+            "wandb_run_id": wandb_run_id,
             "rng_states": {
                 "torch": torch.get_rng_state(),
                 "numpy": np.random.get_state(),
@@ -624,6 +630,22 @@ def run_dagger(
             if traj is not None:
                 buffer.add(traj)
     logger.info(f"Buffer seeded with {len(buffer)} windows")
+
+    # If resuming, extract W&B run ID from checkpoint before Logger init
+    # so the same W&B run is continued (curve continuity).
+    if checkpoint_path and not no_warm_start:
+        resume_id = getattr(cfg, "wandb_resume_id", None)
+        if not resume_id:
+            ckpt_peek = torch.load(
+                checkpoint_path, map_location="cpu", weights_only=False,
+            )
+            saved_id = ckpt_peek.get("wandb_run_id")
+            if saved_id:
+                cfg.wandb_resume_id = saved_id
+                logger.info(
+                    f"W&B run ID from checkpoint: {saved_id}"
+                )
+            del ckpt_peek
 
     # DataCollector uses raw_model for eval copies (not compiled)
     collector = DataCollector(ema, raw_model, buffer, curriculum, cfg, device)

@@ -106,6 +106,16 @@ Train the diffusion model on pre-collected oracle demonstrations.
 
 ```bash
 python main.py --mode offline --data path/to/dataset.pt
+
+# Resume from a checkpoint (restores optimizer, scheduler, epoch, and W&B run)
+python main.py --mode offline --data path/to/dataset.pt \
+    --checkpoint checkpoints/offline_epoch10.pth
+```
+
+Set `offline_checkpoint_every` to save epoch-level checkpoints (default 0 = off):
+
+```bash
+python main.py --mode offline --data dataset.pt offline_checkpoint_every=5
 ```
 
 ### DAgger online training
@@ -340,6 +350,8 @@ remdm_minihack/
 
 ## Checkpoint Format
 
+**DAgger checkpoint:**
+
 ```python
 {
     "model_state_dict":     ...,
@@ -348,7 +360,22 @@ remdm_minihack/
     "scheduler_state_dict": ...,
     "curriculum_state":     {"env_ids", "queue_size", "queues"},
     "iteration":            int,
+    "wandb_run_id":         str | None,
     "rng_states":           {"torch", "numpy", "python"},
+}
+```
+
+**Offline BC checkpoint** (epoch-level, saved when `offline_checkpoint_every > 0`):
+
+```python
+{
+    "model_state_dict":     ...,
+    "ema_state_dict":       ...,
+    "optimizer_state_dict": ...,
+    "scheduler_state_dict": ...,
+    "epoch":                int,
+    "step":                 int,
+    "wandb_run_id":         str | None,
 }
 ```
 
@@ -371,6 +398,30 @@ python main.py --mode inference \
 ```
 
 The artifact reference format is `entity/project/artifact-name:version` where version is `latest`, `v0`, `v1`, etc.
+
+### W&B Run Resumption
+
+All training loops save the W&B run ID in their checkpoints. When resuming from a checkpoint, the run ID is automatically extracted and passed to `wandb.init(resume="must")`, so metrics continue on the same W&B curves with no gaps.
+
+```bash
+# DAgger: automatic — run ID is read from the checkpoint
+python main.py --mode dagger --checkpoint checkpoints/iter2000.pth
+
+# Offline BC: automatic
+python main.py --mode offline --data dataset.pt \
+    --checkpoint checkpoints/offline_epoch10.pth
+
+# Manual override (e.g. checkpoint saved before this feature was added):
+python main.py --mode dagger --checkpoint old_checkpoint.pth \
+    wandb_resume_id=abc123xyz
+
+# Ablation suite:
+python experiments/rl_finetuning/run_ablations.py \
+    --checkpoint path/to/ckpt.pth --all --use_wandb \
+    --wandb_resume_id abc123xyz
+```
+
+The run ID is visible in the W&B dashboard URL: `wandb.ai/.../runs/<run-id>`.
 
 ---
 

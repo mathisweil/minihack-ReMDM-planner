@@ -172,6 +172,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--use_wandb", action="store_true", default=False)
     p.add_argument("--wandb_project", type=str, default=None)
+    p.add_argument(
+        "--wandb_resume_id", type=str, default=None,
+        help=(
+            "W&B run ID to resume (curve continuity). "
+            "Find it in the W&B dashboard URL: wandb.ai/.../runs/<id>"
+        ),
+    )
 
     p.add_argument("--max_iter", type=int, default=None)
     p.add_argument("--batch_size", type=int, default=None)
@@ -514,11 +521,14 @@ def main(argv: list[str] | None = None) -> None:
             wandb = None
             logger.warning("wandb not installed; skipping.")
         else:
+            resume_id = args.wandb_resume_id
             wandb_run = wandb.init(
                 project=args.wandb_project or "remdm-minihack-ablations",
                 name=run_id,
                 config=vars(cfg),
                 tags=["ablations"] + selected,
+                id=resume_id or None,
+                resume="must" if resume_id else "never",
             )
             # Define metric x-axes
             wandb.define_metric("iteration")
