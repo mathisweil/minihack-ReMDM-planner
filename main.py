@@ -148,7 +148,8 @@ def run_mode(mode: str, cfg, args) -> None:
         run_smoke(cfg)
 
     elif mode == "offline":
-        run_offline(cfg, args.data)
+        ckpt = _resolve_checkpoint(args, cfg)
+        run_offline(cfg, args.data, checkpoint_path=ckpt)
 
     elif mode == "dagger":
         ckpt = _resolve_checkpoint(args, cfg)

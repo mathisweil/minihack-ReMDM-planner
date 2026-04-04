@@ -47,6 +47,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         device: torch.device | str,
         log: Logger | None = None,
         raw_model: nn.Module | None = None,
+        resume_state: dict | None = None,
     ) -> dict:
         """Run offline BC training.
 
@@ -59,6 +60,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             log: Optional Logger for wandb and stdout metrics.
             raw_model: Uncompiled model for EMA updates. If ``None``,
                 uses *model* directly.
+            resume_state: Checkpoint dict to resume from. If provided,
+                restores optimizer, scheduler, epoch, and step state.
 
         Returns:
             Dict with ``"final_loss"`` and ``"loss_history"``.
@@ -78,6 +81,25 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             eta_min=cfg.offline_lr * 0.1,
         )
 
+        # Restore optimizer/scheduler state if resuming
+        start_epoch = 0
+        step = 0
+        if resume_state is not None:
+            if "optimizer_state_dict" in resume_state:
+                optimizer.load_state_dict(
+                    resume_state["optimizer_state_dict"],
+                )
+            if "scheduler_state_dict" in resume_state:
+                scheduler.load_state_dict(
+                    resume_state["scheduler_state_dict"],
+                )
+            start_epoch = resume_state.get("epoch", 0)
+            step = resume_state.get("step", 0)
+            logger.info(
+                f"Resumed offline training from epoch {start_epoch}, "
+                f"step {step}"
+            )
+
         # AMP: enabled when use_amp=true and on CUDA
         _use_amp = (
             getattr(cfg, "use_amp", False)
@@ -86,10 +108,10 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
 
         loss_history: list[float] = []
-        step = 0
         _batch_start = time.perf_counter()
+        ckpt_every_epoch = getattr(cfg, "offline_checkpoint_every", 0)
 
-        for epoch in range(cfg.offline_epochs):
+        for epoch in range(start_epoch, cfg.offline_epochs):
             n_batches = max(1, len(buffer) // cfg.offline_batch_size)
             for _ in range(n_batches):
                 batch = buffer.sample(cfg.offline_batch_size)
@@ -171,6 +193,16 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 f"loss={loss_history[-1]:.4f}"
             )
 
+            # Periodic epoch-level checkpoint
+            if (
+                ckpt_every_epoch > 0
+                and (epoch + 1) % ckpt_every_epoch == 0
+            ):
+                _save_offline_checkpoint(
+                    _ema_source, ema_model, optimizer, scheduler,
+                    epoch + 1, step, cfg, log,
+                )
+
         if log is not None:
             log.log_summary({
                 "offline/final_loss": loss_history[-1] if loss_history else 0.0,
@@ -184,6 +216,50 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         }
 
     return train_offline
+
+
+def _save_offline_checkpoint(
+    model: nn.Module,
+    ema_model: ModelEMA,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    epoch: int,
+    step: int,
+    cfg: SimpleNamespace,
+    log: Logger | None,
+) -> None:
+    """Save an offline training checkpoint with W&B run ID.
+
+    Args:
+        model: Raw (uncompiled) model.
+        ema_model: EMA tracker.
+        optimizer: Optimizer.
+        scheduler: LR scheduler.
+        epoch: Current epoch (completed).
+        step: Global gradient step count.
+        cfg: Config namespace.
+        log: Logger (used to extract W&B run ID).
+    """
+    wandb_run_id: str | None = None
+    if log is not None and log._use_wandb and log._run is not None:
+        wandb_run_id = log._run.id
+
+    ckpt_dir = Path(cfg.checkpoint_dir)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    path = ckpt_dir / f"offline_epoch{epoch}.pth"
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "ema_state_dict": ema_model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "epoch": epoch,
+            "step": step,
+            "wandb_run_id": wandb_run_id,
+        },
+        path,
+    )
+    logger.info(f"Offline checkpoint saved: {path}")
 
 
 def load_offline_dataset(
@@ -208,8 +284,20 @@ def load_offline_dataset(
         return None
 
 
-def run_offline(cfg: SimpleNamespace, data_path: str | None) -> None:
-    """Offline BC training on pre-collected data."""
+def run_offline(
+    cfg: SimpleNamespace,
+    data_path: str | None,
+    checkpoint_path: str | None = None,
+) -> None:
+    """Offline BC training on pre-collected data.
+
+    Args:
+        cfg: Config namespace.
+        data_path: Path to ``.pt`` dataset file.
+        checkpoint_path: Optional checkpoint to resume from. Restores
+            model, EMA, optimizer, scheduler, and W&B run for curve
+            continuity.
+    """
     make_run_dir(cfg, tag="offline")
 
     device = cfg.device
@@ -238,20 +326,43 @@ def run_offline(cfg: SimpleNamespace, data_path: str | None) -> None:
 
     ema = ModelEMA(raw_model, decay=cfg.ema_decay)
 
+    # If resuming, extract W&B run ID from checkpoint before Logger init
+    resume_state: dict | None = None
+    if checkpoint_path:
+        resume_state = torch.load(
+            checkpoint_path, map_location=device, weights_only=False,
+        )
+        raw_model.load_state_dict(resume_state["model_state_dict"])
+        ema.load_state_dict(resume_state["ema_state_dict"])
+        resume_id = getattr(cfg, "wandb_resume_id", None)
+        if not resume_id:
+            saved_id = resume_state.get("wandb_run_id")
+            if saved_id:
+                cfg.wandb_resume_id = saved_id
+                logger.info(f"W&B run ID from checkpoint: {saved_id}")
+
     log = Logger(cfg)
     train_fn = make_offline_trainer(cfg)
-    result = train_fn(model, ema, buffer, cfg, device, log=log,
-                       raw_model=raw_model)
-    logger.info(f"Offline training done. Final loss: {result['final_loss']:.4f}")
+    result = train_fn(
+        model, ema, buffer, cfg, device, log=log,
+        raw_model=raw_model, resume_state=resume_state,
+    )
+    logger.info(
+        f"Offline training done. Final loss: {result['final_loss']:.4f}"
+    )
 
-    # Save checkpoint
+    # Save final checkpoint for downstream compatibility (DAgger, inference)
+    wandb_run_id: str | None = None
+    if log._use_wandb and log._run is not None:
+        wandb_run_id = log._run.id
+
     ckpt_dir = Path(cfg.checkpoint_dir)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
     path = ckpt_dir / "offline_final.pth"
     torch.save(
         {
             "model_state_dict": raw_model.state_dict(),
             "ema_state_dict": ema.state_dict(),
+            "wandb_run_id": wandb_run_id,
         },
         path,
     )

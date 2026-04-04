@@ -101,11 +101,14 @@ class Logger:
                 run_name = getattr(cfg, "wandb_run_name", None)
                 if not run_name:
                     run_name = _auto_run_name(cfg)
+                resume_id = getattr(cfg, "wandb_resume_id", None)
                 self._run = wandb.init(
                     project=cfg.wandb_project,
                     entity=cfg.wandb_entity or None,
                     name=run_name,
                     config=vars(cfg),
+                    id=resume_id or None,
+                    resume="must" if resume_id else "never",
                 )
                 # Define custom metric x-axes
                 wandb.define_metric("iteration")

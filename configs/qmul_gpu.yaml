@@ -98,5 +98,6 @@ use_wandb: true
 wandb_project: remdm-minihack
 wandb_entity: "mathis-weil-university-college-london-ucl-"
 wandb_run_name: null
+wandb_resume_id: p7wfp67q
 offline_log_every: 10
 seed: null
