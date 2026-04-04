@@ -92,6 +92,14 @@ torch_compile: true
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
 num_collection_workers: 8
 
+# ── Data Collection ─────────────────────────────────────────────────
+# Oracle episodes per ID environment for --mode collect.
+collect_episodes_per_env: 5000
+# Parallel environment workers for collection.
+collect_num_workers: 8
+# Output path for collected dataset.
+collect_output: "data/dataset.pt"
+
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
 save_policy: true
