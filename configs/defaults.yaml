@@ -87,7 +87,7 @@ checkpoint_eval_episodes: 50
 use_amp: false
 # torch.compile the model for fused kernels (experimental).
 # May cause slow first iteration due to compilation. No effect on CPU.
-torch_compile: true
+torch_compile: false
 # Number of parallel workers for DAgger episode collection.
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
 num_collection_workers: 8
