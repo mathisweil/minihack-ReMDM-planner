@@ -1,0 +1,5 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+kl_penalty,A,0.675,0.1,0.075,IMPROVEMENT
+ewc,A,0.65,0.075,0.05,NEUTRAL
+llrd,A,0.625,0.05,0.025,NEUTRAL
+baseline_rl,Baseline,0.6,0.025,0.0,NEUTRAL

@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+\centering
+\caption{Representation drift (KL)}
+\label{tab:repr-drift}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Method} & \textbf{KL\_mean} & \textbf{KL\_low\_t} & \textbf{KL\_mid\_t} & \textbf{KL\_high\_t} \\
+\midrule
+baseline\_rl & 0.2381 & 0.2947 & 0.2297 & 0.1820 \\
+ewc & 0.0360 & 0.0419 & 0.0404 & 0.0328 \\
+kl\_penalty & 0.3201 & 0.4173 & 0.3109 & 0.2268 \\
+llrd & 0.1201 & 0.1383 & 0.1157 & 0.1240 \\
+\bottomrule
+\end{tabular}
+\end{table}
