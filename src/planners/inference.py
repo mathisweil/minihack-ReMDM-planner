@@ -1,7 +1,9 @@
 """Stateless evaluation runner.
 
 Runs episodes using the diffusion model and collects per-environment
-win rates, average rewards, and step counts.
+win rates, average rewards, and step counts.  All episodes for a given
+environment are rolled out in lockstep so that replanning calls are
+batched into single GPU forward passes (B = n_episodes).
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 
 from src.models.denoiser import ModelEMA, make_model
@@ -23,7 +26,8 @@ class Evaluator:
     """Stateless evaluation runner.
 
     Runs the model on a set of environments and returns aggregate
-    statistics per environment.
+    statistics per environment.  Episodes within each environment are
+    executed in lockstep so replanning calls are GPU-batched.
     """
 
     @torch.no_grad()
@@ -38,6 +42,10 @@ class Evaluator:
         blind_global: bool = False,
     ) -> dict[str, dict]:
         """Evaluate *model* on each environment in *env_ids*.
+
+        All *n_episodes* for a given environment run in lockstep so
+        that replanning forward passes are batched (B = active envs
+        needing a replan).
 
         Args:
             env_ids: List of MiniHack environment IDs.
@@ -55,8 +63,6 @@ class Evaluator:
             ``{env_id: {"win_rate", "wins", "avg_reward", "avg_steps",
             "n_episodes"}}``
         """
-        from src.planners.collect import run_model_episode
-
         model.eval()
         results: dict[str, dict] = {}
 
@@ -72,42 +78,178 @@ class Evaluator:
                     eval_targets.append((stem, fh.read()))
 
         for env_id, des_content in eval_targets:
-            wins = 0
-            total_reward = 0.0
-            total_steps = 0
-            completed = 0
+            seeds = [
+                42 + hash((env_id, ep)) % (2**31)
+                for ep in range(n_episodes)
+            ]
+            ep_results = self._run_episodes_batched(
+                model, env_id, n_episodes, cfg, device,
+                seeds=seeds,
+                des_content=des_content,
+                blind_global=blind_global,
+            )
 
-            for ep in range(n_episodes):
-                seed = 42 + hash((env_id, ep)) % (2**31)
-                try:
-                    ep_result = run_model_episode(
-                        model, env_id, cfg, device, seed,
-                        des_file=des_content,
-                        blind_global=blind_global,
-                        stochastic=True,
-                    )
-                    if ep_result["won"]:
-                        wins += 1
-                    total_steps += ep_result["steps"]
-                    total_reward += ep_result["total_reward"]
-                    completed += 1
-                except Exception:
-                    logger.warning(
-                        f"Episode {ep} failed for {env_id}",
-                        exc_info=True,
-                    )
-                    completed += 1  # count as loss
-
-            n = max(completed, 1)
+            wins = sum(1 for r in ep_results if r["won"])
+            total_reward = sum(r["total_reward"] for r in ep_results)
+            total_steps = sum(r["steps"] for r in ep_results)
+            n = max(len(ep_results), 1)
             results[env_id] = {
                 "win_rate": wins / n,
                 "wins": wins,
                 "avg_reward": total_reward / n,
                 "avg_steps": total_steps / n,
-                "n_episodes": completed,
+                "n_episodes": len(ep_results),
             }
 
         return results
+
+    @torch.no_grad()
+    def _run_episodes_batched(
+        self,
+        model: torch.nn.Module,
+        env_id: str,
+        n_episodes: int,
+        cfg: SimpleNamespace,
+        device: torch.device | str,
+        seeds: list[int],
+        des_content: str | None = None,
+        blind_global: bool = False,
+    ) -> list[dict]:
+        """Run episodes in lockstep with batched model inference.
+
+        Creates one environment per episode, steps them in lockstep,
+        and batches all replanning calls into single forward passes
+        (B = number of active envs needing a replan at each step).
+
+        Args:
+            model: Denoising model (eval mode).
+            env_id: MiniHack environment ID.
+            n_episodes: Number of episodes to run.
+            cfg: Config namespace.
+            device: Torch device.
+            seeds: Per-episode RNG seeds (length *n_episodes*).
+            des_content: Optional ``.des`` file content for custom
+                scenarios.
+            blind_global: If ``True``, zero out global map observations.
+
+        Returns:
+            List of per-episode dicts with ``"won"``, ``"steps"``,
+            ``"total_reward"`` keys.  Failed episodes report
+            ``won=False``.
+        """
+        from src.diffusion.sampling import remdm_sample
+        from src.envs.minihack_env import make_env
+
+        n = n_episodes
+        max_steps = 500
+        cs = cfg.crop_size
+
+        # Create and reset all envs
+        envs: list = []
+        cur_local = np.zeros((n, cs, cs), dtype=np.int16)
+        cur_global = np.zeros(
+            (n, cfg.map_h, cfg.map_w), dtype=np.int16,
+        )
+        failed = np.zeros(n, dtype=bool)
+
+        for i in range(n):
+            try:
+                env = make_env(env_id, des_content, cfg)
+                (local, glb), _ = env.reset(seed=seeds[i])
+                envs.append(env)
+                cur_local[i] = local
+                cur_global[i] = glb
+            except Exception:
+                logger.warning(
+                    "Failed to create env %s (ep %d)",
+                    env_id, i, exc_info=True,
+                )
+                envs.append(None)
+                failed[i] = True
+
+        # Per-episode state vectors
+        plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
+        step_in_plan = np.zeros(n, dtype=np.int32)
+        need_replan = np.ones(n, dtype=bool)
+        done = failed.copy()
+        won = np.zeros(n, dtype=bool)
+        total_reward = np.zeros(n, dtype=np.float64)
+        n_steps = np.zeros(n, dtype=np.int32)
+
+        try:
+            for _ in range(max_steps):
+                # Batch replan for active envs that need it
+                replan_idx = np.where(need_replan & ~done)[0]
+                if len(replan_idx) > 0:
+                    local_t = torch.from_numpy(
+                        cur_local[replan_idx],
+                    ).long().to(device)  # [B_r, cs, cs]
+                    glb_t = torch.from_numpy(
+                        cur_global[replan_idx],
+                    ).long().to(device)  # [B_r, map_h, map_w]
+                    batch_plans = remdm_sample(
+                        model, local_t, glb_t, cfg, device,
+                        physics_aware=getattr(
+                            cfg, "physics_aware_sampling", False,
+                        ),
+                        blind_global=blind_global,
+                    ).cpu().numpy()  # [B_r, seq_len]
+                    plans[replan_idx] = batch_plans
+                    step_in_plan[replan_idx] = 0
+                    need_replan[replan_idx] = False
+
+                # Step all active envs
+                any_active = False
+                for i in range(n):
+                    if done[i]:
+                        continue
+                    any_active = True
+
+                    action = int(plans[i, step_in_plan[i]])
+                    action = max(
+                        0, min(action, cfg.action_dim - 1),
+                    )
+                    step_in_plan[i] += 1
+                    n_steps[i] += 1
+
+                    if step_in_plan[i] >= cfg.replan_every:
+                        need_replan[i] = True
+
+                    try:
+                        obs, reward, term, trunc, info = (
+                            envs[i].step(action)
+                        )
+                        local, glb = obs
+                        total_reward[i] += reward
+                        cur_local[i] = local
+                        cur_global[i] = glb
+
+                        if info.get("won", False):
+                            won[i] = True
+                        if term or trunc:
+                            done[i] = True
+                    except Exception:
+                        logger.warning(
+                            "Episode %d step failed for %s",
+                            i, env_id, exc_info=True,
+                        )
+                        done[i] = True
+
+                if not any_active:
+                    break
+        finally:
+            for env in envs:
+                if env is not None:
+                    env.close()
+
+        return [
+            {
+                "won": bool(won[i]),
+                "steps": int(n_steps[i]),
+                "total_reward": float(total_reward[i]),
+            }
+            for i in range(n)
+        ]
 
 
 def format_eval_results(
