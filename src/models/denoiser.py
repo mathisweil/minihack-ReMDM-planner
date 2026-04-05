@@ -85,7 +85,7 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
             batch_first=True,
         )
         self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=n_layer,
+            encoder_layer, num_layers=n_layer, enable_nested_tensor=False,
         )
         self.head = nn.Linear(n_embd, action_dim)
 
