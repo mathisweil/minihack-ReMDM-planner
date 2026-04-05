@@ -25,27 +25,27 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
-import orjson
-import torch
-import torch.nn as nn
-from torch import Tensor
+matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
-from experiments.rl_finetuning.ablations.losses import (
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import orjson  # noqa: E402
+import torch  # noqa: E402
+import torch.nn as nn  # noqa: E402
+from torch import Tensor  # noqa: E402
+
+from experiments.rl_finetuning.ablations.losses import (  # noqa: E402
     LossContext,
     make_loss_baseline,
 )
-from experiments.rl_finetuning.ablations.training import (
+from experiments.rl_finetuning.ablations.training import (  # noqa: E402
     MixedReplayBuffer,
     _extract_windows,
 )
-from src.diffusion.schedules import get_schedule
-from src.models.denoiser import ModelEMA, make_model
-from src.planners.collect import run_model_episode
-from src.planners.inference import Evaluator
-
-matplotlib.use("Agg")
+from src.diffusion.schedules import get_schedule  # noqa: E402
+from src.models.denoiser import ModelEMA, make_model  # noqa: E402
+from src.planners.collect import run_model_episode  # noqa: E402
+from src.planners.inference import Evaluator  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -659,16 +659,13 @@ def run_mixing_experiment(
         "pure_rl_id": float(known_0),
         "mixing_details": {
             str(frac): {
-                "final_id": float(
-                    mixing_results[frac]["final_id"]
-                ),
+                "final_id": float(info["final_id"]),
                 "history": {
                     k: [float(v) for v in vals]
-                    for k, vals
-                    in mixing_results[frac]["history"].items()
+                    for k, vals in info["history"].items()
                 },
             }
-            for frac in oracle_fractions
+            for frac, info in mixing_results.items()
         },
     }
 
