@@ -25,7 +25,7 @@ rl_finetuning/
 │   ├── representation.py     # KL drift, CKA similarity, activation norms
 │   └── timestep.py           # t-bin gradient norms, per-t loss decomposition
 ├── analysis/
-│   ├── plots.py              # 9 matplotlib figure generators
+│   ├── plots.py              # 12 matplotlib figure generators
 │   ├── tables.py             # Summary tables as polars DataFrames + LaTeX export
 │   ├── report.py             # diagnosis.md + decision tree figure
 │   ├── action_distribution.py  # Pre/post-RL action distribution analysis
@@ -184,11 +184,16 @@ experiments/rl_finetuning/outputs/{run_id}/
 ├── t_ratio.png                     # High-t / low-t gradient norm ratio over training
 ├── win_rate.png                    # Online win rate over training
 ├── group_comparison.png            # Boxplot of scores by ablation group
+├── gradient_conflict_map.png       # Binary heatmap of gradient conflicts (cos_sim < 0)
+├── score_delta.png                 # Sorted bar chart of improvement over baseline_rl
+├── per_env_delta.png               # Heatmap of per-env win rate change (end - start)
 ├── main_results.{csv,tex}          # Main results table
 ├── group_summary.{csv,tex}         # Group-level summary table
 ├── gradient_diagnostics.{csv,tex}  # Gradient alignment at final iteration
 ├── repr_drift.{csv,tex}            # KL drift values at final iteration
-└── per_env_win_rates.{csv,tex}     # Per-environment win rates
+├── per_env_win_rates.{csv,tex}     # Per-environment win rates
+├── forgetting_analysis.{csv,tex}   # First collapse iter, min score, recovery
+└── hypothesis_verdicts.{csv,tex}   # Per-ablation hypothesis verdict + conclusion
 ```
 
 **`results.json` schema:**

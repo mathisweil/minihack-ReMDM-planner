@@ -505,6 +505,173 @@ def plot_group_comparison(
 
 
 # ---------------------------------------------------------------------------
+# Gradient conflict map (binary heatmap)
+# ---------------------------------------------------------------------------
+
+
+def plot_gradient_conflict_map(
+    results: dict[str, dict],
+    out_dir: Path,
+) -> None:
+    """Binary heatmap of gradient conflicts (cos_sim < 0).
+
+    Rows are ablations, columns are diagnostic iterations. A red
+    cell indicates the RL gradient conflicted with the BC gradient
+    at that checkpoint.
+
+    Args:
+        results: Full results dict.
+        out_dir: Output directory.
+    """
+    all_iters: set[int] = set()
+    for res in results.values():
+        h: AblationHistory = res["history"]
+        all_iters.update(h.grad_align_iters)
+    if not all_iters:
+        return
+
+    sorted_iters = sorted(all_iters)
+    iter_to_col = {it: j for j, it in enumerate(sorted_iters)}
+    names = sorted(results.keys())
+    matrix = np.full((len(names), len(sorted_iters)), np.nan)
+
+    for i, name in enumerate(names):
+        h = results[name]["history"]
+        for it, val in zip(h.grad_align_iters, h.grad_align):
+            matrix[i, iter_to_col[it]] = 1.0 if val < 0 else 0.0
+
+    with plt.rc_context(_STYLE):
+        fig, ax = plt.subplots(
+            figsize=(max(8, len(sorted_iters) * 0.4),
+                     max(4, len(names) * 0.35)),
+        )
+        cmap = plt.cm.RdYlGn_r.copy()  # type: ignore[attr-defined]
+        cmap.set_bad(color="white")
+        im = ax.imshow(matrix, aspect="auto", cmap=cmap, vmin=0, vmax=1)
+        ax.set_yticks(range(len(names)))
+        ax.set_yticklabels(names, fontsize=8)
+        ax.set_xticks(range(0, len(sorted_iters), max(1, len(sorted_iters) // 10)))
+        ax.set_xticklabels(
+            [str(sorted_iters[j]) for j in range(
+                0, len(sorted_iters), max(1, len(sorted_iters) // 10),
+            )],
+            rotation=45, ha="right", fontsize=7,
+        )
+        ax.set_xlabel("Iteration")
+        ax.set_title("Gradient Conflict Map (red = cos_sim(RL, BC) < 0)")
+        fig.colorbar(im, ax=ax, label="Conflict", ticks=[0, 1])
+        fig.tight_layout()
+        _save(fig, out_dir / "gradient_conflict_map.png")
+
+
+# ---------------------------------------------------------------------------
+# Score delta plot (sorted bar chart vs baseline)
+# ---------------------------------------------------------------------------
+
+
+def plot_score_delta(
+    results: dict[str, dict],
+    out_dir: Path,
+) -> None:
+    """Sorted horizontal bar chart of score improvement over baseline_rl.
+
+    Args:
+        results: Full results dict.
+        out_dir: Output directory.
+    """
+    baseline_score = results.get("baseline_rl", {}).get("score", 0.0)
+    names = sorted(
+        results.keys(),
+        key=lambda n: results[n]["score"] - baseline_score,
+    )
+    deltas = [results[n]["score"] - baseline_score for n in names]
+    colors = [_group_color(n) for n in names]
+
+    with plt.rc_context(_STYLE):
+        fig, ax = plt.subplots(
+            figsize=(8, max(4, len(names) * 0.35)),
+        )
+        ax.barh(range(len(names)), deltas, color=colors, alpha=0.85)
+        ax.axvline(0, color="black", linewidth=0.8)
+        ax.set_yticks(range(len(names)))
+        ax.set_yticklabels(names, fontsize=8)
+        ax.set_xlabel("Delta vs Baseline RL")
+        ax.set_title("Score Improvement Over Baseline RL (sorted)")
+        fig.tight_layout()
+        _save(fig, out_dir / "score_delta.png")
+
+
+# ---------------------------------------------------------------------------
+# Per-environment delta heatmap
+# ---------------------------------------------------------------------------
+
+
+def plot_per_env_delta(
+    results: dict[str, dict],
+    out_dir: Path,
+) -> None:
+    """Heatmap of per-environment win rate change (end minus start).
+
+    Rows are ablations, columns are environments. Blue = improved,
+    red = degraded.
+
+    Args:
+        results: Full results dict.
+        out_dir: Output directory.
+    """
+    env_names: list[str] = []
+    for res in results.values():
+        h: AblationHistory = res["history"]
+        if h.per_env_win_rates and len(h.per_env_win_rates) >= 2:
+            env_names = sorted(h.per_env_win_rates[0].keys())
+            break
+    if not env_names:
+        return
+
+    short_envs = [
+        e.replace("MiniHack-", "").replace("-v0", "")
+        for e in env_names
+    ]
+
+    valid_names: list[str] = []
+    data_rows: list[list[float]] = []
+    for name in sorted(results.keys()):
+        h = results[name]["history"]
+        if h.per_env_win_rates and len(h.per_env_win_rates) >= 2:
+            start = h.per_env_win_rates[0]
+            end = h.per_env_win_rates[-1]
+            data_rows.append([
+                end.get(e, 0.0) - start.get(e, 0.0)
+                for e in env_names
+            ])
+            valid_names.append(name)
+
+    if not data_rows:
+        return
+
+    matrix = np.array(data_rows)
+    v_abs = max(float(np.abs(matrix).max()), 0.01)
+
+    with plt.rc_context(_STYLE):
+        fig, ax = plt.subplots(
+            figsize=(max(8, len(env_names) * 1.5),
+                     max(4, len(valid_names) * 0.35)),
+        )
+        im = ax.imshow(
+            matrix, aspect="auto", cmap="RdBu",
+            vmin=-v_abs, vmax=v_abs,
+        )
+        ax.set_yticks(range(len(valid_names)))
+        ax.set_yticklabels(valid_names, fontsize=8)
+        ax.set_xticks(range(len(short_envs)))
+        ax.set_xticklabels(short_envs, rotation=45, ha="right", fontsize=9)
+        ax.set_title("Per-Environment Win Rate Change (End - Start)")
+        fig.colorbar(im, ax=ax, label="Delta Win Rate")
+        fig.tight_layout()
+        _save(fig, out_dir / "per_env_delta.png")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -537,5 +704,8 @@ def generate_all_plots(
     plot_t_ratio(results, out_dir)
     plot_win_rate(results, out_dir)
     plot_group_comparison(results, pretrained_score, out_dir)
+    plot_gradient_conflict_map(results, out_dir)
+    plot_score_delta(results, out_dir)
+    plot_per_env_delta(results, out_dir)
 
     logger.info("All plots generated.")
