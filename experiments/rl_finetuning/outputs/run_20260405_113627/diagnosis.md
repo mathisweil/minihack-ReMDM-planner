@@ -58,6 +58,7 @@
 | ewc | A | 0.6500 | +0.0750 |
 | kl_penalty | A | 0.6750 | +0.1000 |
 | llrd | A | 0.6250 | +0.0500 |
+| lora | A | 0.6000 | +0.0250 |
 
 | Ablation | Score | Delta vs Baseline | Verdict |
 |---|---|---|---|
@@ -65,12 +66,13 @@
 | ewc | 0.6500 | +0.0500 | NEUTRAL |
 | kl_penalty | 0.6750 | +0.0750 | IMPROVEMENT |
 | llrd | 0.6250 | +0.0250 | NEUTRAL |
+| lora | 0.6000 | +0.0000 | NEUTRAL |
 
 *Pretrained score: 0.5750*
 *Baseline RL score: 0.6000*
 
 ## Aggregate Verdict
 
-Mixed results: 0/3 ablations collapsed. Check individual verdicts above.
+Mixed results: 0/4 ablations collapsed. Check individual verdicts above.
 
-**Gradient alignment** = +0.7887: RL gradient has useful signal.
+**Gradient alignment** = +0.6994: RL gradient has useful signal.
