@@ -1,5 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-baseline_rl,Baseline,0.675,-0.025,0.0,NEUTRAL
-llrd,A,0.675,-0.025,0.0,NEUTRAL
-ewc,A,0.625,-0.075,-0.05,NEUTRAL
-lora,A,0.55,-0.15,-0.125,COLLAPSE
