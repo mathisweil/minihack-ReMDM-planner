@@ -264,6 +264,114 @@ def make_per_env_table(
 
 
 # ---------------------------------------------------------------------------
+# Forgetting analysis table
+# ---------------------------------------------------------------------------
+
+
+def make_forgetting_analysis_table(
+    results: dict[str, dict],
+    pretrained_score: float,
+    collapse_threshold: float = 0.05,
+) -> pl.DataFrame:
+    """Forgetting timeline: first collapse, min score, recovery.
+
+    Collapse is defined as eval score dropping below
+    ``pretrained_score - collapse_threshold``.
+
+    Args:
+        results: Ablation results dict.
+        pretrained_score: Pretrained eval score.
+        collapse_threshold: Drop from pretrained that counts as collapse.
+
+    Returns:
+        DataFrame with one row per ablation.
+    """
+    rows: list[dict] = []
+    for name, res in sorted(results.items()):
+        h: AblationHistory = res["history"]
+        if not h.eval_iters or not h.eval_score:
+            continue
+
+        scores = h.eval_score
+        iters = h.eval_iters
+        min_score = min(scores)
+        min_idx = scores.index(min_score)
+        final_score = scores[-1]
+        boundary = pretrained_score - collapse_threshold
+
+        first_collapse = "never"
+        for it, sc in zip(iters, scores):
+            if sc < boundary:
+                first_collapse = str(it)
+                break
+
+        recovered = final_score >= boundary
+
+        rows.append({
+            "Method": name,
+            "First_Collapse": first_collapse,
+            "Min_Score": round(min_score, 4),
+            "Min_Score_Iter": iters[min_idx],
+            "Final_Score": round(final_score, 4),
+            "Recovered": recovered,
+        })
+
+    return pl.DataFrame(rows) if rows else pl.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis verdict table
+# ---------------------------------------------------------------------------
+
+
+def make_hypothesis_verdict_table(
+    results: dict[str, dict],
+    pretrained_score: float,
+) -> pl.DataFrame:
+    """Map each ablation to its hypothesis and render a verdict.
+
+    Verdict thresholds match ``make_main_results_table``:
+    IMPROVEMENT (delta > +0.05), COLLAPSE (delta < -0.1), else NEUTRAL.
+
+    Args:
+        results: Ablation results dict.
+        pretrained_score: Pretrained eval score.
+
+    Returns:
+        DataFrame with Method, Group, Score, Verdict, Hypothesis.
+    """
+    baseline_score = results.get("baseline_rl", {}).get(
+        "score", pretrained_score,
+    )
+
+    rows: list[dict] = []
+    for name, res in sorted(results.items()):
+        spec = REGISTRY.get(name)
+        if spec is None:
+            continue
+        score = res["score"]
+        delta_bl = score - baseline_score
+
+        if delta_bl > 0.05:
+            verdict = "IMPROVEMENT"
+        elif delta_bl < -0.1:
+            verdict = "COLLAPSE"
+        else:
+            verdict = "NEUTRAL"
+
+        rows.append({
+            "Method": name,
+            "Group": spec.group,
+            "Score": round(score, 4),
+            "Delta_Baseline": round(delta_bl, 4),
+            "Verdict": verdict,
+            "Hypothesis": spec.hypothesis,
+        })
+
+    return pl.DataFrame(rows) if rows else pl.DataFrame()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -314,6 +422,20 @@ def generate_summary_tables(
         _save_table(
             env_df, out_dir / "per_env_win_rates",
             caption="Per-environment win rates", label="tab:per-env",
+        )
+
+    forg_df = make_forgetting_analysis_table(results, pretrained_score)
+    if forg_df.shape[0] > 0:
+        _save_table(
+            forg_df, out_dir / "forgetting_analysis",
+            caption="Forgetting analysis", label="tab:forgetting",
+        )
+
+    hyp_df = make_hypothesis_verdict_table(results, pretrained_score)
+    if hyp_df.shape[0] > 0:
+        _save_table(
+            hyp_df, out_dir / "hypothesis_verdicts",
+            caption="Hypothesis verdicts", label="tab:hyp-verdicts",
         )
 
     logger.info("All tables generated.")
