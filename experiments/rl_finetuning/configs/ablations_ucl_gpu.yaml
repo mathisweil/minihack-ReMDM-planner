@@ -39,7 +39,7 @@ t_analysis_every: 25
 cka_every: 50
 per_layer_every: 25
 t_analysis_n_bins: 10
-cka_batch_size: 64
+cka_batch_size: 128
 
 # -- Return / advantage weighting --------------------------------------------
 win_threshold: 0.5
