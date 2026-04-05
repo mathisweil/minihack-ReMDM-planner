@@ -981,15 +981,23 @@ def run_ablation(
         grad_norm_val = 0.0
         for _ in range(grad_steps):
             if spec.gradient_surgery:
-                # PCGrad: compute RL grad, BC grad, project
+                # PCGrad: collect RL and BC grads, project, then step.
+                # We manually unscale via the inverse scale factor to
+                # avoid calling scaler.unscale_() twice on the same
+                # optimizer (which raises RuntimeError with AMP).
+                inv_scale = 1.0 / scaler.get_scale()
+
                 optimizer.zero_grad()
                 with torch.amp.autocast("cuda", enabled=_use_amp):
                     rl_loss = loss_fn(
                         model, local_b, global_b, x0_b, adv_b, cfg, device,
                     )
                 scaler.scale(rl_loss).backward()
-                scaler.unscale_(optimizer)
-                g_rl = collect_gradients(model)
+                g_rl = {
+                    n: p.grad.detach().clone() * inv_scale
+                    for n, p in model.named_parameters()
+                    if p.grad is not None
+                }
 
                 optimizer.zero_grad()
                 with torch.amp.autocast("cuda", enabled=_use_amp):
@@ -997,11 +1005,17 @@ def run_ablation(
                         model, local_b, global_b, x0_b, None, cfg, device,
                     )
                 scaler.scale(bc_loss).backward()
-                scaler.unscale_(optimizer)
-                g_bc = collect_gradients(model)
+                g_bc = {
+                    n: p.grad.detach().clone() * inv_scale
+                    for n, p in model.named_parameters()
+                    if p.grad is not None
+                }
 
                 g_proj = gradient_surgery(g_rl, g_bc)
+                # Write projected grads back (already unscaled) and
+                # call unscale_ once so scaler.step can check for infs.
                 apply_gradients(model, g_proj)
+                scaler.unscale_(optimizer)
                 grad_norm_val = torch.nn.utils.clip_grad_norm_(
                     [p for p in model.parameters() if p.requires_grad],
                     max_grad_norm,
