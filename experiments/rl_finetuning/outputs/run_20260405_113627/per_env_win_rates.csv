@@ -1,6 +1,10 @@
 Method,MiniHack-Room-Random-5x5-v0,MiniHack-Room-Random-15x15-v0,MiniHack-Corridor-R2-v0,MiniHack-MazeWalk-9x9-v0
 baseline_rl,1.0,1.0,0.3,0.3
+entropy_bonus,0.8,0.8,0.4,0.0
 ewc,0.9,0.9,0.3,0.4
 kl_penalty,0.9,1.0,0.4,0.3
 llrd,1.0,1.0,0.1,0.1
 lora,0.9,0.9,0.4,0.0
+mixed_replay,0.9,0.7,0.4,0.4
+t_curriculum,0.9,0.9,0.4,0.2
+trust_region_kl,1.0,0.6,0.3,0.4
