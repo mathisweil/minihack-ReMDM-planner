@@ -15,7 +15,7 @@ texture_cache*.pbz2
 # ============================================================
 # Byte-compiled / optimized / DLL files
 # ============================================================
-__pycache__/
+**/__pycache__/
 *.py[codz]
 *$py.class
 
@@ -260,7 +260,4 @@ __marimo__/
 
 #Claude specific
 .claude/
-CLAUDE.md__pycache__/
-*.pyc
-__pycache__/
-*.pyc
+CLAUDE.md
