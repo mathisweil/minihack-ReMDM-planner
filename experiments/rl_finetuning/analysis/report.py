@@ -15,13 +15,17 @@ import logging
 from pathlib import Path
 
 import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
+matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
-from experiments.rl_finetuning.ablations.registry import REGISTRY
-from experiments.rl_finetuning.ablations.training import AblationHistory
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
-matplotlib.use("Agg")
+from experiments.rl_finetuning.ablations.registry import (  # noqa: E402
+    REGISTRY,
+)
+from experiments.rl_finetuning.ablations.training import (  # noqa: E402
+    AblationHistory,
+)
 logger = logging.getLogger(__name__)
 
 _DPI = 150

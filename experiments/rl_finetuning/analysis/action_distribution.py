@@ -30,15 +30,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
-import orjson
-import torch
-from scipy import stats as scipy_stats
+matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
-from src.planners.collect import run_model_episode
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import orjson  # noqa: E402
+import torch  # noqa: E402
+from scipy import stats as scipy_stats  # noqa: E402
 
-matplotlib.use("Agg")
+from src.planners.collect import run_model_episode  # noqa: E402
 logger = logging.getLogger(__name__)
 
 MINIHACK_ACTIONS: dict[int, str] = {
@@ -193,9 +193,12 @@ def compute_gini(probs: np.ndarray) -> float:
     """
     s = np.sort(probs)
     n = len(s)
+    total = s.sum()
+    if total == 0:
+        return 0.0
     indices = np.arange(1, n + 1)
     return float(
-        (2.0 * np.sum(indices * s) - (n + 1) * s.sum()) / (n * s.sum())
+        (2.0 * np.sum(indices * s) - (n + 1) * total) / (n * total)
     )
 
 
@@ -378,7 +381,7 @@ def generate_action_distribution_plots(
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(labels, rotation=45, ha="right")
     axes[1].set_ylim(0, y_max)
-    plt.tight_layout()
+    fig.tight_layout()
     fig.savefig(
         out_dir / "action_dist_comparison.png",
         dpi=_DPI, bbox_inches="tight",
@@ -415,7 +418,7 @@ def generate_action_distribution_plots(
     axes[1].set_ylabel("log2(Post/Pre)")
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(labels, rotation=45, ha="right")
-    plt.tight_layout()
+    fig.tight_layout()
     fig.savefig(
         out_dir / "probability_change.png",
         dpi=_DPI, bbox_inches="tight",
@@ -521,7 +524,7 @@ def generate_action_distribution_plots(
             fontsize=12,
         )
 
-    plt.tight_layout()
+    fig.tight_layout()
     fig.savefig(
         out_dir / "distribution_metrics.png",
         dpi=_DPI, bbox_inches="tight",
@@ -575,7 +578,7 @@ def generate_action_distribution_plots(
     ax.set_title("Episode Length Distribution", fontweight="bold")
     ax.legend()
 
-    plt.tight_layout()
+    fig.tight_layout()
     fig.savefig(
         out_dir / "episode_analysis.png", dpi=_DPI, bbox_inches="tight",
     )
@@ -611,7 +614,7 @@ def generate_action_distribution_plots(
     )
     ax.legend()
     ax.set_ylim(0, 1.05)
-    plt.tight_layout()
+    fig.tight_layout()
     fig.savefig(
         out_dir / "cumulative_distribution.png",
         dpi=_DPI, bbox_inches="tight",
@@ -646,7 +649,7 @@ def generate_action_distribution_plots(
         ax_i.set_xlabel("Next Action")
         ax_i.set_ylabel("Current Action")
         plt.colorbar(im, ax=ax_i, fraction=0.046)
-    plt.tight_layout()
+    fig.tight_layout()
     fig.savefig(
         out_dir / "action_transitions.png", dpi=_DPI, bbox_inches="tight",
     )

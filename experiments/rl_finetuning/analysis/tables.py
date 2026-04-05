@@ -194,7 +194,7 @@ def make_gradient_diagnostics_table(
     rows: list[dict] = []
     for name, res in sorted(results.items()):
         h: AblationHistory = res["history"]
-        if h.grad_align:
+        if h.grad_align and h.rl_grad_norm and h.bc_grad_norm:
             rows.append({
                 "Method": name,
                 "Cos_Sim": round(h.grad_align[-1], 4),

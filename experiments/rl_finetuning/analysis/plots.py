@@ -7,7 +7,8 @@ Style conventions:
 - Font sizes: title=13, axis labels=11, ticks=9, legend=9
 - Grid: alpha=0.3, linestyle="--"
 - Pretrained baseline shown as dashed horizontal in comparison plots
-- Group colours: Baseline=grey, A=blue, B=orange, C=green, D=red
+- Colorblind-safe group palette (Wong 2011)
+- Each ablation gets a unique color + linestyle within its group
 """
 
 from __future__ import annotations
@@ -16,13 +17,18 @@ import logging
 from pathlib import Path
 
 import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
+matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
-from experiments.rl_finetuning.ablations.registry import REGISTRY
-from experiments.rl_finetuning.ablations.training import AblationHistory
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
-matplotlib.use("Agg")
+from experiments.rl_finetuning.ablations.registry import (  # noqa: E402
+    REGISTRY,
+)
+from experiments.rl_finetuning.ablations.training import (  # noqa: E402
+    AblationHistory,
+)
+
 logger = logging.getLogger(__name__)
 
 _DPI = 150
@@ -39,13 +45,54 @@ _STYLE = {
     "legend.fontsize": 9,
 }
 
+# Colorblind-safe group palette (Wong 2011).
 _GROUP_COLORS = {
-    "Baseline": "#9E9E9E",
-    "A": "#2196F3",
-    "B": "#FF9800",
-    "C": "#4CAF50",
-    "D": "#F44336",
+    "Baseline": "#999999",
+    "A": "#0072B2",
+    "B": "#E69F00",
+    "C": "#CC79A7",
+    "D": "#D55E00",
 }
+
+# Line style cycling within groups for visual distinction.
+_LINE_STYLES = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2)),
+                (0, (1, 1))]
+_MARKERS = ["o", "s", "D", "^", "v", "P", "X"]
+
+# Cache: ablation name -> (color, linestyle, marker).
+_ABLATION_STYLE_CACHE: dict[str, tuple[str, str, str]] = {}
+
+
+def _build_ablation_styles() -> None:
+    """Assign each ablation a unique (color, linestyle, marker)."""
+    if _ABLATION_STYLE_CACHE:
+        return
+    groups: dict[str, list[str]] = {}
+    for name, spec in REGISTRY.items():
+        groups.setdefault(spec.group, []).append(name)
+    for group, names in groups.items():
+        color = _GROUP_COLORS.get(group, "#999999")
+        for i, name in enumerate(sorted(names)):
+            ls = _LINE_STYLES[i % len(_LINE_STYLES)]
+            mk = _MARKERS[i % len(_MARKERS)]
+            _ABLATION_STYLE_CACHE[name] = (color, ls, mk)
+
+
+def _ablation_style(name: str) -> tuple[str, str, str]:
+    """Return ``(color, linestyle, marker)`` for an ablation.
+
+    Args:
+        name: Ablation name.
+
+    Returns:
+        Tuple of hex colour, linestyle, marker string.
+    """
+    _build_ablation_styles()
+    if name in _ABLATION_STYLE_CACHE:
+        return _ABLATION_STYLE_CACHE[name]
+    spec = REGISTRY.get(name)
+    group = spec.group if spec else "Baseline"
+    return _GROUP_COLORS.get(group, "#999999"), "-", "o"
 
 
 def _group_color(name: str) -> str:
@@ -57,9 +104,7 @@ def _group_color(name: str) -> str:
     Returns:
         Hex colour string.
     """
-    spec = REGISTRY.get(name)
-    group = spec.group if spec else "Baseline"
-    return _GROUP_COLORS.get(group, "#9E9E9E")
+    return _ablation_style(name)[0]
 
 
 def _ema(values: list[float], alpha: float = 0.3) -> list[float]:
@@ -182,18 +227,23 @@ def plot_grad_alignment(
         out_dir: Output directory.
     """
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(12, 5))
         for name, res in sorted(results.items()):
             h: AblationHistory = res["history"]
             if h.grad_align_iters:
+                c, ls, mk = _ablation_style(name)
                 ax.plot(
                     h.grad_align_iters, _ema(h.grad_align),
-                    label=name, color=_group_color(name), alpha=0.8,
+                    label=name, color=c, linestyle=ls,
+                    alpha=0.8, linewidth=1.5,
                 )
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Cosine Similarity (RL vs BC)")
         ax.set_title("Gradient Alignment")
-        ax.legend(ncol=2, fontsize=7)
+        ax.legend(
+            ncol=3, fontsize=7, loc="upper left",
+            bbox_to_anchor=(0, -0.15),
+        )
         fig.tight_layout()
         _save(fig, out_dir / "grad_alignment.png")
 
@@ -224,17 +274,21 @@ def plot_repr_drift(
             h: AblationHistory = res["history"]
             if not h.repr_drift_iters:
                 continue
+            c, ls, _ = _ablation_style(name)
             for ax, key in zip(axes, keys):
                 vals = getattr(h, key)
                 ax.plot(
                     h.repr_drift_iters, _ema(vals),
-                    label=name, color=_group_color(name), alpha=0.7,
+                    label=name, color=c, linestyle=ls, alpha=0.7,
                 )
         for ax, title in zip(axes, titles):
             ax.set_xlabel("Iteration")
             ax.set_title(title)
         axes[0].set_ylabel("KL(ref || cur)")
-        axes[0].legend(ncol=2, fontsize=6)
+        axes[0].legend(
+            ncol=3, fontsize=6, loc="upper left",
+            bbox_to_anchor=(0, -0.18),
+        )
         fig.suptitle("Representation Drift", fontsize=14)
         fig.tight_layout()
         _save(fig, out_dir / "repr_drift.png")
@@ -256,18 +310,23 @@ def plot_cka(
         out_dir: Output directory.
     """
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(12, 5))
         for name, res in sorted(results.items()):
             h: AblationHistory = res["history"]
             if h.cka_iters:
+                c, ls, mk = _ablation_style(name)
                 ax.plot(
                     h.cka_iters, h.cka_similarity,
-                    "o-", label=name, color=_group_color(name), alpha=0.8,
+                    label=name, color=c, linestyle=ls,
+                    marker=mk, markersize=4, alpha=0.8,
                 )
         ax.set_xlabel("Iteration")
         ax.set_ylabel("CKA")
         ax.set_title("CKA Similarity vs Pretrained")
-        ax.legend(ncol=2, fontsize=7)
+        ax.legend(
+            ncol=3, fontsize=7, loc="upper left",
+            bbox_to_anchor=(0, -0.15),
+        )
         fig.tight_layout()
         _save(fig, out_dir / "cka_similarity.png")
 
@@ -287,35 +346,33 @@ def plot_t_bin_norms(
         results: Full results dict.
         out_dir: Output directory.
     """
-    names = sorted(results.keys())
+    valid_names: list[str] = []
     data_rows: list[list[float]] = []
     bin_labels: list[str] = []
 
-    for name in names:
+    for name in sorted(results.keys()):
         h: AblationHistory = results[name]["history"]
-        if h.t_bin_norms:
-            last = h.t_bin_norms[-1]
-            if not bin_labels:
-                bin_labels = list(last.keys())
-            data_rows.append([last.get(k, 0.0) for k in bin_labels])
-        else:
-            data_rows.append([])
+        if not h.t_bin_norms:
+            continue
+        last = h.t_bin_norms[-1]
+        if not bin_labels:
+            bin_labels = list(last.keys())
+        data_rows.append([last.get(k, 0.0) for k in bin_labels])
+        valid_names.append(name)
 
-    valid = [r for r in data_rows if r]
-    if not valid:
+    if not data_rows:
         return
 
-    n_bins = len(valid[0])
-    matrix = np.zeros((len(names), n_bins))
-    for i, row in enumerate(data_rows):
-        if row:
-            matrix[i] = row
+    n_bins = len(data_rows[0])
+    matrix = np.array(data_rows)
 
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(10, max(4.0, len(names) * 0.35)))
+        fig, ax = plt.subplots(
+            figsize=(10, max(4.0, len(valid_names) * 0.35)),
+        )
         im = ax.imshow(matrix, aspect="auto", cmap="YlOrRd")
-        ax.set_yticks(range(len(names)))
-        ax.set_yticklabels(names, fontsize=8)
+        ax.set_yticks(range(len(valid_names)))
+        ax.set_yticklabels(valid_names, fontsize=8)
         ax.set_xticks(range(n_bins))
         ax.set_xticklabels(bin_labels, rotation=45, ha="right", fontsize=7)
         ax.set_title("Gradient Norms by t-bin (final iteration)")
@@ -342,7 +399,7 @@ def plot_t_ratio(
         out_dir: Output directory.
     """
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(12, 5))
         for name, res in sorted(results.items()):
             h: AblationHistory = res["history"]
             if h.t_analysis_iters and h.norm_low_t and h.norm_high_t:
@@ -350,16 +407,20 @@ def plot_t_ratio(
                     hi / (lo + 1e-10)
                     for hi, lo in zip(h.norm_high_t, h.norm_low_t)
                 ]
+                c, ls, mk = _ablation_style(name)
                 ax.plot(
                     h.t_analysis_iters, _ema(ratios),
-                    "D-", label=name, color=_group_color(name),
-                    alpha=0.8, markersize=4, linewidth=1.5,
+                    label=name, color=c, linestyle=ls,
+                    marker=mk, alpha=0.8, markersize=4, linewidth=1.5,
                 )
         ax.axhline(1.0, ls="--", color="black", alpha=0.5, label="Equal")
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Ratio (>1 = high-t dominates)")
         ax.set_title("High-t / Low-t Gradient Norm Ratio")
-        ax.legend(ncol=2, fontsize=7)
+        ax.legend(
+            ncol=3, fontsize=7, loc="upper left",
+            bbox_to_anchor=(0, -0.15),
+        )
         fig.tight_layout()
         _save(fig, out_dir / "t_ratio.png")
 
@@ -380,18 +441,23 @@ def plot_win_rate(
         out_dir: Output directory.
     """
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(12, 5))
         for name, res in sorted(results.items()):
             h: AblationHistory = res["history"]
             if h.iters and h.win_rate:
+                c, ls, _ = _ablation_style(name)
                 ax.plot(
                     h.iters, _ema(h.win_rate),
-                    label=name, color=_group_color(name), alpha=0.8,
+                    label=name, color=c, linestyle=ls,
+                    alpha=0.8, linewidth=1.5,
                 )
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Win Rate")
         ax.set_title("Online Win Rate (EMA)")
-        ax.legend(ncol=2, fontsize=7)
+        ax.legend(
+            ncol=3, fontsize=7, loc="upper left",
+            bbox_to_anchor=(0, -0.15),
+        )
         fig.tight_layout()
         _save(fig, out_dir / "win_rate.png")
 
