@@ -13,8 +13,6 @@
 # -- Training loop ------------------------------------------------------------
 # Iterations per ablation run.  Range: [50, 5000].
 max_iter: 500
-# Gradient batch size. 1536 fills ~6-6.5GB on 8GB with AMP, leaving ~1.5GB
-# headroom for heavier ablations (mixed_replay buffer, gradient_surgery, etc.).
 batch_size: 1024
 # Learning rate for ablation fine-tuning.  Range: [1e-5, 1e-3].
 lr: 3.0e-4
