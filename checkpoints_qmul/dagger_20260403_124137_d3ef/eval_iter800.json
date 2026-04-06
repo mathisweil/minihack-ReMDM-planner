@@ -1,0 +1,124 @@
+{
+  "timestamp": "2026-04-04T21:15:10.811678+00:00",
+  "results": {
+    "id": {
+      "MiniHack-Room-Random-5x5-v0": {
+        "win_rate": 0.92,
+        "wins": 46,
+        "avg_reward": 20.574000000000005,
+        "avg_steps": 18.32,
+        "n_episodes": 50
+      },
+      "MiniHack-Room-Random-15x15-v0": {
+        "win_rate": 0.84,
+        "wins": 42,
+        "avg_reward": 21.66060000000001,
+        "avg_steps": 111.04,
+        "n_episodes": 50
+      },
+      "MiniHack-Corridor-R2-v0": {
+        "win_rate": 0.46,
+        "wins": 23,
+        "avg_reward": 7.3164000000000335,
+        "avg_steps": 275.42,
+        "n_episodes": 50
+      },
+      "MiniHack-MazeWalk-9x9-v0": {
+        "win_rate": 0.28,
+        "wins": 14,
+        "avg_reward": 4.719599999999997,
+        "avg_steps": 145.84,
+        "n_episodes": 50
+      }
+    },
+    "ood": {
+      "MiniHack-Room-Dark-15x15-v0": {
+        "win_rate": 0.08,
+        "wins": 4,
+        "avg_reward": -0.4261999999999941,
+        "avg_steps": 279.08,
+        "n_episodes": 50
+      },
+      "MiniHack-Corridor-R5-v0": {
+        "win_rate": 0.0,
+        "wins": 0,
+        "avg_reward": -4.7981999999999445,
+        "avg_steps": 500.0,
+        "n_episodes": 50
+      },
+      "MiniHack-MazeWalk-45x19-v0": {
+        "win_rate": 0.0,
+        "wins": 0,
+        "avg_reward": -4.733999999999944,
+        "avg_steps": 500.0,
+        "n_episodes": 50
+      }
+    }
+  },
+  "metadata": {
+    "iteration": 800,
+    "lr": 3e-05,
+    "dagger_batch_size": 2048,
+    "aux_loss_weight": 0.5,
+    "buffer_size": 10000,
+    "buffer_capacity": 10000,
+    "ema_decay": 0.999,
+    "grad_steps_per_iteration": 100,
+    "episodes_per_iteration": 30,
+    "id_winrate": 0.625,
+    "ood_winrate": 0.02666666666666667,
+    "per_env_id": {
+      "MiniHack-Room-Random-5x5-v0": {
+        "win_rate": 0.92,
+        "wins": 46,
+        "avg_reward": 20.574000000000005,
+        "avg_steps": 18.32,
+        "n_episodes": 50
+      },
+      "MiniHack-Room-Random-15x15-v0": {
+        "win_rate": 0.84,
+        "wins": 42,
+        "avg_reward": 21.66060000000001,
+        "avg_steps": 111.04,
+        "n_episodes": 50
+      },
+      "MiniHack-Corridor-R2-v0": {
+        "win_rate": 0.46,
+        "wins": 23,
+        "avg_reward": 7.3164000000000335,
+        "avg_steps": 275.42,
+        "n_episodes": 50
+      },
+      "MiniHack-MazeWalk-9x9-v0": {
+        "win_rate": 0.28,
+        "wins": 14,
+        "avg_reward": 4.719599999999997,
+        "avg_steps": 145.84,
+        "n_episodes": 50
+      }
+    },
+    "per_env_ood": {
+      "MiniHack-Room-Dark-15x15-v0": {
+        "win_rate": 0.08,
+        "wins": 4,
+        "avg_reward": -0.4261999999999941,
+        "avg_steps": 279.08,
+        "n_episodes": 50
+      },
+      "MiniHack-Corridor-R5-v0": {
+        "win_rate": 0.0,
+        "wins": 0,
+        "avg_reward": -4.7981999999999445,
+        "avg_steps": 500.0,
+        "n_episodes": 50
+      },
+      "MiniHack-MazeWalk-45x19-v0": {
+        "win_rate": 0.0,
+        "wins": 0,
+        "avg_reward": -4.733999999999944,
+        "avg_steps": 500.0,
+        "n_episodes": 50
+      }
+    }
+  }
+}
