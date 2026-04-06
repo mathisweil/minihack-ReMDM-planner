@@ -119,8 +119,10 @@ def _ema(values: list[float], alpha: float = 0.3) -> list[float]:
     """
     if not values:
         return []
-    out = [values[0]]
-    for v in values[1:]:
+    # Replace None (from NaN -> JSON null -> None roundtrip) with 0.0
+    clean = [v if v is not None else 0.0 for v in values]
+    out = [clean[0]]
+    for v in clean[1:]:
         out.append(alpha * v + (1.0 - alpha) * out[-1])
     return out
 
