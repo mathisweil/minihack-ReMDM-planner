@@ -57,7 +57,7 @@ def upload_run(
         run_id: Unique run identifier.
         token: HF API token.
     """
-    run_path = Path(run_dir)
+    run_path = Path(run_dir).resolve()
     if not run_path.is_dir():
         logger.error(f"Run directory not found: {run_dir}")
         return
