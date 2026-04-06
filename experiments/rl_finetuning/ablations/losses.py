@@ -102,7 +102,7 @@ def _forward_and_loss(
     device: torch.device,
     t_min: float = _EPS,
     t_max: float = 1.0,
-) -> tuple[Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     """Sample t, mask, forward pass, compute per-sample loss + goal loss.
 
     Args:
@@ -116,7 +116,8 @@ def _forward_and_loss(
         t_max: Upper bound for uniform t sampling.
 
     Returns:
-        Tuple of (per_sample_loss ``[B]``, aux_loss scalar, logits ``[B,H,V]``).
+        Tuple of (per_sample_loss ``[B]``, aux_loss scalar,
+        logits ``[B,H,V]``, zt ``[B,H]``, t_discrete ``[B]``).
     """
     B = x0.shape[0]
     schedule_fn = cfg._schedule_fn
@@ -145,7 +146,7 @@ def _forward_and_loss(
     # Auxiliary goal loss
     aux_loss = auxiliary_goal_loss(goal_pred, global_obs)
 
-    return per_sample, aux_loss, logits
+    return per_sample, aux_loss, logits, zt, t_discrete
 
 
 def _core_loss(
@@ -175,7 +176,7 @@ def _core_loss(
     Returns:
         Scalar total loss.
     """
-    per_sample, aux_loss, _ = _forward_and_loss(
+    per_sample, aux_loss, _, _, _ = _forward_and_loss(
         model, local_obs, global_obs, x0, cfg, device, t_min, t_max
     )
 
@@ -187,44 +188,35 @@ def _core_loss(
     return loss + cfg.aux_loss_weight * aux_loss
 
 
-def _kl_penalty(
-    current_model: nn.Module,
+def _kl_from_logits(
+    cur_logits: Tensor,
     ref_model: nn.Module,
     local_obs: Tensor,
     global_obs: Tensor,
-    x0: Tensor,
+    zt: Tensor,
+    t_discrete: Tensor,
     cfg: SimpleNamespace,
-    device: torch.device,
 ) -> Tensor:
-    """KL divergence KL(current || pretrained) on masked positions.
+    """KL(current || pretrained) on masked positions, reusing logits.
+
+    Avoids a second gradient-tracked forward pass through the current
+    model by accepting pre-computed logits from ``_forward_and_loss``.
+    Only the frozen ref_model is run (under ``no_grad``).
 
     Args:
-        current_model: Current fine-tuned model.
+        cur_logits: ``[B, H, A]`` logits from the current model.
         ref_model: Frozen pretrained model.
         local_obs: ``[B, 9, 9]``.
         global_obs: ``[B, 21, 79]``.
-        x0: ``[B, H]`` clean actions.
+        zt: ``[B, H]`` noisy sequence (same as used for cur_logits).
+        t_discrete: ``[B]`` discrete timestep (same as above).
         cfg: Config namespace.
-        device: Torch device.
 
     Returns:
         Scalar mean KL on masked positions.
     """
-    B = x0.shape[0]
-    schedule_fn = cfg._schedule_fn
-
-    t = torch.rand(B, device=device) * (1.0 - _EPS) + _EPS  # [B]
-    zt = q_sample(x0, t, cfg.mask_token, cfg.pad_token, schedule_fn)
-
-    t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
-        0, cfg.num_diffusion_steps - 1
-    )
-
-    cur_out = current_model(local_obs, global_obs, zt, t_discrete)
     with torch.no_grad():
         ref_out = ref_model(local_obs, global_obs, zt, t_discrete)
-
-    cur_logits = cur_out["actions"]  # [B, H, A]
     ref_logits = ref_out["actions"]  # [B, H, A]
 
     is_masked = (zt == cfg.mask_token).float()  # [B, H]
@@ -234,43 +226,31 @@ def _kl_penalty(
     cur_prob = cur_log.exp()
 
     kl = (cur_prob * (cur_log - ref_log)).sum(dim=-1)  # [B, H]
-    kl_masked = (kl * is_masked).sum(dim=1) / is_masked.sum(dim=1).clamp(min=1.0)
+    kl_masked = (
+        (kl * is_masked).sum(dim=1)
+        / is_masked.sum(dim=1).clamp(min=1.0)
+    )
     return kl_masked.mean()
 
 
-def _entropy_bonus(
-    model: nn.Module,
-    local_obs: Tensor,
-    global_obs: Tensor,
-    x0: Tensor,
+def _entropy_from_logits(
+    logits: Tensor,
+    zt: Tensor,
     cfg: SimpleNamespace,
-    device: torch.device,
 ) -> Tensor:
-    """Mean entropy of p_theta over masked positions.
+    """Mean entropy from pre-computed logits on masked positions.
+
+    Avoids a second gradient-tracked forward pass by reusing logits
+    from ``_forward_and_loss``.
 
     Args:
-        model: Current model.
-        local_obs: ``[B, 9, 9]``.
-        global_obs: ``[B, 21, 79]``.
-        x0: ``[B, H]``.
+        logits: ``[B, H, A]`` model logits.
+        zt: ``[B, H]`` noisy sequence.
         cfg: Config namespace.
-        device: Torch device.
 
     Returns:
-        Scalar mean entropy.
+        Scalar mean entropy on masked positions.
     """
-    B = x0.shape[0]
-    schedule_fn = cfg._schedule_fn
-
-    t = torch.rand(B, device=device) * (1.0 - _EPS) + _EPS
-    zt = q_sample(x0, t, cfg.mask_token, cfg.pad_token, schedule_fn)
-    t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
-        0, cfg.num_diffusion_steps - 1
-    )
-
-    out = model(local_obs, global_obs, zt, t_discrete)
-    logits = out["actions"]  # [B, H, A]
-
     is_masked = (zt == cfg.mask_token).float()  # [B, H]
 
     log_probs = F.log_softmax(logits, dim=-1)  # [B, H, A]
@@ -334,6 +314,9 @@ def make_loss_baseline(ctx: LossContext) -> LossFn:
 def make_loss_kl_penalty(ctx: LossContext) -> LossFn:
     """Return-weighted ELBO + soft KL penalty vs pretrained.
 
+    Shares the model forward pass between the ELBO and KL terms to
+    halve peak activation memory (1 gradient-tracked pass instead of 2).
+
     Args:
         ctx: Shared loss context (ref_model required).
 
@@ -352,9 +335,20 @@ def make_loss_kl_penalty(ctx: LossContext) -> LossFn:
         cfg: SimpleNamespace,
         device: torch.device,
     ) -> Tensor:
-        rl = _core_loss(model, local_obs, global_obs, x0, advantages, cfg, device)
-        kl = _kl_penalty(model, ref_model, local_obs, global_obs, x0, cfg, device)
-        return rl + kl_coef * kl
+        per_sample, aux_loss, logits, zt, t_discrete = _forward_and_loss(
+            model, local_obs, global_obs, x0, cfg, device,
+        )
+        if advantages is not None:
+            loss = (per_sample * advantages).mean()
+        else:
+            loss = per_sample.mean()
+        loss = loss + cfg.aux_loss_weight * aux_loss
+
+        kl = _kl_from_logits(
+            logits, ref_model, local_obs, global_obs,
+            zt, t_discrete, cfg,
+        )
+        return loss + kl_coef * kl
 
     return loss_fn
 
@@ -391,6 +385,9 @@ def make_loss_ewc(ctx: LossContext, fisher: dict[str, Tensor]) -> LossFn:
 def make_loss_trust_region_kl(ctx: LossContext) -> LossFn:
     """Return-weighted ELBO + hard KL trust region via quadratic barrier.
 
+    Shares the model forward pass between the ELBO and KL terms to
+    halve peak activation memory.
+
     Args:
         ctx: Shared loss context.
 
@@ -409,10 +406,21 @@ def make_loss_trust_region_kl(ctx: LossContext) -> LossFn:
         cfg: SimpleNamespace,
         device: torch.device,
     ) -> Tensor:
-        rl = _core_loss(model, local_obs, global_obs, x0, advantages, cfg, device)
-        kl = _kl_penalty(model, ref_model, local_obs, global_obs, x0, cfg, device)
+        per_sample, aux_loss, logits, zt, t_discrete = _forward_and_loss(
+            model, local_obs, global_obs, x0, cfg, device,
+        )
+        if advantages is not None:
+            loss = (per_sample * advantages).mean()
+        else:
+            loss = per_sample.mean()
+        loss = loss + cfg.aux_loss_weight * aux_loss
+
+        kl = _kl_from_logits(
+            logits, ref_model, local_obs, global_obs,
+            zt, t_discrete, cfg,
+        )
         violation = torch.clamp(kl - threshold, min=0.0)
-        return rl + 1e4 * violation ** 2
+        return loss + 1e4 * violation ** 2
 
     return loss_fn
 
@@ -529,6 +537,9 @@ def make_loss_t_curriculum(ctx: LossContext) -> LossFn:
 def make_loss_entropy_bonus(ctx: LossContext) -> LossFn:
     """Return-weighted ELBO minus entropy bonus.
 
+    Shares the model forward pass between the ELBO and entropy terms
+    to halve peak activation memory.
+
     Args:
         ctx: Shared loss context.
 
@@ -546,9 +557,17 @@ def make_loss_entropy_bonus(ctx: LossContext) -> LossFn:
         cfg: SimpleNamespace,
         device: torch.device,
     ) -> Tensor:
-        rl = _core_loss(model, local_obs, global_obs, x0, advantages, cfg, device)
-        entropy = _entropy_bonus(model, local_obs, global_obs, x0, cfg, device)
-        return rl - entropy_coef * entropy
+        per_sample, aux_loss, logits, zt, _ = _forward_and_loss(
+            model, local_obs, global_obs, x0, cfg, device,
+        )
+        if advantages is not None:
+            loss = (per_sample * advantages).mean()
+        else:
+            loss = per_sample.mean()
+        loss = loss + cfg.aux_loss_weight * aux_loss
+
+        entropy = _entropy_from_logits(logits, zt, cfg)
+        return loss - entropy_coef * entropy
 
     return loss_fn
 
