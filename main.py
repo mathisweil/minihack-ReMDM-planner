@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import random
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -128,10 +129,17 @@ def validate(args) -> None:
 # Dispatch (no lambdas, cleaner)
 # =============================================================================
 
+def _resolve_path(p: str | None) -> str | None:
+    """Resolve a user-provided path to absolute, or return None."""
+    if p is None:
+        return None
+    return str(Path(p).resolve())
+
+
 def _resolve_checkpoint(args, cfg) -> str | None:
     """Return a local checkpoint path from --checkpoint or --wandb-artifact."""
     if args.checkpoint:
-        return args.checkpoint
+        return _resolve_path(args.checkpoint)
     artifact_ref = args.wandb_artifact
     if artifact_ref:
         from src.planners.logging import download_artifact
@@ -145,12 +153,19 @@ def _resolve_checkpoint(args, cfg) -> str | None:
 
 
 def run_mode(mode: str, cfg, args) -> None:
+    data_path = _resolve_path(args.data)
+    output_path = _resolve_path(args.output)
+    des_files = (
+        [str(Path(d).resolve()) for d in args.des]
+        if args.des else None
+    )
+
     if mode == "smoke":
         run_smoke(cfg)
 
     elif mode == "offline":
         ckpt = _resolve_checkpoint(args, cfg)
-        run_offline(cfg, args.data, checkpoint_path=ckpt)
+        run_offline(cfg, data_path, checkpoint_path=ckpt)
 
     elif mode == "dagger":
         ckpt = _resolve_checkpoint(args, cfg)
@@ -171,10 +186,10 @@ def run_mode(mode: str, cfg, args) -> None:
             ckpt,
             args.envs,
             args.episodes,
-            args.output,
+            output_path,
             not args.no_ema,
             log=log,
-            des_files=args.des,
+            des_files=des_files,
             blind_global=args.blind_global,
         )
         log.finish()

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -295,11 +296,13 @@ def save_eval_json(
     }
     if metadata:
         payload["metadata"] = metadata
+    resolved = str(Path(path).resolve())
+    Path(resolved).parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(path, "w") as f:
+        with open(resolved, "w") as f:
             json.dump(payload, f, indent=2, default=str)
     except Exception:
-        logger.error(f"Failed to save eval JSON to {path}", exc_info=True)
+        logger.error(f"Failed to save eval JSON to {resolved}", exc_info=True)
 
 
 def run_inference(

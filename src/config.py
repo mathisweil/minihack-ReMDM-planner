@@ -157,7 +157,7 @@ def make_run_dir(cfg: SimpleNamespace, tag: str = "run") -> Path:
     """
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     suffix = secrets.token_hex(2)
-    run_dir = Path(cfg.checkpoint_dir) / f"{tag}_{ts}_{suffix}"
+    run_dir = Path(cfg.checkpoint_dir).resolve() / f"{tag}_{ts}_{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
     cfg.checkpoint_dir = str(run_dir)
     logger.info("Checkpoint directory: %s", run_dir)

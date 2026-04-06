@@ -169,7 +169,7 @@ def compute_t_bin_losses(
         t_lo = max(bin_edges[i].item(), _EPS)
         t_hi = max(bin_edges[i + 1].item(), t_lo + _EPS)
 
-        per_sample, aux_loss, _ = _forward_and_loss(
+        per_sample, aux_loss, _, _, _ = _forward_and_loss(
             model, local_obs, global_obs, x0, cfg, device,
             t_min=t_lo, t_max=t_hi,
         )
