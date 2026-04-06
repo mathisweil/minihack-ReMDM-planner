@@ -15,7 +15,7 @@
 
 # -- Training loop ------------------------------------------------------------
 max_iter: 500
-batch_size: 5120
+batch_size: 6144
 lr: 3.0e-4
 weight_decay: 1.0e-4
 max_grad_norm: 1.0
