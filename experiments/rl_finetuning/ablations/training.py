@@ -71,15 +71,18 @@ def _wandb_log(metrics: dict[str, float], step: int) -> None:
 
     Always injects ``"iteration": step`` so that
     ``define_metric(ns, step_metric="iteration")`` works correctly.
+    Does **not** pass ``step=`` to ``wandb.log`` — the global wandb
+    step auto-increments, and all namespaced metrics use
+    ``"iteration"`` as their x-axis via ``define_metric``.
 
     Args:
         metrics: Flat ``{namespace/key: value}`` dict.
-        step: Global iteration index.
+        step: Global iteration index (injected as ``"iteration"``).
     """
     try:
         import wandb
         if wandb.run is not None:
-            wandb.log({**metrics, "iteration": step}, step=step)
+            wandb.log({**metrics, "iteration": step})
     except Exception:
         pass
 
