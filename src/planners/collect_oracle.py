@@ -172,14 +172,14 @@ def run_collect(cfg: SimpleNamespace) -> None:
         )
 
     # Save in the dict format expected by ReplayBuffer.load_offline_data()
-    out = Path(output_path)
+    out = Path(output_path).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
 
     dataset: dict = {"trajectories": trajectories}
-    torch.save(dataset, output_path)
+    torch.save(dataset, str(out))
 
     file_mb = out.stat().st_size / (1024 * 1024)
     logger.info(
         "Saved %d trajectories to %s (%.1f MB)",
-        len(trajectories), output_path, file_mb,
+        len(trajectories), out, file_mb,
     )

@@ -85,7 +85,7 @@ def _load_yaml(path: str | None) -> dict:
     """
     if path is None:
         return {}
-    with open(path) as f:
+    with open(Path(path).resolve()) as f:
         return yaml.safe_load(f) or {}
 
 
@@ -238,7 +238,7 @@ def _results_from_json(
     Returns:
         Tuple of (results, pretrained_score, config).
     """
-    with open(path, "rb") as f:
+    with open(Path(path).resolve(), "rb") as f:
         data = orjson.loads(f.read())
 
     pretrained_score = data["pretrained_score"]
@@ -361,7 +361,7 @@ def main(argv: list[str] | None = None) -> None:
     run_id = args.run_id or (
         f"run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
-    output_dir = Path(args.output_dir) if args.output_dir else (
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else (
         _PROJECT_ROOT / "experiments" / "rl_finetuning" / "outputs" / run_id
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -371,7 +371,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.analyze_only:
         # Resolve results path: explicit --results_path, or results.json
         # inside --output_dir
-        results_path = args.results_path
+        results_path = (
+            str(Path(args.results_path).resolve())
+            if args.results_path else None
+        )
         if not results_path:
             candidate = output_dir / "results.json"
             if candidate.exists():
@@ -410,13 +413,14 @@ def main(argv: list[str] | None = None) -> None:
 
     # Merge mode: combine results from independent runs
     if args.merge:
-        for p in args.merge:
+        merge_paths = [str(Path(p).resolve()) for p in args.merge]
+        for p in merge_paths:
             if not Path(p).exists():
                 parser.error(f"Results file not found: {p}")
         logger.info(
-            "Merging %d results files: %s", len(args.merge), args.merge,
+            "Merging %d results files: %s", len(merge_paths), merge_paths,
         )
-        results, pretrained_score, config = _merge_result_files(args.merge)
+        results, pretrained_score, config = _merge_result_files(merge_paths)
         logger.info(
             "Merged %d ablation(s): %s",
             len(results), list(results.keys()),

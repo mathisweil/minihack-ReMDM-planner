@@ -957,7 +957,7 @@ def run_ablation(
         # -- Mixed replay: splice offline data --
         if replay_buf is not None and replay_buf.size > 0:
             n_offline = max(1, int(batch_size * replay_ratio))
-            n_online = batch_size - n_offline
+            n_online = min(batch_size - n_offline, n)
             buf_lo, buf_go, buf_x0, buf_ret = replay_buf.sample(n_offline)
             buf_adv, _, _ = compute_advantages(
                 buf_ret, floor, cap,
