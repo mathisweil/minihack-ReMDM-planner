@@ -13,7 +13,7 @@
 # -- Training loop ------------------------------------------------------------
 # Iterations per ablation run.  Range: [50, 5000].
 max_iter: 500
-batch_size: 1024
+batch_size: 512
 # Learning rate for ablation fine-tuning.  Range: [1e-5, 1e-3].
 lr: 3.0e-4
 # AdamW weight decay.  Reference uses 1e-4.  Range: [0, 0.1].

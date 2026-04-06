@@ -1,0 +1,35 @@
+\begin{table}[htbp]
+\centering
+\caption{Forgetting analysis}
+\label{tab:forgetting}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{First\_Collapse} & \textbf{Min\_Score} & \textbf{Min\_Score\_Iter} & \textbf{Final\_Score} & \textbf{Recovered} \\
+\midrule
+action\_diversity & never & 0.5250 & 200 & 0.6750 & True \\
+advantage\_clip & 300 & 0.4750 & 300 & 0.5750 & True \\
+attention\_only & never & 0.5250 & 200 & 0.6000 & True \\
+baseline\_rl & 250 & 0.4250 & 250 & 0.6500 & True \\
+bc\_wins & never & 0.5500 & 150 & 0.5750 & True \\
+entropy\_bonus & 50 & 0.4750 & 50 & 0.5000 & False \\
+ewc & 450 & 0.5000 & 450 & 0.6250 & True \\
+ffn\_only & never & 0.5250 & 500 & 0.5250 & True \\
+frozen\_backbone & 250 & 0.4500 & 250 & 0.6750 & True \\
+head\_only & 500 & 0.4750 & 500 & 0.4750 & False \\
+kl\_penalty & 100 & 0.5000 & 100 & 0.6500 & True \\
+layer\_ablation\_top1 & 200 & 0.5000 & 200 & 0.5750 & True \\
+layer\_ablation\_top2 & 400 & 0.5000 & 400 & 0.7500 & True \\
+layer\_ablation\_top3 & never & 0.5250 & 450 & 0.5750 & True \\
+llrd & 400 & 0.5000 & 400 & 0.5500 & True \\
+lora & 100 & 0.5000 & 100 & 0.5500 & True \\
+low\_t & never & 0.5250 & 100 & 0.7000 & True \\
+mixed\_replay & 350 & 0.5000 & 350 & 0.6000 & True \\
+normalized\_adv & 250 & 0.0750 & 450 & 0.1250 & False \\
+reward\_filtering & 250 & 0.4250 & 400 & 0.4500 & False \\
+reward\_model & 50 & 0.4250 & 500 & 0.4250 & False \\
+running\_stats & never & 0.5250 & 400 & 0.6250 & True \\
+t\_curriculum & never & 0.5250 & 100 & 0.6000 & True \\
+trust\_region\_kl & never & 0.5250 & 50 & 0.5750 & True \\
+\bottomrule
+\end{tabular}
+\end{table}
