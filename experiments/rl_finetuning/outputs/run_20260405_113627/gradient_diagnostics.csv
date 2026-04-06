@@ -1,10 +1,14 @@
 Method,Cos_Sim,RL_Norm,BC_Norm
+advantage_clip,-0.0386,0.5455,0.6101
 baseline_rl,0.8088,0.3904,0.4024
+bc_wins,0.9876,0.5529,0.5557
 entropy_bonus,0.5488,0.2495,0.3153
 ewc,0.9694,0.402,0.3786
 kl_penalty,0.5297,0.286,0.9221
 llrd,0.9639,1.9947,2.0802
 lora,0.0945,0.1744,0.4814
+low_t,0.4936,0.1769,0.6545
 mixed_replay,0.6572,0.3549,0.7259
+normalized_adv,0.5903,11159.1006,17985.6289
 t_curriculum,0.8929,1.2704,1.1694
 trust_region_kl,0.6012,0.3831,0.919

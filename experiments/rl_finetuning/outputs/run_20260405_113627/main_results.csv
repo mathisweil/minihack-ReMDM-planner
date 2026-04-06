@@ -6,5 +6,9 @@ mixed_replay,A,0.625,0.05,0.025,NEUTRAL
 t_curriculum,B,0.625,0.05,0.025,NEUTRAL
 baseline_rl,Baseline,0.6,0.025,0.0,NEUTRAL
 lora,A,0.6,0.025,0.0,NEUTRAL
+low_t,B,0.6,0.025,0.0,NEUTRAL
 trust_region_kl,A,0.575,0.0,-0.025,NEUTRAL
+bc_wins,B,0.575,0.0,-0.025,NEUTRAL
+advantage_clip,B,0.525,-0.05,-0.075,NEUTRAL
 entropy_bonus,B,0.45,-0.125,-0.15,COLLAPSE
+normalized_adv,B,0.125,-0.45,-0.475,COLLAPSE
