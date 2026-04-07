@@ -17,8 +17,6 @@ from sb3_contrib import RecurrentPPO
 import wandb
 from wandb.integration.sb3 import WandbCallback
 from src.envs.minihack_env import AdvancedObservationEnv
-from imitation.algorithms import bc
-from imitation.data.types import TransitionsMinimal
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.evaluation import evaluate_policy
 from torch.utils.data import Dataset, DataLoader
