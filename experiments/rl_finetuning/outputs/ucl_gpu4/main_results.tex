@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+\centering
+\caption{Main ablation results}
+\label{tab:main-results}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{Group} & \textbf{Score} & \textbf{Delta\_Pretrained} & \textbf{Delta\_Baseline} & \textbf{Verdict} \\
+\midrule
+attention\_only & C & 0.6250 & 0.0875 & 0.0875 & IMPROVEMENT \\
+head\_only & C & 0.5875 & 0.0500 & 0.0500 & IMPROVEMENT \\
+frozen\_backbone & C & 0.5625 & 0.0250 & 0.0250 & NEUTRAL \\
+low\_t & B & 0.5375 & 0.0000 & 0.0000 & NEUTRAL \\
+\bottomrule
+\end{tabular}
+\end{table}

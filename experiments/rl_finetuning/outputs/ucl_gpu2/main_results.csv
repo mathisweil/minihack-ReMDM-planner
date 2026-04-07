@@ -1,0 +1,4 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+trust_region_kl,A,0.55,-0.0625,-0.0625,NEUTRAL
+entropy_bonus,B,0.5375,-0.075,-0.075,NEUTRAL
+t_curriculum,B,0.475,-0.1375,-0.1375,COLLAPSE

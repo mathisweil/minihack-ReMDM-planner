@@ -1,0 +1,4 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+llrd,A,0.65,0.1,0.1,IMPROVEMENT
+mixed_replay,A,0.6375,0.0875,0.0875,IMPROVEMENT
+lora,A,0.6,0.05,0.05,IMPROVEMENT

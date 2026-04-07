@@ -1,0 +1,5 @@
+Method,Cos_Sim,RL_Norm,BC_Norm
+action_diversity,0.6523,0.3765,0.5877
+reward_filtering,0.6039,0.5642,0.4366
+reward_model,0.9506,0.5677,0.6015
+running_stats,0.9009,0.4331,0.5528

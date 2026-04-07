@@ -1,0 +1,14 @@
+\begin{table}[htbp]
+\centering
+\caption{Representation drift (KL)}
+\label{tab:repr-drift}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Method} & \textbf{KL\_mean} & \textbf{KL\_low\_t} & \textbf{KL\_mid\_t} & \textbf{KL\_high\_t} \\
+\midrule
+entropy\_bonus & 0.5774 & 0.7749 & 0.5667 & 0.3758 \\
+t\_curriculum & 0.6222 & 0.8063 & 0.6099 & 0.5158 \\
+trust\_region\_kl & 0.1314 & 0.2027 & 0.1320 & 0.0708 \\
+\bottomrule
+\end{tabular}
+\end{table}

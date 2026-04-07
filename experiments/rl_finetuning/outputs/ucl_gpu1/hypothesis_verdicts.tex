@@ -1,0 +1,14 @@
+\begin{table}[htbp]
+\centering
+\caption{Hypothesis verdicts}
+\label{tab:hyp-verdicts}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{Group} & \textbf{Score} & \textbf{Delta\_Baseline} & \textbf{Verdict} & \textbf{Hypothesis} \\
+\midrule
+llrd & A & 0.6500 & 0.1000 & IMPROVEMENT & If LLRD helps: deep gradient flow into early layers corrupts representations \\
+lora & A & 0.6000 & 0.0500 & IMPROVEMENT & If LoRA works: too many unconstrained degrees of freedom cause collapse \\
+mixed\_replay & A & 0.6375 & 0.0875 & IMPROVEMENT & If mixed replay helps: online data distribution alone is too corrupted \\
+\bottomrule
+\end{tabular}
+\end{table}

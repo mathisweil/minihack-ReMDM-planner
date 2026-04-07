@@ -1,0 +1,5 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+advantage_clip,B,0.5375,-0.0875,NEUTRAL,If clipping helps: large advantage magnitudes destabilise training
+bc_wins,B,0.5125,-0.1125,COLLAPSE,If BC on wins helps: the return weighting is the specific cause
+gradient_surgery,B,0.6875,0.0625,IMPROVEMENT,If PCGrad helps: gradients are conflicting and resolvable by projection
+normalized_adv,B,0.05,-0.575,COLLAPSE,If std normalisation helps: simple mean normalisation is too loose

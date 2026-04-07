@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+\centering
+\caption{Hypothesis verdicts}
+\label{tab:hyp-verdicts}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{Group} & \textbf{Score} & \textbf{Delta\_Baseline} & \textbf{Verdict} & \textbf{Hypothesis} \\
+\midrule
+advantage\_clip & B & 0.5375 & -0.0875 & NEUTRAL & If clipping helps: large advantage magnitudes destabilise training \\
+bc\_wins & B & 0.5125 & -0.1125 & COLLAPSE & If BC on wins helps: the return weighting is the specific cause \\
+gradient\_surgery & B & 0.6875 & 0.0625 & IMPROVEMENT & If PCGrad helps: gradients are conflicting and resolvable by projection \\
+normalized\_adv & B & 0.0500 & -0.5750 & COLLAPSE & If std normalisation helps: simple mean normalisation is too loose \\
+\bottomrule
+\end{tabular}
+\end{table}

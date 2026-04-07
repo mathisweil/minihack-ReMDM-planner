@@ -1,0 +1,5 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+gradient_surgery,B,0.6875,0.0625,0.0625,IMPROVEMENT
+advantage_clip,B,0.5375,-0.0875,-0.0875,NEUTRAL
+bc_wins,B,0.5125,-0.1125,-0.1125,COLLAPSE
+normalized_adv,B,0.05,-0.575,-0.575,COLLAPSE

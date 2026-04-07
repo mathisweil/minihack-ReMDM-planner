@@ -1,0 +1,4 @@
+Method,Cos_Sim,RL_Norm,BC_Norm
+llrd,0.8937,0.5853,0.6906
+lora,0.2934,0.1279,0.1811
+mixed_replay,0.6833,0.5154,0.7881

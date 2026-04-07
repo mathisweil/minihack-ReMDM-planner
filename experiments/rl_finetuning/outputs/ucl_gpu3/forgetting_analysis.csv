@@ -1,0 +1,5 @@
+Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
+advantage_clip,25,0.525,125,0.5625,false
+bc_wins,200,0.45,400,0.525,false
+gradient_surgery,75,0.525,75,0.65,true
+normalized_adv,175,0.05,400,0.075,false

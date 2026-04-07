@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+\centering
+\caption{Representation drift (KL)}
+\label{tab:repr-drift}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Method} & \textbf{KL\_mean} & \textbf{KL\_low\_t} & \textbf{KL\_mid\_t} & \textbf{KL\_high\_t} \\
+\midrule
+advantage\_clip & 0.1817 & 0.1848 & 0.1589 & 0.1751 \\
+bc\_wins & 0.5611 & 0.6670 & 0.5812 & 0.4072 \\
+gradient\_surgery & 0.1017 & 0.0943 & 0.1041 & 0.1018 \\
+normalized\_adv & 43705.3086 & 44855.9883 & 43429.1992 & 42087.7305 \\
+\bottomrule
+\end{tabular}
+\end{table}

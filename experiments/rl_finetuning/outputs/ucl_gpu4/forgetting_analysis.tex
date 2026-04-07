@@ -1,0 +1,15 @@
+\begin{table}[htbp]
+\centering
+\caption{Forgetting analysis}
+\label{tab:forgetting}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{First\_Collapse} & \textbf{Min\_Score} & \textbf{Min\_Score\_Iter} & \textbf{Final\_Score} & \textbf{Recovered} \\
+\midrule
+attention\_only & never & 0.4875 & 125 & 0.6875 & True \\
+frozen\_backbone & never & 0.5625 & 275 & 0.6875 & True \\
+head\_only & never & 0.5625 & 225 & 0.6000 & True \\
+low\_t & 400 & 0.4375 & 400 & 0.5500 & True \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,4 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+llrd,A,0.65,0.1,IMPROVEMENT,If LLRD helps: deep gradient flow into early layers corrupts representations
+lora,A,0.6,0.05,IMPROVEMENT,If LoRA works: too many unconstrained degrees of freedom cause collapse
+mixed_replay,A,0.6375,0.0875,IMPROVEMENT,If mixed replay helps: online data distribution alone is too corrupted
