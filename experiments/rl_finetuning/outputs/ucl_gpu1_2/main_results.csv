@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+llrd,A,0.6125,-0.1125,-0.1125,COLLAPSE

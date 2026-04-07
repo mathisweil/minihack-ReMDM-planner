@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+ffn_only,C,0.5938,0.0437,0.0437,NEUTRAL

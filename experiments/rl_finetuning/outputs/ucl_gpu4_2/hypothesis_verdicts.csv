@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+low_t,B,0.5563,0.0063,NEUTRAL,If low-t helps: high-t (coarse-structure) gradients are biased

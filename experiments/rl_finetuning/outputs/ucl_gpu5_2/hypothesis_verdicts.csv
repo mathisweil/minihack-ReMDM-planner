@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+ffn_only,C,0.5938,0.0437,NEUTRAL,If FFN-only works: stored knowledge (FFN as memory) needs updating; not attention
