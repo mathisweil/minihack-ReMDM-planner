@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+trust_region_kl,A,0.5875,-0.05,NEUTRAL,If hard constraint helps: soft KL is insufficient -- a hard boundary is needed

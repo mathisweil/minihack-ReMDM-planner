@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+gradient_surgery,B,0.6375,0.1625,IMPROVEMENT,If PCGrad helps: gradients are conflicting and resolvable by projection

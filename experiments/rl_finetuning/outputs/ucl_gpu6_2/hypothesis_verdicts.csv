@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+reward_filtering,D,0.5687,-0.0438,NEUTRAL,If filtering helps: noisy/low-return data poisons gradients

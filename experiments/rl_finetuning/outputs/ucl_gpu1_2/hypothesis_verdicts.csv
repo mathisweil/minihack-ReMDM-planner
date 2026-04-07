@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+llrd,A,0.6125,-0.1125,COLLAPSE,If LLRD helps: deep gradient flow into early layers corrupts representations
