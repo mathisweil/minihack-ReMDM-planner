@@ -1,4 +1,44 @@
-# ── Environments ──────────────────────────────────────────────────────
+# =============================================================================
+# QMUL H200 GPU — final paper run config
+# =============================================================================
+#
+# This single config drives BOTH the final DAgger run that produced
+# `checkpoint_final/online/final.pth` AND the compute-matched offline
+# BC baseline used for the paper comparison.
+#
+#   --mode dagger    → reproduces the iter600 DAgger checkpoint recipe
+#   --mode offline   → trains a fair offline BC baseline against it
+#
+# ── Fairness analysis ───────────────────────────────────────────────
+#
+# DAgger compute at iter600 (the checkpointed model):
+#     600 iters × 100 grad_steps_per_iter × 2048 batch_size
+#         = 60,000 AdamW updates
+#         = 122,880,000 sample-equivalents
+#
+# The fair offline BC baseline matches this exactly:
+#     offline_total_grad_steps = 60,000  (override; pinned)
+#     offline_batch_size       = 2048    (matches DAgger; same SNR)
+#     weight_decay, grad_clip, aux_loss_weight, model arch, diffusion
+#         params: all matched. Model is identical between modes.
+#
+# LR strategy follows "best-of-each-method" rather than identical
+# optimisers — DAgger's 3e-5 constant is tuned for online refinement,
+# offline's 3e-4 cosine→3e-5 is BC standard from-scratch. Both
+# converge to the same effective late-training LR.
+#
+# Eval/checkpoint cadence is matched in *count* across modes (12 evals,
+# 6 checkpoints per run) via the offline_*_every_grad_steps overrides,
+# because the env-step→grad-step ratio differs by ~50× between modes.
+#
+# ── Hardware ─────────────────────────────────────────────────────────
+#
+# QMUL H200 (constrained VRAM allocation). The DAgger checkpoint was
+# produced on this hardware, so batch_size and AMP settings must
+# stay identical to the original run. AMP + torch.compile + 32-worker
+# collection are the original perf settings.
+
+# ── Environments ─────────────────────────────────────────────────────
 id_envs:
   - MiniHack-Room-Random-5x5-v0
   - MiniHack-Room-Random-15x15-v0
@@ -15,80 +55,105 @@ action_dim: 12
 mask_token: 12
 pad_token: 13
 
-# ── Model ─────────────────────────────────────────────────────────────
+# ── Model (matches checkpoint) ───────────────────────────────────────
 n_embd: 256
 n_head: 4
 n_layer: 4
 n_global_tokens: 8
 seq_len: 64
 global_gate_init: -3.0
-# Transformer dropout. 0.0 is deliberate — discrete diffusion forward masking
-# already regularises; dropout on top is redundant.
 dropout: 0.0
 ema_decay: 0.999
 
-# ── Diffusion (MDLM) ─────────────────────────────────────────────────
+# ── Diffusion (MDLM) — matches checkpoint ────────────────────────────
 noise_schedule: linear
 num_diffusion_steps: 100
 loss_weight_clip: 1000.0
 label_smoothing: 0.0
-# Use SUBS importance weighting w(t) in loss. Off by default (flat average
-# matching reference). Enable for MDLM ELBO experiments.
 use_importance_weighting: false
-# ReMDM stochastic remask base fraction
 eta: 0.15
-# Remasking strategy: rescale | cap | conf
 remask_strategy: conf
 
-# ── Inference ─────────────────────────────────────────────────────────
-# Number of reverse denoising steps at inference.
-# Reference uses 5 (aggressive). Higher = better quality, slower.
+# ── Inference / sampling — matches checkpoint ────────────────────────
 diffusion_steps_eval: 10
 diffusion_steps_collect: 5
 temperature: 0.5
 top_k: 4
 replan_every: 16
-# Soft-penalise hazardous cardinal actions during stochastic sampling.
-# Not active in the reference evaluation pipeline; off by default.
 physics_aware_sampling: false
 
-# ── Training budget (unified) ────────────────────────────────────────
-total_timesteps: 20000000
+# ── Shared training budget (DAgger only) ─────────────────────────────
+# 3.0M env-steps targets the env-step budget consumed at iter600 of
+# the original DAgger run (~600 iters × ~4-5k env-steps/iter, mid of
+# the early-iter random-policy long-rollout regime and the late-iter
+# converged short-rollout regime). Used by `--mode dagger` only.
+# Offline mode bypasses this entirely via `offline_total_grad_steps`
+# below — the unified env-step budget is fundamentally unfair when
+# the sample-to-grad-step ratio differs by ~50× between modes.
+total_timesteps: 3000000
+
+# Eval/checkpoint cadence in env-step units (DAgger mode).
+# 250k → ~12 ID/OOD evals over the run.
+# 500k → ~6 checkpoints over the run.
 id_eval_every_timesteps: 250000
 ood_eval_every_timesteps: 250000
-checkpoint_every_timesteps: 1000000
+checkpoint_every_timesteps: 500000
 
-# ── Offline BC ────────────────────────────────────────────────────────
-offline_lr: 0.0003
-offline_batch_size: 2048
-offline_grad_clip: 1.0
+# Final-eval episode count (used by both ID/OOD eval triggers and
+# checkpoint-time evals; matches the original DAgger run).
+eval_episodes_per_env: 50
+checkpoint_eval_episodes: 50
+weight_decay: 0.0001
 aux_loss_weight: 0.5
 
-# ── DAgger ────────────────────────────────────────────────────────────
+# ── DAgger (matches checkpoint_final/online/config_iter600.yaml) ─────
 dagger_lr: 0.00003
 dagger_batch_size: 2048
 dagger_grad_clip: 1.0
-weight_decay: 0.0001
 buffer_capacity: 10000
 episodes_per_iteration: 30
 grad_steps_per_iteration: 100
 efficiency_multiplier: 1.5
 curriculum_queue_size: 100
-# Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
 curriculum_preseed: true
-eval_episodes_per_env: 50
-checkpoint_eval_episodes: 50
 
-# ── Performance ──────────────────────────────────────────────────────
-# Mixed-precision (FP16) training via torch.cuda.amp.
-# Speeds up forward/backward ~1.5-2x on GPU. No effect on CPU.
+# ── Offline BC (compute-matched fair baseline) ───────────────────────
+# Per the fairness analysis above:
+#   * Same gradient compute as DAgger (60k AdamW updates × 2048 batch)
+#   * Same model, diffusion, weight_decay, grad_clip, aux_loss
+#   * BC-tuned LR + cosine schedule (best practice from-scratch)
+#   * Eval/checkpoint counts matched to DAgger via grad-step overrides
+offline_lr: 0.0003
+offline_batch_size: 2048
+offline_grad_clip: 1.0
+
+# Compute pin: 60,000 AdamW updates = exactly DAgger@iter600.
+offline_total_grad_steps: 60000
+
+# Eval cadence: 5,000 grad steps → 12 evals (matches DAgger eval count).
+offline_eval_every_grad_steps: 5000
+
+# Checkpoint cadence: 10,000 grad steps → 6 checkpoints (matches DAgger).
+offline_checkpoint_every_grad_steps: 10000
+
+# Buffer cap for offline mode only — must hold the full pre-collected
+# dataset (~1M sliding windows from 20k oracle trajectories). DAgger's
+# `buffer_capacity: 10000` would silently FIFO-evict 99% of the data.
+offline_buffer_capacity: 1500000
+
+# ── Performance (cluster-tuned, matches original DAgger run) ─────────
 use_amp: true
-# torch.compile the model for fused kernels (experimental).
-# May cause slow first iteration due to compilation. No effect on CPU.
 torch_compile: true
-# Number of parallel workers for DAgger episode collection.
-# 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
 num_collection_workers: 32
+
+# ── Data collection (for offline BC dataset) ─────────────────────────
+# 5000 eps × 4 ID envs = 20k oracle trajectories. Strictly more than
+# the ~7k unique trajectories DAgger had in its filtered buffer at
+# iter600 — offline always gets a richer pre-collected pool, which is
+# the standard fairness asymmetry in BC vs DAgger comparisons.
+collect_episodes_per_env: 5000
+collect_num_workers: 32
+collect_output: data/oracle_bc_qmul.pt
 
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints_qmul
@@ -99,6 +164,7 @@ use_wandb: true
 wandb_project: remdm-minihack
 wandb_entity: "mathis-weil-university-college-london-ucl-"
 wandb_run_name: null
-wandb_resume_id: p7wfp67q
+# wandb_resume_id intentionally omitted — fresh runs by default.
+# Override on the CLI (`wandb_resume_id=...`) to continue an existing run.
 offline_log_every: 10
 seed: null

@@ -23,6 +23,7 @@ from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
 from src.models.denoiser import ModelEMA, make_model, try_compile
+from src.planners.inference import Evaluator
 from src.planners.logging import Logger
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,9 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         log: Logger | None = None,
         raw_model: nn.Module | None = None,
         resume_state: dict | None = None,
+        evaluator: Evaluator | None = None,
+        id_envs: list[str] | None = None,
+        ood_envs: list[str] | None = None,
     ) -> dict:
         """Run offline BC training.
 
@@ -62,6 +66,14 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 uses *model* directly.
             resume_state: Checkpoint dict to resume from. If provided,
                 restores optimizer, scheduler, epoch, and step state.
+            evaluator: Optional ``Evaluator`` instance for periodic ID/OOD
+                evaluation. When ``None``, no eval is run during training.
+            id_envs: In-distribution environment IDs for periodic eval.
+                Required (non-empty) if ``evaluator`` is provided and
+                ``cfg.id_eval_every_timesteps > 0``.
+            ood_envs: Out-of-distribution environment IDs for periodic
+                eval. Required (non-empty) if ``evaluator`` is provided
+                and ``cfg.ood_eval_every_timesteps > 0``.
 
         Returns:
             Dict with ``"final_loss"`` and ``"loss_history"``.
@@ -82,16 +94,57 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         total_grad_steps = max(
             1, cfg.total_timesteps // cfg.offline_batch_size,
         )
+        # Optional override: pin offline gradient budget independently
+        # of `total_timesteps`. Used for paper-fair compute matching
+        # against a specific DAgger iteration count, e.g.
+        # `offline_total_grad_steps: 60000` to match 600 DAgger iters
+        # × `grad_steps_per_iteration: 100` AdamW updates regardless of
+        # what env-step budget DAgger consumed in those iters.
+        _grad_override = getattr(cfg, "offline_total_grad_steps", None)
+        if _grad_override is not None and _grad_override > 0:
+            total_grad_steps = int(_grad_override)
+            logger.info(
+                "Offline grad budget pinned via offline_total_grad_steps="
+                f"{total_grad_steps} (overrides total_timesteps)"
+            )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=total_grad_steps,
             eta_min=cfg.offline_lr * 0.1,
         )
-        # Checkpoint every `checkpoint_every_timesteps` samples processed
-        # → cadence in gradient-step units. 0 disables.
-        ckpt_every_step = (
-            cfg.checkpoint_every_timesteps // cfg.offline_batch_size
-            if cfg.checkpoint_every_timesteps > 0 else 0
+        # Checkpoint cadence — defaults to deriving from
+        # `checkpoint_every_timesteps` (env-step units → grad-step units
+        # via // batch_size). The optional `offline_checkpoint_every_grad_steps`
+        # override is used when an offline run is pinned via
+        # `offline_total_grad_steps` and needs an aligned cadence in
+        # grad-step units (env-step cadence diverges wildly from grad-step
+        # cadence between offline and DAgger because their sample-to-step
+        # ratios differ by ~50x).
+        _ckpt_grad_override = getattr(
+            cfg, "offline_checkpoint_every_grad_steps", None,
         )
+        if _ckpt_grad_override is not None and _ckpt_grad_override > 0:
+            ckpt_every_step = int(_ckpt_grad_override)
+        else:
+            ckpt_every_step = (
+                cfg.checkpoint_every_timesteps // cfg.offline_batch_size
+                if cfg.checkpoint_every_timesteps > 0 else 0
+            )
+        # Eval cadence — same override pattern. Without this, an offline
+        # run pinned at e.g. 60k grad steps with the default
+        # `id_eval_every_timesteps=250000` would fire ~491 evals
+        # (250000 // 2048 = 122 grad steps per eval), which is
+        # impractically dense.
+        _eval_grad_override = getattr(
+            cfg, "offline_eval_every_grad_steps", None,
+        )
+        if _eval_grad_override is not None and _eval_grad_override > 0:
+            id_eval_every_env_steps = (
+                int(_eval_grad_override) * cfg.offline_batch_size
+            )
+            ood_eval_every_env_steps = id_eval_every_env_steps
+        else:
+            id_eval_every_env_steps = cfg.id_eval_every_timesteps
+            ood_eval_every_env_steps = cfg.ood_eval_every_timesteps
         # Logging cadence. `offline_log_every` is the configured default, but
         # for very short budgets (smoke tests, ablations) we clamp it so that
         # every run emits at least ~10 log points — otherwise short runs go
@@ -128,6 +181,12 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         loss_history: list[float] = []
         _batch_start = time.perf_counter()
         last_ckpt_step = step
+        # Periodic eval anchors (env-step units, mirroring online.py).
+        # Snapping to current env_steps avoids accumulated drift across
+        # resumes; the next eval fires once another full interval has
+        # been processed since the resume point.
+        last_id_eval_env_steps = step * cfg.offline_batch_size
+        last_ood_eval_env_steps = step * cfg.offline_batch_size
 
         while step < total_grad_steps:
             batch = buffer.sample(cfg.offline_batch_size)
@@ -211,6 +270,60 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     f"step {step}/{total_grad_steps} "
                     f"(env_steps={env_steps}) loss={loss.item():.4f}"
                 )
+
+            # Periodic ID eval — env-step delta-check (mirrors
+            # online.py:277-305). Eval is opt-in: skipped entirely when
+            # no Evaluator was threaded through. The cadence variable
+            # already accounts for the optional
+            # `offline_eval_every_grad_steps` override.
+            if (
+                evaluator is not None
+                and id_envs
+                and id_eval_every_env_steps > 0
+                and env_steps - last_id_eval_env_steps
+                >= id_eval_every_env_steps
+            ):
+                eval_model = ema_model.make_eval_model(_ema_source)
+                results = evaluator.evaluate(
+                    id_envs, eval_model, cfg.eval_episodes_per_env,
+                    cfg, device,
+                )
+                if log is not None:
+                    log.log_eval(results, step=step, prefix="eval_id")
+                    mean_id_wr = (
+                        sum(s["win_rate"] for s in results.values())
+                        / len(results)
+                    ) if results else 0.0
+                    log.log(
+                        {"eval_id/mean_win_rate": mean_id_wr},
+                        step=step,
+                    )
+                last_id_eval_env_steps = env_steps
+
+            # Periodic OOD eval — same delta-check pattern.
+            if (
+                evaluator is not None
+                and ood_envs
+                and ood_eval_every_env_steps > 0
+                and env_steps - last_ood_eval_env_steps
+                >= ood_eval_every_env_steps
+            ):
+                eval_model = ema_model.make_eval_model(_ema_source)
+                results = evaluator.evaluate(
+                    ood_envs, eval_model, cfg.eval_episodes_per_env,
+                    cfg, device,
+                )
+                if log is not None:
+                    log.log_eval(results, step=step, prefix="eval_ood")
+                    mean_ood_wr = (
+                        sum(s["win_rate"] for s in results.values())
+                        / len(results)
+                    ) if results else 0.0
+                    log.log(
+                        {"eval_ood/mean_win_rate": mean_ood_wr},
+                        step=step,
+                    )
+                last_ood_eval_env_steps = env_steps
 
             # Periodic step-level checkpoint (cadence derived from
             # checkpoint_every_timesteps)
@@ -327,7 +440,14 @@ def run_offline(
         logger.error("No dataset provided or failed to load. Exiting.")
         sys.exit(1)
 
-    buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)
+    # Offline buffer must hold the full pre-collected dataset. DAgger's
+    # `buffer_capacity` (typically 10k) would silently FIFO-evict 99% of
+    # the dataset, so honour the optional `offline_buffer_capacity`
+    # override when present.
+    _offline_buf_cap = (
+        getattr(cfg, "offline_buffer_capacity", None) or cfg.buffer_capacity
+    )
+    buffer = ReplayBuffer(_offline_buf_cap, cfg.seq_len, cfg.pad_token)
     buffer.load_offline_data(data, cfg.id_envs)
     logger.info(f"Loaded {len(buffer)} windows")
 
@@ -361,10 +481,14 @@ def run_offline(
                 logger.info(f"W&B run ID from checkpoint: {saved_id}")
 
     log = Logger(cfg)
+    evaluator = Evaluator()
     train_fn = make_offline_trainer(cfg)
     result = train_fn(
         model, ema, buffer, cfg, device, log=log,
         raw_model=raw_model, resume_state=resume_state,
+        evaluator=evaluator,
+        id_envs=cfg.id_envs,
+        ood_envs=cfg.ood_envs,
     )
     logger.info(
         f"Offline training done. Final loss: {result['final_loss']:.4f}"
