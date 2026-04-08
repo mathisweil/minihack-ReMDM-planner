@@ -1,0 +1,32 @@
+\begin{table}[htbp]
+\centering
+\caption{Hypothesis verdicts}
+\label{tab:hyp-verdicts}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{Group} & \textbf{Score} & \textbf{Delta\_Baseline} & \textbf{Verdict} & \textbf{Hypothesis} \\
+\midrule
+advantage\_clip & B & 0.4958 & -0.0667 & NEUTRAL & If clipping helps: large advantage magnitudes destabilise training \\
+attention\_only & C & 0.6250 & 0.0625 & IMPROVEMENT & If attention-only works: model needs routing updates, not feature updates \\
+baseline\_rl & Baseline & 0.5625 & 0.0000 & NEUTRAL & Diagnoses whether the RL signal alone causes collapse \\
+bc\_wins & B & 0.5125 & -0.0500 & NEUTRAL & If BC on wins helps: the return weighting is the specific cause \\
+entropy\_bonus & B & 0.5708 & 0.0083 & NEUTRAL & If entropy bonus helps: collapse is mode-collapse; not a gradient problem \\
+ewc & A & 0.6667 & 0.1042 & IMPROVEMENT & If EWC helps: forgetting pretrained representations is the proximate cause \\
+ffn\_only & C & 0.6083 & 0.0458 & NEUTRAL & If FFN-only works: stored knowledge (FFN as memory) needs updating; not attention \\
+frozen\_backbone & C & 0.6167 & 0.0542 & IMPROVEMENT & If frozen backbone helps: deep gradient flow into backbone causes collapse \\
+gradient\_surgery & B & 0.6542 & 0.0917 & IMPROVEMENT & If PCGrad helps: gradients are conflicting and resolvable by projection \\
+head\_only & C & 0.5958 & 0.0333 & NEUTRAL & If head-only works: backbone representations are fine; only decision boundary needs updating \\
+kl\_penalty & A & 0.5583 & -0.0042 & NEUTRAL & If this helps: catastrophic forgetting is the primary cause; soft regularisation suffices \\
+layer\_ablation\_top1 & C & 0.6208 & 0.0583 & IMPROVEMENT & Minimal unfrozen depth needed; collapse depth correlates with gradient flow depth \\
+layer\_ablation\_top2 & C & 0.6458 & 0.0833 & IMPROVEMENT & Minimal unfrozen depth needed; collapse depth correlates with gradient flow depth \\
+layer\_ablation\_top3 & C & 0.5500 & -0.0125 & NEUTRAL & Minimal unfrozen depth needed; collapse depth correlates with gradient flow depth \\
+llrd & A & 0.6250 & 0.0625 & IMPROVEMENT & If LLRD helps: deep gradient flow into early layers corrupts representations \\
+lora & A & 0.6042 & 0.0417 & NEUTRAL & If LoRA works: too many unconstrained degrees of freedom cause collapse \\
+low\_t & B & 0.5500 & -0.0125 & NEUTRAL & If low-t helps: high-t (coarse-structure) gradients are biased \\
+mixed\_replay & A & 0.5833 & 0.0208 & NEUTRAL & If mixed replay helps: online data distribution alone is too corrupted \\
+normalized\_adv & B & 0.0625 & -0.5000 & COLLAPSE & If std normalisation helps: simple mean normalisation is too loose \\
+t\_curriculum & B & 0.5875 & 0.0250 & NEUTRAL & If curriculum helps: ordering of learning signals matters \\
+trust\_region\_kl & A & 0.5750 & 0.0125 & NEUTRAL & If hard constraint helps: soft KL is insufficient -- a hard boundary is needed \\
+\bottomrule
+\end{tabular}
+\end{table}

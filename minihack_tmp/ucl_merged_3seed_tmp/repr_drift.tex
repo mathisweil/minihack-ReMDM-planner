@@ -1,0 +1,32 @@
+\begin{table}[htbp]
+\centering
+\caption{Representation drift (KL)}
+\label{tab:repr-drift}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Method} & \textbf{KL\_mean} & \textbf{KL\_low\_t} & \textbf{KL\_mid\_t} & \textbf{KL\_high\_t} \\
+\midrule
+advantage\_clip & 0.1817 & 0.1848 & 0.1589 & 0.1751 \\
+attention\_only & 0.3199 & 0.3923 & 0.3324 & 0.2236 \\
+baseline\_rl & 0.5987 & 0.7777 & 0.5996 & 0.3991 \\
+bc\_wins & 0.5611 & 0.6670 & 0.5812 & 0.4072 \\
+entropy\_bonus & 0.5774 & 0.7749 & 0.5667 & 0.3758 \\
+ewc & 0.3276 & 0.3602 & 0.3282 & 0.2777 \\
+ffn\_only & 0.5555 & 0.6779 & 0.5862 & 0.4105 \\
+frozen\_backbone & 0.1269 & 0.1960 & 0.1098 & 0.0747 \\
+gradient\_surgery & 0.1017 & 0.0943 & 0.1041 & 0.1018 \\
+head\_only & 0.2310 & 0.2832 & 0.2224 & 0.1880 \\
+kl\_penalty & 0.2556 & 0.3376 & 0.2571 & 0.1826 \\
+layer\_ablation\_top1 & 0.3000 & 0.3306 & 0.2982 & 0.2487 \\
+layer\_ablation\_top2 & 0.4148 & 0.5064 & 0.4319 & 0.2855 \\
+layer\_ablation\_top3 & 0.6077 & 0.7826 & 0.6331 & 0.3648 \\
+llrd & 0.4395 & 0.5588 & 0.4434 & 0.3183 \\
+lora & 0.1047 & 0.0931 & 0.0954 & 0.1276 \\
+low\_t & 0.7628 & 0.9388 & 0.7382 & 0.5966 \\
+mixed\_replay & 0.5048 & 0.6290 & 0.5070 & 0.3746 \\
+normalized\_adv & 43705.3086 & 44855.9883 & 43429.1992 & 42087.7305 \\
+t\_curriculum & 0.6222 & 0.8063 & 0.6099 & 0.5158 \\
+trust\_region\_kl & 0.1314 & 0.2027 & 0.1320 & 0.0708 \\
+\bottomrule
+\end{tabular}
+\end{table}
