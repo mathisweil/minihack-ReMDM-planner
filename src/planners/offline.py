@@ -73,16 +73,35 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             weight_decay=cfg.weight_decay,
         )
 
-        total_steps = cfg.offline_epochs * max(
-            1, len(buffer) // cfg.offline_batch_size
+        # Unified budget: `total_timesteps` counts env.step()-equivalent
+        # samples consumed during training. Each gradient step consumes
+        # `offline_batch_size` samples, so total grad steps derives
+        # directly from the budget and is independent of dataset size
+        # — this is what gives offline / DAgger / SB3 runs a common
+        # denominator when comparing curves.
+        total_grad_steps = max(
+            1, cfg.total_timesteps // cfg.offline_batch_size,
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max(1, total_steps),
+            optimizer, T_max=total_grad_steps,
             eta_min=cfg.offline_lr * 0.1,
+        )
+        # Checkpoint every `checkpoint_every_timesteps` samples processed
+        # → cadence in gradient-step units. 0 disables.
+        ckpt_every_step = (
+            cfg.checkpoint_every_timesteps // cfg.offline_batch_size
+            if cfg.checkpoint_every_timesteps > 0 else 0
+        )
+        # Logging cadence. `offline_log_every` is the configured default, but
+        # for very short budgets (smoke tests, ablations) we clamp it so that
+        # every run emits at least ~10 log points — otherwise short runs go
+        # silent and curves cannot be compared across budgets.
+        log_every = min(
+            max(1, cfg.offline_log_every),
+            max(1, total_grad_steps // 10),
         )
 
         # Restore optimizer/scheduler state if resuming
-        start_epoch = 0
         step = 0
         if resume_state is not None:
             if "optimizer_state_dict" in resume_state:
@@ -93,11 +112,10 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 scheduler.load_state_dict(
                     resume_state["scheduler_state_dict"],
                 )
-            start_epoch = resume_state.get("epoch", 0)
             step = resume_state.get("step", 0)
             logger.info(
-                f"Resumed offline training from epoch {start_epoch}, "
-                f"step {step}"
+                f"Resumed offline training from step {step}/"
+                f"{total_grad_steps}"
             )
 
         # AMP: enabled when use_amp=true and on CUDA
@@ -109,105 +127,108 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
 
         loss_history: list[float] = []
         _batch_start = time.perf_counter()
-        ckpt_every_epoch = getattr(cfg, "offline_checkpoint_every", 0)
+        last_ckpt_step = step
 
-        for epoch in range(start_epoch, cfg.offline_epochs):
-            n_batches = max(1, len(buffer) // cfg.offline_batch_size)
-            for _ in range(n_batches):
-                batch = buffer.sample(cfg.offline_batch_size)
-                if batch is None:
-                    continue
-                local_np, global_np, actions_np = batch
-                local_t = torch.from_numpy(local_np).long().to(device)
-                global_t = torch.from_numpy(global_np).long().to(device)
-                actions_t = torch.from_numpy(actions_np).long().to(device)
+        while step < total_grad_steps:
+            batch = buffer.sample(cfg.offline_batch_size)
+            if batch is None:
+                break
+            local_np, global_np, actions_np = batch
+            local_t = torch.from_numpy(local_np).long().to(device)
+            global_t = torch.from_numpy(global_np).long().to(device)
+            actions_t = torch.from_numpy(actions_np).long().to(device)
 
-                B = actions_t.shape[0]
-                t = torch.rand(B, device=device)  # [B] in [0, 1)
-                t = t.clamp(1e-5, 1.0 - 1e-5)
+            B = actions_t.shape[0]
+            t = torch.rand(B, device=device)  # [B] in [0, 1)
+            t = t.clamp(1e-5, 1.0 - 1e-5)
 
-                zt = q_sample(
-                    actions_t, t, cfg.mask_token, cfg.pad_token,
-                    schedule_fn,
+            zt = q_sample(
+                actions_t, t, cfg.mask_token, cfg.pad_token,
+                schedule_fn,
+            )
+            t_discrete = (
+                t * cfg.num_diffusion_steps
+            ).long().clamp(0, cfg.num_diffusion_steps - 1)  # [B]
+
+            optimizer.zero_grad()
+            with torch.amp.autocast("cuda", enabled=_use_amp):
+                out = model(local_t, global_t, zt, t_discrete)
+
+                loss_diff = mdlm_loss(
+                    out["actions"], actions_t, zt, t,
+                    cfg.mask_token, cfg.pad_token, schedule_fn,
+                    weight_clip=cfg.loss_weight_clip,
+                    label_smoothing=cfg.label_smoothing,
+                    use_importance_weighting=cfg.use_importance_weighting,
                 )
-                t_discrete = (
-                    t * cfg.num_diffusion_steps
-                ).long().clamp(0, cfg.num_diffusion_steps - 1)  # [B]
 
-                optimizer.zero_grad()
-                with torch.amp.autocast("cuda", enabled=_use_amp):
-                    out = model(local_t, global_t, zt, t_discrete)
-
-                    loss_diff = mdlm_loss(
-                        out["actions"], actions_t, zt, t,
-                        cfg.mask_token, cfg.pad_token, schedule_fn,
-                        weight_clip=cfg.loss_weight_clip,
-                        label_smoothing=cfg.label_smoothing,
-                        use_importance_weighting=cfg.use_importance_weighting,
+                loss_aux = torch.tensor(0.0, device=device)
+                if "goal_pred" in out:
+                    loss_aux = auxiliary_goal_loss(
+                        out["goal_pred"], global_t,
                     )
 
-                    loss_aux = torch.tensor(0.0, device=device)
-                    if "goal_pred" in out:
-                        loss_aux = auxiliary_goal_loss(
-                            out["goal_pred"], global_t,
-                        )
+                loss = loss_diff + cfg.aux_loss_weight * loss_aux
 
-                    loss = loss_diff + cfg.aux_loss_weight * loss_aux
-
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                grad_norm = nn.utils.clip_grad_norm_(
-                    model.parameters(), cfg.offline_grad_clip,
-                )
-                scaler.step(optimizer)
-                scaler.update()
-                scheduler.step()
-
-                ema_model.update(_ema_source)
-                loss_history.append(loss.item())
-                step += 1
-
-                if log is not None and step % cfg.offline_log_every == 0:
-                    step_time = time.perf_counter() - _batch_start
-                    metrics = {
-                        "diffusion/loss": loss.item(),
-                        "diffusion/loss_diff": loss_diff.item(),
-                        "diffusion/loss_aux": loss_aux.item(),
-                        "train/lr": scheduler.get_last_lr()[0],
-                        "train/epoch": epoch,
-                        "train/grad_norm": grad_norm.item(),
-                        "perf/grad_steps_per_sec": (
-                            cfg.offline_log_every / max(step_time, 1e-6)
-                        ),
-                    }
-                    _ema_source_ref = _ema_source
-                    if hasattr(_ema_source_ref, "global_gate"):
-                        metrics["train/global_gate"] = torch.sigmoid(
-                            _ema_source_ref.global_gate,
-                        ).item()
-                    log.log(metrics, step=step)
-                    _batch_start = time.perf_counter()
-
-            logger.info(
-                f"Epoch {epoch + 1}/{cfg.offline_epochs} "
-                f"loss={loss_history[-1]:.4f}"
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            grad_norm = nn.utils.clip_grad_norm_(
+                model.parameters(), cfg.offline_grad_clip,
             )
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
 
-            # Periodic epoch-level checkpoint
+            ema_model.update(_ema_source)
+            loss_history.append(loss.item())
+            step += 1
+
+            # env-step equivalent: samples processed so far.
+            env_steps = step * cfg.offline_batch_size
+
+            if log is not None and step % log_every == 0:
+                step_time = time.perf_counter() - _batch_start
+                metrics = {
+                    "diffusion/loss": loss.item(),
+                    "diffusion/loss_diff": loss_diff.item(),
+                    "diffusion/loss_aux": loss_aux.item(),
+                    "train/lr": scheduler.get_last_lr()[0],
+                    "train/env_steps": env_steps,
+                    "train/progress": step / total_grad_steps,
+                    "train/grad_norm": grad_norm.item(),
+                    "perf/grad_steps_per_sec": (
+                        log_every / max(step_time, 1e-6)
+                    ),
+                }
+                _ema_source_ref = _ema_source
+                if hasattr(_ema_source_ref, "global_gate"):
+                    metrics["train/global_gate"] = torch.sigmoid(
+                        _ema_source_ref.global_gate,
+                    ).item()
+                log.log(metrics, step=step)
+                _batch_start = time.perf_counter()
+                logger.info(
+                    f"step {step}/{total_grad_steps} "
+                    f"(env_steps={env_steps}) loss={loss.item():.4f}"
+                )
+
+            # Periodic step-level checkpoint (cadence derived from
+            # checkpoint_every_timesteps)
             if (
-                ckpt_every_epoch > 0
-                and (epoch + 1) % ckpt_every_epoch == 0
+                ckpt_every_step > 0
+                and step - last_ckpt_step >= ckpt_every_step
             ):
                 _save_offline_checkpoint(
                     _ema_source, ema_model, optimizer, scheduler,
-                    epoch + 1, step, cfg, log,
+                    step, cfg, log,
                 )
+                last_ckpt_step = step
 
         if log is not None:
             log.log_summary({
                 "offline/final_loss": loss_history[-1] if loss_history else 0.0,
                 "offline/total_steps": step,
-                "offline/epochs": cfg.offline_epochs,
+                "offline/total_timesteps": step * cfg.offline_batch_size,
             })
 
         return {
@@ -223,7 +244,6 @@ def _save_offline_checkpoint(
     ema_model: ModelEMA,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
-    epoch: int,
     step: int,
     cfg: SimpleNamespace,
     log: Logger | None,
@@ -235,7 +255,6 @@ def _save_offline_checkpoint(
         ema_model: EMA tracker.
         optimizer: Optimizer.
         scheduler: LR scheduler.
-        epoch: Current epoch (completed).
         step: Global gradient step count.
         cfg: Config namespace.
         log: Logger (used to extract W&B run ID).
@@ -246,15 +265,15 @@ def _save_offline_checkpoint(
 
     ckpt_dir = Path(cfg.checkpoint_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    path = ckpt_dir / f"offline_epoch{epoch}.pth"
+    path = ckpt_dir / f"offline_step{step}.pth"
     torch.save(
         {
             "model_state_dict": model.state_dict(),
             "ema_state_dict": ema_model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "epoch": epoch,
             "step": step,
+            "env_steps": step * cfg.offline_batch_size,
             "wandb_run_id": wandb_run_id,
         },
         path,

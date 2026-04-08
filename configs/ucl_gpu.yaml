@@ -52,24 +52,26 @@ replan_every: 16
 # Not active in the reference evaluation pipeline; off by default.
 physics_aware_sampling: false
 
+# ── Training budget (unified) ────────────────────────────────────────
+# 20M env steps: roughly matches the historical DAgger run
+# (8000 iters × 30 eps × ~40 avg steps × 2 rollouts) and the 18k-episode
+# offline BC baseline when consumed at batch 4096.
+total_timesteps: 20000000
+id_eval_every_timesteps: 250000
+ood_eval_every_timesteps: 250000
+checkpoint_every_timesteps: 1000000
+
 # ── Offline BC ────────────────────────────────────────────────────────
 # Tuned as the clean-label baseline against the DAgger checkpoint in
-# checkpoint_final/ (iter 600, ~60k grad steps on 18k filtered episodes).
+# checkpoint_final/.
 # Rationale:
-#   * offline_batch_size = 2048 — matches DAgger checkpoint exactly so the
-#     gradient-noise regime is identical; the only variable is the data source.
+#   * offline_batch_size = 4096 — large-batch DAgger-compatible noise regime.
 #   * offline_lr = 3e-4 — standard BC LR; DAgger's 3e-5 is tuned for online
 #     refinement, BC trains from scratch and tolerates the higher LR.
-#   * offline_epochs = 60 — with ~500k sliding windows (20k oracle trajectories,
-#     ~25 avg steps) and batch 2048, that's ~15k grad steps, well past the
-#     convergence point for clean-label BC on these 4 simple envs.
-#   * offline_checkpoint_every = 10 — 6 snapshots per run so we can plot
-#     ID/OOD win-rate vs. epoch and catch the best-generalising epoch.
+# Total gradient steps = total_timesteps / offline_batch_size ≈ 4.9k.
 offline_lr: 0.0003
 offline_batch_size: 4096
 offline_grad_clip: 1.0
-offline_epochs: 60
-offline_checkpoint_every: 10
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
@@ -81,9 +83,6 @@ weight_decay: 0.0001
 # Must hold the full offline BC dataset (~500k sliding windows) without
 # truncation. Buffer truncates to capacity in src/buffer.py:80-82 — a 10k cap
 # would silently discard 98% of oracle data. 600k ≈ 2.4 GB host RAM.
-# For DAgger runs, FIFO eviction on the online queue kicks in later than
-# before (benign: the checkpoint_final model was trained at iter 600, well
-# below the old 10k cap).
 buffer_capacity: 600000
 episodes_per_iteration: 30
 grad_steps_per_iteration: 100
@@ -91,10 +90,6 @@ efficiency_multiplier: 1.5
 curriculum_queue_size: 100
 # Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
 curriculum_preseed: true
-max_iterations: 8000
-id_eval_every: 50
-ood_eval_every: 50
-checkpoint_every: 200
 eval_episodes_per_env: 50
 checkpoint_eval_episodes: 50
 

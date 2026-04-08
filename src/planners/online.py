@@ -92,14 +92,28 @@ class Trainer:
 
     # ── Main loop ────────────────────────────────────────────────
 
-    def train(self, start_iter: int = 0) -> None:
+    def train(
+        self, start_iter: int = 0, start_env_steps: int = 0,
+    ) -> None:
         """Run the DAgger training loop.
 
+        The budget is ``cfg.total_timesteps`` — total env.step() calls
+        across model + oracle rollouts. Iteration count is derived; it
+        depends on how many env steps each iteration consumes (which in
+        turn depends on episode length and efficiency filter outcomes).
+
         Args:
-            start_iter: Iteration to resume from.
+            start_iter: Iteration index to resume from (for logging).
+            start_env_steps: Cumulative env steps already consumed.
         """
         cfg = self.cfg
-        for iteration in range(start_iter, cfg.max_iterations):
+        env_steps_total = start_env_steps
+        iteration = start_iter
+        last_id_eval_step = start_env_steps
+        last_ood_eval_step = start_env_steps
+        last_ckpt_step = start_env_steps
+
+        while env_steps_total < cfg.total_timesteps:
             reset_gpu_memory_stats()
             iter_start = time.perf_counter()
 
@@ -143,6 +157,16 @@ class Trainer:
                 "model_won": model_wins,
                 "added_to_buffer": added_total,
             }
+
+            # Advance the unified env-step budget. Both model and oracle
+            # rollouts consume real env.step() calls (the oracle rollout
+            # runs in its own env instance in collect_oracle_trajectory),
+            # so both contribute to the budget.
+            iter_env_steps = (
+                collect_stats.get("model_steps", 0)
+                + collect_stats.get("oracle_steps", 0)
+            )
+            env_steps_total += iter_env_steps
 
             # 2. Gradient steps (EMA updated after each step)
             self.model.train()
@@ -213,6 +237,8 @@ class Trainer:
                 ),
                 "train/lr": current_lr,
                 "train/grad_norm": avg_grad_norm,
+                "train/env_steps": env_steps_total,
+                "train/progress": env_steps_total / cfg.total_timesteps,
                 "speed/iter_time_sec": iter_time,
                 "speed/collect_time_sec": collect_time,
                 "speed/train_step_time_sec": train_time,
@@ -247,11 +273,11 @@ class Trainer:
 
             self.log.log(metrics, step=iteration)
 
-            # 5. ID eval
+            # 5. ID eval — triggered when env-step delta crosses threshold
             if (
-                cfg.id_eval_every > 0
-                and iteration > 0
-                and iteration % cfg.id_eval_every == 0
+                cfg.id_eval_every_timesteps > 0
+                and env_steps_total - last_id_eval_step
+                >= cfg.id_eval_every_timesteps
             ):
                 eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
@@ -276,12 +302,13 @@ class Trainer:
                     },
                     step=iteration,
                 )
+                last_id_eval_step = env_steps_total
 
-            # 6. OOD eval
+            # 6. OOD eval — env-step-triggered
             if (
-                cfg.ood_eval_every > 0
-                and iteration > 0
-                and iteration % cfg.ood_eval_every == 0
+                cfg.ood_eval_every_timesteps > 0
+                and env_steps_total - last_ood_eval_step
+                >= cfg.ood_eval_every_timesteps
             ):
                 eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
@@ -298,18 +325,22 @@ class Trainer:
                 self.log.log(
                     {"eval_ood/mean_win_rate": mean_ood_wr}, step=iteration,
                 )
+                last_ood_eval_step = env_steps_total
 
-            # 7. Checkpoint
+            # 7. Checkpoint — env-step-triggered
             if (
-                cfg.checkpoint_every > 0
-                and iteration > 0
-                and iteration % cfg.checkpoint_every == 0
+                cfg.checkpoint_every_timesteps > 0
+                and env_steps_total - last_ckpt_step
+                >= cfg.checkpoint_every_timesteps
             ):
-                self.save_checkpoint(iteration)
+                self.save_checkpoint(iteration, env_steps_total)
+                last_ckpt_step = env_steps_total
+
+            iteration += 1
 
         # Final checkpoint
         if cfg.save_policy:
-            self.save_checkpoint(cfg.max_iterations)
+            self.save_checkpoint(iteration, env_steps_total)
 
     # ── Single gradient step ─────────────────────────────────────
 
@@ -381,11 +412,14 @@ class Trainer:
 
     # ── Checkpointing ────────────────────────────────────────────
 
-    def save_checkpoint(self, iteration: int) -> None:
+    def save_checkpoint(
+        self, iteration: int, env_steps: int,
+    ) -> None:
         """Save a training checkpoint.
 
         Args:
-            iteration: Current iteration number.
+            iteration: Current iteration number (for filename + metadata).
+            env_steps: Cumulative env.step() count consumed so far.
         """
         ckpt_dir = Path(self.cfg.checkpoint_dir)
         ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -407,6 +441,7 @@ class Trainer:
             ),
             "curriculum_state": self.collector.curriculum.state_dict(),
             "iteration": iteration,
+            "env_steps": env_steps,
             "wandb_run_id": wandb_run_id,
             "rng_states": {
                 "torch": torch.get_rng_state(),
@@ -463,6 +498,8 @@ class Trainer:
             )
             training_meta = {
                 "iteration": iteration,
+                "env_steps": env_steps,
+                "total_timesteps": self.cfg.total_timesteps,
                 "lr": current_lr,
                 "dagger_batch_size": self.cfg.dagger_batch_size,
                 "aux_loss_weight": self.cfg.aux_loss_weight,
@@ -547,14 +584,15 @@ class Trainer:
             },
         )
 
-    def load_checkpoint(self, path: str) -> int:
+    def load_checkpoint(self, path: str) -> tuple[int, int]:
         """Load a training checkpoint.
 
         Args:
             path: Path to ``.pth`` checkpoint file.
 
         Returns:
-            Iteration to resume from.
+            ``(start_iter, start_env_steps)`` — the iteration and
+            cumulative env-step count to resume from.
         """
         ckpt = torch.load(
             path, map_location=self.device, weights_only=False,
@@ -589,12 +627,13 @@ class Trainer:
             )
 
         iteration = ckpt.get("iteration", 0)
+        env_steps = ckpt.get("env_steps", 0)
         resume_from = iteration + 1
         logger.info(
-            f"Resumed from checkpoint: {path} (iter {iteration}), "
-            f"starting at iter {resume_from}"
+            f"Resumed from checkpoint: {path} (iter {iteration}, "
+            f"env_steps={env_steps}), starting at iter {resume_from}"
         )
-        return resume_from
+        return resume_from, env_steps
 
 
 def run_dagger(
@@ -662,8 +701,13 @@ def run_dagger(
     )
 
     start_iter = 0
+    start_env_steps = 0
     if checkpoint_path and not no_warm_start:
-        start_iter = trainer.load_checkpoint(checkpoint_path)
+        start_iter, start_env_steps = trainer.load_checkpoint(
+            checkpoint_path,
+        )
 
-    trainer.train(start_iter=start_iter)
+    trainer.train(
+        start_iter=start_iter, start_env_steps=start_env_steps,
+    )
     log.finish()

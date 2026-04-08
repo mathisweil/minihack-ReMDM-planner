@@ -1,9 +1,16 @@
-# Smoke test overrides — fast iteration for sanity checking.
+# Smoke test overrides — fast end-to-end sanity check on CPU.
+# With total_timesteps=5000 and ~2 eps × ~30 avg steps × 2 (model+oracle)
+# = ~120 env steps/iter → ~40 iters → a few seconds per iter on CPU.
 buffer_capacity: 50
 dagger_batch_size: 256
 offline_batch_size: 256
-max_iterations: 30
-eval_episodes_per_env: 5
-checkpoint_eval_episodes: 5
-offline_epochs: 1
+total_timesteps: 5000
+id_eval_every_timesteps: 2500
+ood_eval_every_timesteps: 2500
+checkpoint_every_timesteps: 2500
+episodes_per_iteration: 2
+grad_steps_per_iteration: 5
+eval_episodes_per_env: 2
+checkpoint_eval_episodes: 2
+num_collection_workers: 0
 use_wandb: false
