@@ -164,7 +164,7 @@ class DecisionTransformer(nn.Module):
         n_heads=4,
         n_layers=3,
         context_len=30,
-        max_ep_len=400,
+        max_ep_len=200,
         dropout=0.1
     ):
         super().__init__()
@@ -287,7 +287,7 @@ class DecisionTransformer(nn.Module):
 
 class DTDataset(Dataset):
     """Dataset for Decision Transformer training."""
-    def __init__(self, trajectories, context_len=30, max_ep_len=400, n_actions=12):
+    def __init__(self, trajectories, context_len=30, max_ep_len=200, n_actions=12):
         """
         Args:
             trajectories: List of dicts with keys:
@@ -356,7 +356,7 @@ class DTDataset(Dataset):
         }
 
 
-def evaluate_dt(model, env_id, cfg, log_dir, target_return, context_len, n_episodes=50, device="cuda", max_ep_len=400):
+def evaluate_dt(model, env_id, cfg, log_dir, target_return, context_len, n_episodes=50, device="cuda", max_ep_len=200):
     """Evaluate Decision Transformer on an environment."""
     from src.envs.minihack_env import AdvancedObservationEnv
     
@@ -381,7 +381,7 @@ def evaluate_dt(model, env_id, cfg, log_dir, target_return, context_len, n_episo
         current_rtg = target_return
         t = 0
         
-        while not done and t < 400:
+        while not done and t < 200:
             # Add current observation to history
             local_hist.append(obs["local"])
             global_hist.append(obs["global"])
@@ -481,19 +481,25 @@ def make_env(env_id, cfg, log_dir):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo", type=str, default="ppo", choices=["ppo", "dqn", "a2c", "ppo-rnn", "bc", "dt"])
-    parser.add_argument("--timesteps", type=int, default=2_000_000)
+    parser.add_argument("--timesteps", type=int, default=5_000_000)  # Match ReMDM online budget (~5.65M)
     parser.add_argument("--eval_freq", type=int, default=10_000)
     # Multi-seed support
     parser.add_argument("--seeds", type=int, nargs="+", default=[0], help="List of seeds to run (e.g., --seeds 0 1 2)")
     parser.add_argument("--n_seeds", type=int, default=None, help="Number of seeds starting from 0 (alternative to --seeds)")
-    # DT-specific args
-    parser.add_argument("--dt_epochs", type=int, default=20)
-    parser.add_argument("--dt_context_len", type=int, default=30)
-    parser.add_argument("--dt_embed_dim", type=int, default=128)
-    parser.add_argument("--dt_n_layers", type=int, default=3)
+    # DT-specific args (matched to ReMDM scale)
+    parser.add_argument("--dt_epochs", type=int, default=50)
+    parser.add_argument("--dt_context_len", type=int, default=64)
+    parser.add_argument("--dt_embed_dim", type=int, default=256)
+    parser.add_argument("--dt_n_layers", type=int, default=4)
     parser.add_argument("--dt_n_heads", type=int, default=4)
-    parser.add_argument("--dt_lr", type=float, default=1e-4)
-    parser.add_argument("--dt_batch_size", type=int, default=64)
+    parser.add_argument("--dt_lr", type=float, default=3e-4)
+    parser.add_argument("--dt_batch_size", type=int, default=256)
+    parser.add_argument("--dt_traj_per_env", type=int, default=5000, help="Trajectories per env (5000 to match ReMDM)")
+    # BC-specific args
+    parser.add_argument("--bc_epochs", type=int, default=50)
+    parser.add_argument("--bc_lr", type=float, default=3e-4)
+    parser.add_argument("--bc_batch_size", type=int, default=256)
+    parser.add_argument("--bc_traj_per_env", type=int, default=5000, help="Trajectories per env (5000 to match ReMDM)")
     args = parser.parse_args()
     
     # Handle seed specification
@@ -564,7 +570,7 @@ def main():
             trajectories = []
             
             for env_id in ID_ENVS:
-                for traj_seed in range(50):  # More data for DT
+                for traj_seed in range(args.dt_traj_per_env):  # 5000 per env to match ReMDM
                     traj_dict = collect_oracle_trajectory(env_id, traj_seed, cfg)
                     if traj_dict is not None:
                         T = len(traj_dict["actions"])
@@ -603,7 +609,7 @@ def main():
             dt_dataset = DTDataset(
                 trajectories, 
                 context_len=args.dt_context_len,
-                max_ep_len=500,
+                max_ep_len=200,
                 n_actions=cfg.action_dim
             )
             dt_dataloader = DataLoader(
@@ -621,7 +627,7 @@ def main():
                 n_heads=args.dt_n_heads,
                 n_layers=args.dt_n_layers,
                 context_len=args.dt_context_len,
-                max_ep_len=500
+                max_ep_len=200
             ).to(device)
             
             n_params = sum(p.numel() for p in model.parameters())
@@ -780,10 +786,9 @@ def main():
             all_loc, all_glob, all_acts = [], [], []
             
             for env_id in ID_ENVS:
-                for traj_seed in range(50):  # Renamed to avoid shadowing loop var
+                for traj_seed in range(args.bc_traj_per_env):  # 5000 per env to match ReMDM
                     traj_dict = collect_oracle_trajectory(env_id, traj_seed, cfg)
                     if traj_dict is not None:
-                        # Add channel dimension: (T, 9, 9) -> (T, 1, 9, 9)
                         all_loc.append(np.expand_dims(traj_dict["local"], axis=1))
                         all_glob.append(np.expand_dims(traj_dict["global"], axis=1))
                         all_acts.append(traj_dict["actions"])
@@ -793,7 +798,7 @@ def main():
             glob_arr = np.concatenate(all_glob, axis=0)
             acts_arr = np.concatenate(all_acts, axis=0)
             
-            # 2. Build Custom PyTorch DataLoader (Bypasses imitation's dict bugs!)
+            # 2. Build Custom PyTorch DataLoader
             class MiniHackBCDataset(Dataset):
                 def __init__(self, loc, glob, acts):
                     self.loc = torch.tensor(loc, dtype=torch.float32)
@@ -812,26 +817,25 @@ def main():
                         "acts": self.acts[idx]
                     }
 
-            batch_size = 256
             bc_dataset = MiniHackBCDataset(loc_arr, glob_arr, acts_arr)
-            bc_dataloader = DataLoader(bc_dataset, batch_size=batch_size, shuffle=True)
+            bc_dataloader = DataLoader(bc_dataset, batch_size=args.bc_batch_size, shuffle=True, num_workers=4, pin_memory=True)
             
             # 3. Setup the BC Policy
-            print(f"Collected {len(acts_arr)} total expert transitions. Training BC natively...")
+            print(f"Collected {len(acts_arr)} total expert transitions. Training BC...")
             policy = ActorCriticPolicy(
                 observation_space=train_env.observation_space,
                 action_space=train_env.action_space,
-                lr_schedule=lambda _: 1e-3,
+                lr_schedule=lambda _: args.bc_lr,
                 features_extractor_class=MiniHackCNN,
                 features_extractor_kwargs={"features_dim": 256},
             ).to("cuda" if torch.cuda.is_available() else "cpu")
             
             # 4. Native PyTorch Behavioral Cloning Loop
-            optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
-            n_epochs = 10
+            optimizer = torch.optim.AdamW(policy.parameters(), lr=args.bc_lr, weight_decay=1e-4)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.bc_epochs)
             
             policy.train()
-            for epoch in range(n_epochs):
+            for epoch in range(args.bc_epochs):
                 total_loss = 0.0
                 
                 for batch in bc_dataloader:
@@ -841,11 +845,14 @@ def main():
                     loss = -log_prob.mean()
                     optimizer.zero_grad()
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
                     optimizer.step()
                     total_loss += loss.item()
-                    
+                
+                scheduler.step()
                 avg_loss = total_loss / len(bc_dataloader)
-                print(f"Epoch {epoch+1:02d}/{n_epochs} | BC Loss: {avg_loss:.4f}")
+                wandb.log({"train/loss": avg_loss, "train/lr": scheduler.get_last_lr()[0], "epoch": epoch + 1})
+                print(f"Epoch {epoch+1:02d}/{args.bc_epochs} | BC Loss: {avg_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}", flush=True)
             
             model = policy  # Save reference for evaluation
             
