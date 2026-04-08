@@ -558,140 +558,129 @@ def main():
             print("="*60)
             print(f" DECISION TRANSFORMER TRAINING (seed={seed})")
             print("="*60)
-        
-        # 1. Collect Oracle Demonstrations with rewards
-        print("\nCollecting Oracle Demonstrations...")
-        trajectories = []
-        
-        for env_id in ID_ENVS:
-            for seed in range(100):  # More data for DT
-                traj_dict = collect_oracle_trajectory(env_id, seed, cfg)
-                if traj_dict is not None:
-                    T = len(traj_dict["actions"])
+            
+            # 1. Collect Oracle Demonstrations with rewards
+            print("\nCollecting Oracle Demonstrations...")
+            trajectories = []
+            
+            for env_id in ID_ENVS:
+                for traj_seed in range(100):  # More data for DT
+                    traj_dict = collect_oracle_trajectory(env_id, traj_seed, cfg)
+                    if traj_dict is not None:
+                        T = len(traj_dict["actions"])
+                        
+                        # Compute rewards (1 for reaching goal, 0 otherwise)
+                        rewards = np.zeros(T)
+                        rewards[-1] = 1.0  # Sparse reward at end
+                        
+                        # Compute returns-to-go
+                        rtg = np.zeros(T)
+                        rtg[-1] = rewards[-1]
+                        for t in range(T - 2, -1, -1):
+                            rtg[t] = rewards[t] + rtg[t + 1]
+                        
+                        trajectories.append({
+                            "local": np.expand_dims(traj_dict["local"], axis=1),
+                            "global": np.expand_dims(traj_dict["global"], axis=1),
+                            "actions": traj_dict["actions"],
+                            "rewards": rewards,
+                            "returns_to_go": rtg
+                        })
+            
+            print(f"Collected {len(trajectories)} successful trajectories")
+            total_transitions = sum(len(t["actions"]) for t in trajectories)
+            print(f"Total transitions: {total_transitions}")
+            
+            traj_lengths = [len(t["actions"]) for t in trajectories]
+            print(f"Trajectory lengths: min={min(traj_lengths)}, max={max(traj_lengths)}, mean={np.mean(traj_lengths):.1f}")
+            
+            all_returns = [t["returns_to_go"][0] for t in trajectories]
+            max_return = max(all_returns)
+            mean_return = np.mean(all_returns)
+            print(f"Return stats: max={max_return:.2f}, mean={mean_return:.2f}")
+            
+            # 2. Create Dataset and DataLoader
+            dt_dataset = DTDataset(
+                trajectories, 
+                context_len=args.dt_context_len,
+                max_ep_len=500,
+                n_actions=cfg.action_dim
+            )
+            dt_dataloader = DataLoader(
+                dt_dataset, 
+                batch_size=args.dt_batch_size, 
+                shuffle=True,
+                num_workers=4,
+                pin_memory=True
+            )
+            
+            # 3. Initialize Model
+            model = DecisionTransformer(
+                n_actions=cfg.action_dim,
+                embed_dim=args.dt_embed_dim,
+                n_heads=args.dt_n_heads,
+                n_layers=args.dt_n_layers,
+                context_len=args.dt_context_len,
+                max_ep_len=500
+            ).to(device)
+            
+            n_params = sum(p.numel() for p in model.parameters())
+            print(f"Model parameters: {n_params:,}")
+            
+            # 4. Training Loop
+            optimizer = torch.optim.AdamW(model.parameters(), lr=args.dt_lr, weight_decay=1e-4)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.dt_epochs)
+            
+            print(f"\nTraining for {args.dt_epochs} epochs...")
+            
+            for epoch in range(args.dt_epochs):
+                model.train()
+                total_loss = 0.0
+                n_batches = 0
+                
+                for batch in dt_dataloader:
+                    local = batch["local"].to(device)
+                    glob = batch["global"].to(device)
+                    actions = batch["actions"].to(device)
+                    rtg = batch["returns_to_go"].to(device)
+                    timesteps = batch["timesteps"].to(device)
+                    attention_mask = batch["attention_mask"].to(device)
                     
-                    # Compute rewards (1 for reaching goal, 0 otherwise)
-                    # Assuming last step is the goal
-                    rewards = np.zeros(T)
-                    rewards[-1] = 1.0  # Sparse reward at end
+                    action_logits = model(rtg, local, glob, actions, timesteps, attention_mask)
                     
-                    # Compute returns-to-go
-                    rtg = np.zeros(T)
-                    rtg[-1] = rewards[-1]
-                    for t in range(T - 2, -1, -1):
-                        rtg[t] = rewards[t] + rtg[t + 1]
+                    target_actions = actions.clone()
+                    logits_flat = action_logits.view(-1, cfg.action_dim)
+                    targets_flat = target_actions.view(-1)
+                    mask_flat = attention_mask.view(-1)
                     
-                    trajectories.append({
-                        "local": np.expand_dims(traj_dict["local"], axis=1),  # (T, 1, 9, 9)
-                        "global": np.expand_dims(traj_dict["global"], axis=1),  # (T, 1, 21, 79)
-                        "actions": traj_dict["actions"],
-                        "rewards": rewards,
-                        "returns_to_go": rtg
-                    })
-        
-        print(f"Collected {len(trajectories)} successful trajectories")
-        total_transitions = sum(len(t["actions"]) for t in trajectories)
-        print(f"Total transitions: {total_transitions}")
-        
-        # Trajectory length statistics
-        traj_lengths = [len(t["actions"]) for t in trajectories]
-        print(f"Trajectory lengths: min={min(traj_lengths)}, max={max(traj_lengths)}, mean={np.mean(traj_lengths):.1f}")
-        
-        # Compute statistics for target return
-        all_returns = [t["returns_to_go"][0] for t in trajectories]
-        max_return = max(all_returns)
-        mean_return = np.mean(all_returns)
-        print(f"Return stats: max={max_return:.2f}, mean={mean_return:.2f}")
-        
-        # 2. Create Dataset and DataLoader
-        dt_dataset = DTDataset(
-            trajectories, 
-            context_len=args.dt_context_len,
-            max_ep_len=200,
-            n_actions=cfg.action_dim
-        )
-        dt_dataloader = DataLoader(
-            dt_dataset, 
-            batch_size=args.dt_batch_size, 
-            shuffle=True,
-            num_workers=4,
-            pin_memory=True
-        )
-        
-        # 3. Initialize Model
-        model = DecisionTransformer(
-            n_actions=cfg.action_dim,
-            embed_dim=args.dt_embed_dim,
-            n_heads=args.dt_n_heads,
-            n_layers=args.dt_n_layers,
-            context_len=args.dt_context_len,
-            max_ep_len=200
-        ).to(device)
-        
-        n_params = sum(p.numel() for p in model.parameters())
-        print(f"Model parameters: {n_params:,}")
-        
-        # 4. Training Loop
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.dt_lr, weight_decay=1e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.dt_epochs)
-        
-        print(f"\nTraining for {args.dt_epochs} epochs...")
-        
-        for epoch in range(args.dt_epochs):
-            model.train()
-            total_loss = 0.0
-            n_batches = 0
+                    loss = nn.functional.cross_entropy(logits_flat, targets_flat, reduction='none')
+                    loss = (loss * mask_flat).sum() / mask_flat.sum()
+                    
+                    optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    optimizer.step()
+                    
+                    total_loss += loss.item()
+                    n_batches += 1
+                
+                scheduler.step()
+                avg_loss = total_loss / n_batches
+                
+                wandb.log({
+                    "train/loss": avg_loss,
+                    "train/lr": scheduler.get_last_lr()[0],
+                    "epoch": epoch + 1
+                })
+                
+                print(f"Epoch {epoch+1:02d}/{args.dt_epochs} | Loss: {avg_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}", flush=True)
             
-            for batch in dt_dataloader:
-                local = batch["local"].to(device)
-                glob = batch["global"].to(device)
-                actions = batch["actions"].to(device)
-                rtg = batch["returns_to_go"].to(device)
-                timesteps = batch["timesteps"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                
-                # Forward pass
-                action_logits = model(rtg, local, glob, actions, timesteps, attention_mask)
-                
-                # Compute loss (cross-entropy on all non-padded positions)
-                # Shift actions by 1 since we predict a_t from s_t
-                target_actions = actions.clone()
-                
-                # Flatten for loss
-                logits_flat = action_logits.view(-1, cfg.action_dim)
-                targets_flat = target_actions.view(-1)
-                mask_flat = attention_mask.view(-1)
-                
-                # Masked cross-entropy
-                loss = nn.functional.cross_entropy(logits_flat, targets_flat, reduction='none')
-                loss = (loss * mask_flat).sum() / mask_flat.sum()
-                
-                # Backward
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                
-                total_loss += loss.item()
-                n_batches += 1
-            
-            scheduler.step()
-            avg_loss = total_loss / n_batches
-            
-            # Log to wandb
-            wandb.log({
-                "train/loss": avg_loss,
-                "train/lr": scheduler.get_last_lr()[0],
-                "epoch": epoch + 1
-            })
-            
-            print(f"Epoch {epoch+1:02d}/{args.dt_epochs} | Loss: {avg_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}")
-        
-            # 5. Evaluation
+            # 5. Evaluation (OUTSIDE the epoch loop)
             print("\n" + "="*60)
             print(f" FINAL EVALUATION: DECISION TRANSFORMER (seed={seed})")
             print("="*60)
             
-            target_return = max_return  # Condition on achieving max return
+            target_return = max_return
             print(f"Evaluating with target return = {target_return:.2f}")
             
             for split_name, env_list in [("ID", ID_ENVS), ("OOD", OOD_ENVS)]:
@@ -709,7 +698,6 @@ def main():
                     
                     print(f"{short_name:25} | Win Rate: {win_rate*100:5.1f}% | Avg Steps: {avg_steps:5.1f}")
                     
-                    # Store results for aggregation
                     seed_results[f"{split_name}/{short_name}/win_rate"] = win_rate * 100
                     seed_results[f"{split_name}/{short_name}/avg_steps"] = avg_steps
                     
