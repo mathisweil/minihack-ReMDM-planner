@@ -1,0 +1,32 @@
+\begin{table}[htbp]
+\centering
+\caption{Per-environment win rates}
+\label{tab:per-env}
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Method} & \textbf{MiniHack-Room-Random-5x5-v0} & \textbf{MiniHack-Room-Random-15x15-v0} & \textbf{MiniHack-Corridor-R2-v0} & \textbf{MiniHack-MazeWalk-9x9-v0} \\
+\midrule
+advantage\_clip & 0.9000 & 0.9500 & 0.2500 & 0.1500 \\
+attention\_only & 1.0000 & 0.9000 & 0.5000 & 0.3500 \\
+baseline\_rl & 1.0000 & 0.7000 & 0.3000 & 0.1000 \\
+bc\_wins & 0.9000 & 0.7000 & 0.4000 & 0.1000 \\
+entropy\_bonus & 0.9000 & 0.4000 & 0.4500 & 0.1500 \\
+ewc & 1.0000 & 0.8500 & 0.6000 & 0.3000 \\
+ffn\_only & 1.0000 & 1.0000 & 0.3500 & 0.3000 \\
+frozen\_backbone & 0.9500 & 0.9000 & 0.5000 & 0.4000 \\
+gradient\_surgery & 1.0000 & 0.9000 & 0.4500 & 0.2500 \\
+head\_only & 1.0000 & 0.8000 & 0.3000 & 0.3000 \\
+kl\_penalty & 0.9000 & 1.0000 & 0.2000 & 0.4500 \\
+layer\_ablation\_top1 & 0.9000 & 0.7500 & 0.2000 & 0.2000 \\
+layer\_ablation\_top2 & 0.9500 & 0.9000 & 0.3500 & 0.2500 \\
+layer\_ablation\_top3 & 0.9500 & 0.7500 & 0.4000 & 0.4500 \\
+llrd & 0.8000 & 0.9000 & 0.4000 & 0.2500 \\
+lora & 1.0000 & 0.7500 & 0.2000 & 0.2000 \\
+low\_t & 1.0000 & 0.6000 & 0.4500 & 0.1500 \\
+mixed\_replay & 0.9500 & 0.7500 & 0.4500 & 0.2000 \\
+normalized\_adv & 0.1000 & 0.0000 & 0.1000 & 0.1000 \\
+t\_curriculum & 1.0000 & 0.8000 & 0.3000 & 0.1500 \\
+trust\_region\_kl & 0.9500 & 0.7500 & 0.4500 & 0.2500 \\
+\bottomrule
+\end{tabular}
+\end{table}
