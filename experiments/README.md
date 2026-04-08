@@ -1,7 +1,10 @@
 # ReMDM Experiments
 
-Research and diagnostic scripts for investigating RL fine-tuning of the ReMDM diffusion planner.
-These scripts are **standalone research code** -- they import from `src/` but do not modify it.
+Research and diagnostic scripts for investigating RL fine-tuning of the ReMDM
+diffusion planner. These scripts are **standalone research code** -- they
+import from `src/` (model, sampling, env wrapper, evaluator) but never modify
+the core training pipeline. They start from a pretrained DAgger checkpoint
+and answer the question: *which intervention prevents RL fine-tuning collapse?*
 
 ---
 
@@ -16,10 +19,11 @@ Implements **25 ablations** across five groups, plus a comprehensive diagnostic 
 rl_finetuning/
 ├── run_ablations.py          # CLI entry point
 ├── ablations/
-│   ├── losses.py             # 16 loss/objective variants as factory functions
-│   ├── optimizers.py         # AdamW, LLRD, LoRA, gradient surgery, frozen params
+│   ├── losses.py             # 15 loss/objective factory functions + LossContext
+│   ├── optimizers.py         # AdamW, LLRD, LoRA, frozen params, PCGrad helpers
 │   ├── registry.py           # AblationSpec dataclass + REGISTRY (25 ablations)
-│   └── training.py           # run_ablation() loop + AblationHistory dataclass
+│   └── training.py           # run_ablation() loop, MixedReplayBuffer, RewardModel,
+│                             #   AblationHistory dataclass
 ├── diagnostics/
 │   ├── gradient.py           # Grad alignment, per-layer norms, surgery metrics
 │   ├── representation.py     # KL drift, CKA similarity, activation norms
@@ -33,8 +37,8 @@ rl_finetuning/
 └── configs/
     ├── ablations_default.yaml   # Full-run hyperparameters
     ├── ablations_fast.yaml      # Smoke-test overrides (50 iterations)
-    ├── ablations_qmul_gpu.yaml  # QMUL GPU cluster overrides
-    └── ablations_ucl_gpu.yaml   # UCL GPU cluster overrides
+    ├── ablations_qmul_gpu.yaml  # QMUL H200 overrides (AMP, B=512, eval/diag every 50)
+    └── ablations_ucl_gpu.yaml   # UCL 3090 Ti overrides (AMP, B=4608, default cadences)
 ```
 
 ### Usage

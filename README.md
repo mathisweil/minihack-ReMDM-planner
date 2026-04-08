@@ -214,8 +214,8 @@ python main.py --mode dagger --checkpoint checkpoints/iter3000.pth --no-warm-sta
 # Override hyperparameters (total_timesteps is the unified run-length knob)
 python main.py --mode dagger total_timesteps=1000000 dagger_lr=0.0001
 
-# Use a GPU-optimised config
-python main.py --mode dagger --config configs/qmul_gpu.yaml
+# Use a GPU-optimised config (paper run, QMUL H200)
+python main.py --mode dagger --config configs/final_qmul_gpu.yaml
 ```
 
 ### Inference
@@ -250,12 +250,51 @@ python main.py --mode inference \
 python main.py --mode inference --checkpoint iter8000.pth --no-ema
 ```
 
+### Baselines (SB3 + Decision Transformer)
+
+Train and evaluate the head-to-head baselines used in the paper comparison.
+Six algorithms are wired in: standard discrete-action RL via Stable-Baselines3
+(`ppo`, `a2c`, `dqn`, `ppo-rnn`), Behavioural Cloning (`bc`) on oracle
+demonstrations, and a causal Decision Transformer (`dt`) with target-return
+conditioning. All six share the unified `cfg.total_timesteps` budget so the
+numbers are directly comparable to DAgger and offline BC.
+
+Hyperparameters live under the `baselines_*` namespace in `configs/defaults.yaml`
+(BC epochs / batch / LR, DT context length / depth / width, oracle episodes per
+env, eval cadence, DQN replay buffer, parallel SubprocVecEnv count, etc.). The
+runner writes per-seed checkpoints, SB3 logs, and an aggregated results JSON
+under `cfg.baselines_output_dir` (default `outputs/baselines/`); W&B runs land
+in a separate project (`cfg.baselines_wandb_project`, default `remdm-baselines`)
+so they don't pollute the main training leaderboards.
+
+```bash
+# PPO on the 4 ID maps for the unified env-step budget, 1 seed
+python main.py --mode baselines --algo ppo
+
+# DQN with a custom budget and 3 seeds
+python main.py --mode baselines --algo dqn \
+    --seeds 0 1 2 \
+    total_timesteps=1000000
+
+# Behavioural Cloning baseline (oracle demos -> SB3 ActorCriticPolicy)
+python main.py --mode baselines --algo bc --n-seeds 3
+
+# Decision Transformer (causal R/s/a transformer with target-return)
+python main.py --mode baselines --algo dt --seeds 0 1 2
+
+# Override the aggregated-results JSON destination
+python main.py --mode baselines --algo ppo --output results/ppo_smoke.json
+```
+
 ### CLI flags
 
 | Flag | Description |
 |---|---|
-| `--mode` | Required. One of `smoke`, `collect`, `offline`, `dagger`, `inference` |
+| `--mode` | Required. One of `smoke`, `collect`, `offline`, `dagger`, `inference`, `baselines` |
 | `--config PATH` | Config file (default: `configs/defaults.yaml`) |
+| `--algo NAME` | Baseline algorithm (`ppo`, `a2c`, `dqn`, `ppo-rnn`, `bc`, `dt`); required with `--mode baselines` |
+| `--seeds N [N ...]` | Explicit seed list for `--mode baselines` |
+| `--n-seeds N` | Number of seeds starting from 0 (alternative to `--seeds`) |
 | `--data PATH` | Dataset `.pt` file (offline mode) |
 | `--checkpoint PATH` | Checkpoint `.pth` file |
 | `--wandb-artifact REF` | W&B artifact reference (e.g. `entity/project/name:latest`) |
@@ -264,7 +303,7 @@ python main.py --mode inference --checkpoint iter8000.pth --no-ema
 | `--envs ENV [ENV ...]` | Override evaluation environments |
 | `--des PATH [PATH ...]` | Custom `.des` scenario files for evaluation |
 | `--episodes N` | Episodes per environment (default: 50) |
-| `--output PATH` | Save evaluation results to JSON |
+| `--output PATH` | Save evaluation results / aggregated baselines JSON |
 | `--blind-global` | Zero out global map observations (local-only ablation) |
 
 ---
@@ -418,7 +457,7 @@ knob that should change to scale a run up or down.
 | Parameter | Default | Description |
 |---|---|---|
 | `use_amp` | false | Mixed-precision (FP16) training via `torch.amp` |
-| `torch_compile` | true | `torch.compile` the model for fused kernels |
+| `torch_compile` | false | `torch.compile` the model for fused kernels |
 | `num_collection_workers` | 8 | Parallel workers for DAgger episode collection |
 
 **Logging**
@@ -437,12 +476,10 @@ knob that should change to scale a run up or down.
 |---|---|
 | `configs/defaults.yaml` | Base defaults for all modes |
 | `configs/smoke.yaml` | Fast smoke test (`total_timesteps=5000`, small buffer, W&B off) |
-| `configs/qmul_gpu.yaml` | QMUL GPU cluster (AMP on, 32 workers, B=2048) |
-| `configs/ucl_gpu_bigger_model.yaml` | UCL GPU with larger model (384D, 6 heads) |
-| `configs/ucl_gpu_learning_behaviour.yaml` | UCL GPU learning behaviour study (eta=0.18, B=6144) |
-| `configs/ucl_gpu_no_amp.yaml` | UCL GPU without AMP (B=3584, 32 workers) |
-| `configs/final_qmul_gpu.yaml` | **Paper run, QMUL H200.** Drives both `--mode dagger` (reproduces the iter600 checkpoint) and `--mode offline` (compute-matched fair BC baseline: 60k grad steps × B=2048). |
-| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti 24 GB.** Identical training hyperparams to the QMUL config for cross-cluster fairness; only `num_collection_workers` and output paths differ. |
+| `configs/ucl_gpu_bigger_model.yaml` | UCL GPU exploration with a larger model (384D, 6 heads) |
+| `configs/ucl_gpu_learning_behaviour.yaml` | UCL GPU learning-behaviour study (eta=0.18, B=6144) |
+| `configs/final_qmul_gpu.yaml` | **Paper run, QMUL H200.** Drives both `--mode dagger` (reproduces the iter600 checkpoint) and `--mode offline` (compute-matched fair BC baseline: 60k grad steps × B=2048). AMP + torch.compile + 32 collection workers. |
+| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti 24 GB.** Identical training hyperparams to the QMUL config for cross-cluster fairness; only `num_collection_workers` (8 instead of 32) and output paths differ. |
 
 ---
 
@@ -481,14 +518,12 @@ The environment wrapper applies shaped rewards to guide learning:
 ```
 minihack-ReMDM-planner/
 ├── configs/
-│   ├── defaults.yaml                  Base hyperparameters
-│   ├── smoke.yaml                     Smoke test overrides
-│   ├── qmul_gpu.yaml                 QMUL GPU cluster config
-│   ├── ucl_gpu_bigger_model.yaml      UCL GPU (larger model)
-│   ├── ucl_gpu_learning_behaviour.yaml UCL GPU (learning study)
-│   ├── ucl_gpu_no_amp.yaml           UCL GPU (no AMP)
-│   ├── final_qmul_gpu.yaml            Paper run: DAgger + fair offline BC (QMUL H200)
-│   └── final_ucl_gpu.yaml             Paper run: DAgger + fair offline BC (UCL 3090 Ti)
+│   ├── defaults.yaml                   Base hyperparameters
+│   ├── smoke.yaml                      Smoke test overrides
+│   ├── ucl_gpu_bigger_model.yaml       UCL GPU (larger model: 384D, 6 heads)
+│   ├── ucl_gpu_learning_behaviour.yaml UCL GPU learning-behaviour study
+│   ├── final_qmul_gpu.yaml             Paper run: DAgger + fair offline BC (QMUL H200)
+│   └── final_ucl_gpu.yaml              Paper run: DAgger + fair offline BC (UCL 3090 Ti)
 ├── environments/                      Custom .des scenario files
 ├── src/
 │   ├── config.py                      YAML config loader with CLI overrides
@@ -510,6 +545,7 @@ minihack-ReMDM-planner/
 │       ├── offline.py                 Offline BC trainer
 │       ├── online.py                  DAgger Trainer + checkpointing
 │       ├── inference.py               Evaluator + result formatting
+│       ├── baselines.py               SB3 + Decision Transformer baselines
 │       ├── smoke.py                   Smoke-test runner
 │       └── logging.py                 Centralised W&B + stdout logging
 ├── experiments/
@@ -522,7 +558,7 @@ minihack-ReMDM-planner/
 ├── scripts/
 │   ├── hf_upload.py                   HuggingFace Hub upload utility
 │   └── profile_dagger.py             DAgger iteration profiler
-├── main.py                            CLI entry point (smoke/offline/dagger/inference)
+├── main.py                            CLI entry point (smoke/collect/offline/dagger/inference/baselines)
 ├── pyproject.toml                     PEP 621 project metadata + dependencies
 ├── uv.lock                            Deterministic lockfile
 └── README.md
@@ -662,7 +698,7 @@ Wraps training forward/backward in `torch.amp.autocast("cuda")` with `GradScaler
 Applies `torch.compile(model, mode="default")` before training. Falls back gracefully if no C compiler is found (common on managed GPU nodes).
 
 - **Measured speedup:** none beyond AMP alone. Not recommended for primary training.
-- **Default:** `true` in `defaults.yaml`
+- **Default:** `false` in `defaults.yaml`; opt in via the `final_*_gpu.yaml` configs.
 - **When to use:** experimental only. May help on future PyTorch versions with better dynamic shape support.
 
 ### Parallel collection (`num_collection_workers: N`)
@@ -688,7 +724,7 @@ Run `python scripts/profile_dagger.py [key=value ...]` to profile DAgger iterati
 - **Sampling paths:** Evaluation uses stochastic ReMDM sampling (temperature, top-K, remasking) with `diffusion_steps_eval` (default 10) steps. DAgger collection uses greedy argmax sampling (deterministic, no remasking) with `diffusion_steps_collect` (default 5) steps for faster rollouts.
 - **`remdm_sample`** guarantees a fully committed output (no MASK tokens) via a final-step commit and an assertion check. A min-keep 10% safety net prevents degenerate all-masked states.
 - **EMA** shadow weights are updated after every gradient step (not per iteration). The `DataCollector` syncs the latest EMA weights before each rollout.
-- **Curriculum** initialises with a 50/50 prior per environment (configurable via `curriculum_preseed`) and uses bucket-based weights: low win-rate (0.2), medium (1.0), high (0.1).
+- **Curriculum** initialises with a 50/50 prior per environment (configurable via `curriculum_preseed`) and uses bucket-based weights over the rolling win-rate: low `[0, 0.15)` → 0.2, medium `[0.15, 0.85)` → 1.0, high `[0.85, 1.0]` → 0.1.
 - **Replay buffer** pins offline data at the front; only online samples are FIFO-evicted. Returns `None` on empty buffer (callers handle gracefully).
 - **Global gate** initialises at `sigmoid(-3.0) ~ 0.047`, starting nearly closed to prevent the global stream from destabilising early training.
 - **Dropout** is set to 0.0 by default. The discrete diffusion forward masking already regularises; dropout on top is redundant.

@@ -172,3 +172,67 @@ wandb_run_name: null
 wandb_resume_id: null
 offline_log_every: 10
 seed: null
+
+# ── SB3 / DT baselines ───────────────────────────────────────────────
+# Baselines compared head-to-head against the diffusion planner.
+# Entry point:
+#   python main.py --mode baselines --algo {ppo,dqn,a2c,ppo-rnn,bc,dt}
+#
+# Algorithm families:
+#   * SB3 RL (ppo, a2c, dqn, ppo-rnn): consume `cfg.total_timesteps` as
+#     the env-step training budget — same convention as DAgger / offline
+#     BC. Use a custom MiniHack CNN feature extractor over the dict
+#     observation {"local": (1,9,9), "global": (1,21,79)}.
+#   * Behavioural Cloning (bc): collects oracle trajectories, trains an
+#     SB3 ActorCriticPolicy with a native PyTorch CE loop, evaluates on
+#     ID + OOD environments.
+#   * Decision Transformer (dt): collects oracle trajectories with
+#     return-to-go labels, trains a small causal transformer over
+#     interleaved (R, s, a) tokens, evaluates with target-return
+#     conditioning on ID + OOD environments.
+#
+# Number of parallel SB3 SubprocVecEnv workers per ID environment.
+# Effective n_envs = baselines_n_envs_per_id * len(id_envs). Default = 2
+# → 8 parallel envs over the 4 ID maps.
+baselines_n_envs_per_id: 2
+# DQN replay buffer capacity (transitions). Used only for --algo dqn.
+baselines_dqn_buffer_size: 100000
+# SB3 EvalCallback cadence in env-steps. Independent from
+# id/ood_eval_every_timesteps because SB3's eval pipeline is per
+# vector-env tick, not shared with the diffusion planner's evaluator.
+baselines_eval_freq_env_steps: 10000
+# Episodes per env at every eval trigger AND at the final BC / DT
+# manual evaluation pass. Falls back to eval_episodes_per_env (50) when
+# null so the comparison stays apples-to-apples with DAgger evals.
+baselines_eval_episodes_per_env: null
+
+# ── BC baseline ──────────────────────────────────────────────────────
+# Oracle trajectories collected per ID environment (seeds 0..N-1).
+baselines_bc_oracle_episodes_per_env: 50
+baselines_bc_epochs: 10
+baselines_bc_batch_size: 256
+baselines_bc_lr: 0.001
+
+# ── Decision Transformer baseline ────────────────────────────────────
+baselines_dt_oracle_episodes_per_env: 100
+baselines_dt_epochs: 20
+baselines_dt_context_len: 30
+baselines_dt_embed_dim: 128
+baselines_dt_n_layers: 3
+baselines_dt_n_heads: 4
+baselines_dt_lr: 0.0001
+baselines_dt_batch_size: 64
+# Maximum episode length covered by DT positional embeddings. MUST be
+# >= the longest oracle trajectory observed during data collection.
+baselines_dt_max_ep_len: 500
+# DT eval rollout cap (steps before truncating an episode as a loss).
+baselines_dt_eval_max_steps: 200
+
+# ── Output / W&B ─────────────────────────────────────────────────────
+# Separate W&B project for baselines (kept distinct from the main
+# remdm-minihack project so baseline runs don't pollute training
+# leaderboards). Set to null to fall back to wandb_project.
+baselines_wandb_project: remdm-baselines
+# Where per-seed checkpoints, SB3 logs, and aggregated results JSON
+# are written. Resolved relative to the project root unless absolute.
+baselines_output_dir: outputs/baselines

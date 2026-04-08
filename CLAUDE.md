@@ -23,6 +23,8 @@ PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) — a d
 [Collect]     Collect oracle demonstrations main.py --mode collect
 [Offline BC]  Train on pre-collected data   main.py --mode offline --data dataset.pt
 [Smoke test]  Quick end-to-end check        main.py --mode smoke
+[Baselines]   SB3 / BC / Decision Transformer head-to-head
+                                            main.py --mode baselines --algo {ppo,a2c,dqn,ppo-rnn,bc,dt}
 ```
 
 DAgger with implicit warm-start is the recommended pipeline. The `--mode collect` + `--mode offline` path is available for explicit two-stage pre-training on oracle demonstrations before DAgger.
@@ -73,6 +75,7 @@ minihack-ReMDM-planner/
 │       ├── offline.py                 # offline BC trainer
 │       ├── online.py                  # DAgger trainer + checkpointing
 │       ├── inference.py               # Evaluator + result formatting
+│       ├── baselines.py               # SB3 (PPO/A2C/DQN/recurrent PPO) + BC + Decision Transformer
 │       ├── smoke.py                   # smoke-test runner
 │       └── logging.py                 # centralised W&B + stdout logging
 ├── experiments/
@@ -178,7 +181,10 @@ Defined in `configs/defaults.yaml` as `mask_token: 12` and `pad_token: 13`. Alwa
 
 | Flag | Description |
 |---|---|
-| `--mode` | Required. One of `smoke`, `collect`, `offline`, `dagger`, `inference` |
+| `--mode` | Required. One of `smoke`, `collect`, `offline`, `dagger`, `inference`, `baselines` |
+| `--algo` | Required for `--mode baselines`. One of `ppo`, `a2c`, `dqn`, `ppo-rnn`, `bc`, `dt` |
+| `--seeds N [N ...]` | Explicit seed list for `--mode baselines` |
+| `--n-seeds N` | Number of seeds starting from 0 (alternative to `--seeds`) |
 | `--config PATH` | Config file (default: `configs/defaults.yaml`) |
 | `--data PATH` | Dataset `.pt` file (offline mode) |
 | `--checkpoint PATH` | Checkpoint `.pth` file |

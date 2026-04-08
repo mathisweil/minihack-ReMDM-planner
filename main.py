@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from src.config import load_config
+from src.planners.baselines import ALL_BASELINE_ALGOS, run_baselines
 from src.planners.logging import Logger
 from src.planners.offline import run_offline
 from src.planners.online import run_dagger
@@ -66,9 +67,29 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["smoke", "offline", "dagger", "inference", "collect"],
+        choices=[
+            "smoke", "offline", "dagger", "inference", "collect", "baselines",
+        ],
     )
     parser.add_argument("--config", default="configs/defaults.yaml")
+    parser.add_argument(
+        "--algo", default=None, choices=list(ALL_BASELINE_ALGOS),
+        help="Baseline algorithm (required for --mode baselines)",
+    )
+    parser.add_argument(
+        "--seeds", type=int, nargs="+", default=None,
+        help=(
+            "Explicit list of seeds for --mode baselines "
+            "(e.g. --seeds 0 1 2)."
+        ),
+    )
+    parser.add_argument(
+        "--n-seeds", type=int, default=None,
+        help=(
+            "Number of seeds starting from 0 (alternative to --seeds; "
+            "only used by --mode baselines)."
+        ),
+    )
 
     parser.add_argument("--data", default=None)
     parser.add_argument("--checkpoint", default=None)
@@ -123,6 +144,20 @@ def validate(args) -> None:
         raise ValueError(
             "--checkpoint or --wandb-artifact required for inference mode"
         )
+    if args.mode == "baselines" and args.algo is None:
+        raise ValueError(
+            "--algo is required for --mode baselines "
+            f"(choose one of {list(ALL_BASELINE_ALGOS)})"
+        )
+
+
+def _resolve_seeds(args, cfg) -> list[int]:
+    """Build the seed list for --mode baselines."""
+    if args.seeds is not None:
+        return list(args.seeds)
+    if args.n_seeds is not None:
+        return list(range(int(args.n_seeds)))
+    return [cfg.seed if cfg.seed is not None else 0]
 
 
 # =============================================================================
@@ -173,6 +208,14 @@ def run_mode(mode: str, cfg, args) -> None:
 
     elif mode == "collect":
         run_collect(cfg)
+
+    elif mode == "baselines":
+        run_baselines(
+            cfg,
+            algo=args.algo,
+            seeds=_resolve_seeds(args, cfg),
+            output_path=output_path,
+        )
 
     elif mode == "inference":
         ckpt = _resolve_checkpoint(args, cfg)
