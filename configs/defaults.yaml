@@ -105,6 +105,26 @@ offline_lr: 0.0003
 offline_batch_size: 3584
 offline_grad_clip: 1.0
 aux_loss_weight: 0.5
+# ── Offline BC compute-match overrides (all opt-in, default null) ───
+# These exist solely to support paper-fair comparisons against a
+# specific DAgger iteration count, where the env-step / grad-step
+# ratio between the two modes (~50x) makes a single shared
+# `total_timesteps` budget unfair to one side. When null, offline
+# falls back to the env-step-derived defaults.
+#
+# offline_total_grad_steps: pin gradient budget (e.g. 60000 to match
+#   600 DAgger iters × 100 grad_steps_per_iter).
+# offline_eval_every_grad_steps: ID/OOD eval cadence in grad-step
+#   units. Without this, dense env-step cadence yields ~500 evals.
+# offline_checkpoint_every_grad_steps: checkpoint cadence in grad-step
+#   units. Same motivation as eval cadence.
+# offline_buffer_capacity: distinct from `buffer_capacity` (which is
+#   sized for DAgger's small FIFO buffer). The full BC dataset has
+#   ~500k–1M sliding windows; using DAgger's cap silently truncates.
+offline_total_grad_steps: null
+offline_eval_every_grad_steps: null
+offline_checkpoint_every_grad_steps: null
+offline_buffer_capacity: null
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
