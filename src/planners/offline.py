@@ -152,13 +152,26 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         else:
             id_eval_every_env_steps = cfg.id_eval_every_timesteps
             ood_eval_every_env_steps = cfg.ood_eval_every_timesteps
-        # Logging cadence. `offline_log_every` is the configured default, but
-        # for very short budgets (smoke tests, ablations) we clamp it so that
-        # every run emits at least ~10 log points — otherwise short runs go
-        # silent and curves cannot be compared across budgets.
+        # Logging cadence. `offline_log_every` is the *minimum* cadence;
+        # the actual `log_every` is clamped on both ends so the number of
+        # log points stays in [~10, ~1000] regardless of run length:
+        #
+        #   * Lower bound (`floor`): on very long runs, force `log_every`
+        #     up so total log points cap at ~1000. Without this, a 600k
+        #     grad-step run with the default `offline_log_every=10` would
+        #     emit 60,000 W&B points — silent log spam.
+        #
+        #   * Upper bound (`ceiling`): on very short runs (smoke, fast
+        #     ablations) clamp `log_every` down so every run emits at
+        #     least ~10 log points and curves stay comparable across
+        #     budgets.
+        #
+        # When the configured value sits inside the [floor, ceiling]
+        # window (the common case), it is used unchanged.
+        _floor = max(1, total_grad_steps // 1000)
+        _ceiling = max(1, total_grad_steps // 10)
         log_every = min(
-            max(1, cfg.offline_log_every),
-            max(1, total_grad_steps // 10),
+            _ceiling, max(_floor, cfg.offline_log_every),
         )
 
         # Restore optimizer/scheduler state if resuming

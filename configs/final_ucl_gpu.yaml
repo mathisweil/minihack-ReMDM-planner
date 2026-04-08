@@ -154,5 +154,5 @@ wandb_entity: "mathis-weil-university-college-london-ucl-"
 wandb_run_name: null
 # wandb_resume_id intentionally omitted — fresh runs by default.
 # Override on the CLI (`wandb_resume_id=...`) to continue an existing run.
-offline_log_every: 10
+offline_log_every: 50
 seed: null
