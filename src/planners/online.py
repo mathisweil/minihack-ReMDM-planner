@@ -122,7 +122,12 @@ class Trainer:
             num_workers = getattr(cfg, "num_collection_workers", 0)
             model_wins = 0
             added_total = 0
-            last_stats: dict = {}
+            # Accumulators across all n_eps episodes — must be summed,
+            # NOT taken from a single (last) episode, otherwise the
+            # unified env-step budget undercounts by ~n_eps×.
+            model_steps_iter = 0
+            oracle_steps_iter = 0
+            last_env_id: str = ""
 
             collect_start = time.perf_counter()
             use_gpu_batch = (
@@ -134,7 +139,9 @@ class Trainer:
                 for s in batch_stats:
                     model_wins += int(s["model_won"])
                     added_total += int(s["added_to_buffer"])
-                    last_stats = s
+                    model_steps_iter += int(s["model_steps"])
+                    oracle_steps_iter += int(s["oracle_steps"])
+                    last_env_id = s.get("env_id", last_env_id)
             elif num_workers > 0 and n_eps > 1:
                 # Threaded CPU collection (fallback)
                 batch_stats = self.collector.collect_batch_parallel(
@@ -143,29 +150,33 @@ class Trainer:
                 for s in batch_stats:
                     model_wins += int(s["model_won"])
                     added_total += int(s["added_to_buffer"])
-                    last_stats = s
+                    model_steps_iter += int(s["model_steps"])
+                    oracle_steps_iter += int(s["oracle_steps"])
+                    last_env_id = s.get("env_id", last_env_id)
             else:
                 # Sequential collection (reference behaviour)
                 for _ in range(n_eps):
-                    last_stats = self.collector.collect_one_iteration()
-                    model_wins += int(last_stats["model_won"])
-                    added_total += int(last_stats["added_to_buffer"])
+                    s = self.collector.collect_one_iteration()
+                    model_wins += int(s["model_won"])
+                    added_total += int(s["added_to_buffer"])
+                    model_steps_iter += int(s["model_steps"])
+                    oracle_steps_iter += int(s["oracle_steps"])
+                    last_env_id = s.get("env_id", last_env_id)
             collect_time = time.perf_counter() - collect_start
 
             collect_stats = {
-                **last_stats,
+                "env_id": last_env_id,
                 "model_won": model_wins,
                 "added_to_buffer": added_total,
+                "model_steps": model_steps_iter,
+                "oracle_steps": oracle_steps_iter,
             }
 
             # Advance the unified env-step budget. Both model and oracle
             # rollouts consume real env.step() calls (the oracle rollout
             # runs in its own env instance in collect_oracle_trajectory),
             # so both contribute to the budget.
-            iter_env_steps = (
-                collect_stats.get("model_steps", 0)
-                + collect_stats.get("oracle_steps", 0)
-            )
+            iter_env_steps = model_steps_iter + oracle_steps_iter
             env_steps_total += iter_env_steps
 
             # 2. Gradient steps (EMA updated after each step)
@@ -211,12 +222,9 @@ class Trainer:
             total_samples = n_steps * cfg.dagger_batch_size
             samples_per_sec = total_samples / max(train_time, 1e-6)
 
-            # Env steps per second
-            total_env_steps = (
-                collect_stats.get("model_steps", 0)
-                + collect_stats.get("oracle_steps", 0)
-            )
-            env_steps_per_sec = total_env_steps / max(collect_time, 1e-6)
+            # Env steps per second (uses the iter-summed total, not a
+            # single episode — same bug class as the env-step budget).
+            env_steps_per_sec = iter_env_steps / max(collect_time, 1e-6)
 
             metrics = {
                 "diffusion/loss": avg_loss,

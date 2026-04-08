@@ -188,6 +188,7 @@ class Logger:
         config_path: str | None,
         iteration: int,
         metadata: dict | None = None,
+        artifact_name: str | None = None,
     ) -> None:
         """Upload a checkpoint as a W&B artifact with config attached.
 
@@ -195,15 +196,20 @@ class Logger:
             checkpoint_path: Path to the ``.pth`` checkpoint file.
             config_path: Path to the YAML config snapshot to attach.
                 If ``None``, only the checkpoint is uploaded.
-            iteration: Iteration number (used in artifact name).
+            iteration: Iteration number (used in the default artifact
+                name when ``artifact_name`` is not provided).
             metadata: Optional metadata dict stored on the artifact.
+            artifact_name: Optional explicit artifact name. When
+                ``None``, defaults to ``f"checkpoint-iter{iteration}"``.
+                Offline BC passes a step-based name to avoid the
+                misleading "iter" prefix.
         """
         if not self._use_wandb or self._run is None:
             return
         try:
             import wandb
 
-            name = f"checkpoint-iter{iteration}"
+            name = artifact_name or f"checkpoint-iter{iteration}"
             artifact = wandb.Artifact(
                 name=name,
                 type="model",
