@@ -101,7 +101,7 @@ python main.py --mode <MODE> [--config PATH] [key=value ...]
 
 ### Smoke test
 
-Collects a few oracle trajectories, trains for 30 iterations, and prints ID evaluation results.
+Collects a few oracle trajectories, trains under a tiny 5k env-step budget, and prints ID evaluation results.
 
 ```bash
 python main.py --mode smoke
@@ -135,20 +135,29 @@ python main.py --mode offline --data data/dataset.pt
 
 ### Offline BC (optional)
 
-Train the diffusion model on pre-collected oracle demonstrations.
+Train the diffusion model on pre-collected oracle demonstrations. The run length
+is controlled by `total_timesteps` — each env-step of the unified budget
+corresponds to one dataset sample, so total gradient steps =
+`total_timesteps // offline_batch_size`.
 
 ```bash
 python main.py --mode offline --data path/to/dataset.pt
 
-# Resume from a checkpoint (restores optimizer, scheduler, epoch, and W&B run)
+# Shorter / longer run (the same knob the DAgger and SB3 baselines use):
+python main.py --mode offline --data dataset.pt total_timesteps=500000
+
+# Resume from a step-level checkpoint (restores optimizer, scheduler,
+# step counter, and W&B run)
 python main.py --mode offline --data path/to/dataset.pt \
-    --checkpoint checkpoints/offline_epoch10.pth
+    --checkpoint checkpoints/offline_step2000.pth
 ```
 
-Set `offline_checkpoint_every` to save epoch-level checkpoints (default 0 = off):
+Step-level checkpoints are written every `checkpoint_every_timesteps` env-step
+equivalents (converted internally to `/ offline_batch_size` grad steps).
+Set to `0` to disable:
 
 ```bash
-python main.py --mode offline --data dataset.pt offline_checkpoint_every=5
+python main.py --mode offline --data dataset.pt checkpoint_every_timesteps=0
 ```
 
 ### DAgger online training
@@ -169,8 +178,8 @@ python main.py --mode dagger \
 # Skip warm-start from checkpoint (reinitialise model, keep config)
 python main.py --mode dagger --checkpoint checkpoints/iter3000.pth --no-warm-start
 
-# Override hyperparameters
-python main.py --mode dagger max_iterations=4000 dagger_lr=0.0001
+# Override hyperparameters (total_timesteps is the unified run-length knob)
+python main.py --mode dagger total_timesteps=1000000 dagger_lr=0.0001
 
 # Use a GPU-optimised config
 python main.py --mode dagger --config configs/qmul_gpu.yaml
@@ -307,20 +316,44 @@ A `LocalDiffusionPlanner` variant (no global stream, no goal head) is also avail
 | `use_importance_weighting` | false | SUBS w(t) in loss (off = flat average) |
 | `physics_aware_sampling` | false | Penalise hazardous actions at inference |
 
+**Training budget (unified)**
+
+Offline BC, DAgger, and the SB3 baselines all share a single env-step budget
+expressed in `total_timesteps` (matching the SB3 convention). This is the only
+knob that should change to scale a run up or down.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `total_timesteps` | 2,000,000 | Env-step budget shared across offline / DAgger / SB3 |
+| `id_eval_every_timesteps` | 25,000 | ID eval cadence (env-steps) |
+| `ood_eval_every_timesteps` | 25,000 | OOD eval cadence (env-steps) |
+| `checkpoint_every_timesteps` | 125,000 | Checkpoint cadence (env-steps) |
+
+- **Offline BC:** each dataset sample is one env.step() equivalent, so total
+  gradient steps = `total_timesteps // offline_batch_size`. The cosine LR
+  schedule's `T_max` derives from the same quantity, so runs of different
+  lengths still decay to the 10% floor at their end.
+- **DAgger:** the training loop tracks cumulative `env.step()` calls (model +
+  oracle rollouts combined) and halts when the running total reaches
+  `total_timesteps`. `episodes_per_iteration` and `grad_steps_per_iteration`
+  control the collect/train ratio but **must not** scale with the budget.
+- **Fairness caveat — `ema_decay`:** this is an absolute-update-count constant
+  (half-life ~ `1 / (1 − decay)` steps). If `total_timesteps` shifts by more
+  than ~2× from the default, the fraction of training covered by the EMA
+  window changes. For very short or very long runs, consider setting a
+  matching decay manually.
+
 **Training**
 
 | Parameter | Default | Description |
 |---|---|---|
-| `offline_lr` | 0.0003 | BC learning rate (cosine-decayed to 10%) |
-| `dagger_lr` | 0.00003 | DAgger learning rate |
+| `offline_lr` | 0.0003 | BC learning rate (cosine-decayed to 10% over `total_grad_steps`) |
+| `dagger_lr` | 0.00003 | DAgger learning rate (constant) |
 | `offline_batch_size` | 3584 | Offline BC batch size |
 | `dagger_batch_size` | 3584 | DAgger batch size |
 | `offline_grad_clip` | 1.0 | Gradient norm clip (offline) |
 | `dagger_grad_clip` | 1.0 | Gradient norm clip (DAgger) |
 | `weight_decay` | 0.0001 | AdamW weight decay (both optimizers) |
-| `offline_epochs` | 30 | BC training epochs |
-| `offline_checkpoint_every` | 0 | Epoch checkpoint frequency (0 = off) |
-| `max_iterations` | 8000 | DAgger iterations |
 | `grad_steps_per_iteration` | 100 | Gradient steps per DAgger iteration |
 | `episodes_per_iteration` | 30 | Episodes collected per DAgger iteration |
 | `aux_loss_weight` | 0.5 | Weight for auxiliary goal loss |
@@ -341,11 +374,11 @@ A `LocalDiffusionPlanner` variant (no global stream, no goal head) is also avail
 
 | Parameter | Default | Description |
 |---|---|---|
-| `eval_episodes_per_env` | 50 | Episodes per environment |
-| `checkpoint_every` | 250 | Checkpoint frequency (iterations) |
+| `eval_episodes_per_env` | 50 | Episodes per environment at eval time |
 | `checkpoint_eval_episodes` | 50 | Episodes per env at checkpoint eval |
-| `id_eval_every` | 50 | ID evaluation frequency |
-| `ood_eval_every` | 50 | OOD evaluation frequency |
+
+(Eval and checkpoint *cadences* are expressed in env-steps under
+**Training budget (unified)** above.)
 
 **Performance**
 
@@ -370,7 +403,7 @@ A `LocalDiffusionPlanner` variant (no global stream, no goal head) is also avail
 | File | Purpose |
 |---|---|
 | `configs/defaults.yaml` | Base defaults for all modes |
-| `configs/smoke.yaml` | Fast smoke test (30 iters, small buffer, W&B off) |
+| `configs/smoke.yaml` | Fast smoke test (`total_timesteps=5000`, small buffer, W&B off) |
 | `configs/qmul_gpu.yaml` | QMUL GPU cluster (AMP on, 32 workers, B=2048) |
 | `configs/ucl_gpu_bigger_model.yaml` | UCL GPU with larger model (384D, 6 heads) |
 | `configs/ucl_gpu_learning_behaviour.yaml` | UCL GPU learning behaviour study (eta=0.18, B=6144) |
@@ -386,7 +419,8 @@ Each DAgger iteration:
 2. **Model rollout:** Generate plans with the EMA model using greedy sampling; execute with replanning every 16 steps. Collects `episodes_per_iteration` (default 30) episodes per iteration.
 3. **Oracle rollout:** Run the BFS oracle on the **same seed** for comparison.
 4. **Efficiency filter:** Add the oracle trajectory to the buffer if the model failed or took >1.5x the oracle's steps.
-5. **Training:** Sample from the replay buffer; run `grad_steps_per_iteration` gradient steps, updating EMA weights after each gradient step.
+5. **Budget accounting:** Advance `env_steps_total += model_steps + oracle_steps`. The training loop halts when the running total reaches `total_timesteps`.
+6. **Training:** Sample from the replay buffer; run `grad_steps_per_iteration` gradient steps, updating EMA weights after each gradient step.
 
 Collection uses GPU-batched rollouts when on CUDA with `episodes_per_iteration > 1`, falling back to threaded CPU collection or sequential collection as appropriate.
 
@@ -464,7 +498,7 @@ minihack-ReMDM-planner/
 | Namespace | Contents |
 |---|---|
 | `diffusion/` | `loss`, `loss_diff`, `loss_aux` |
-| `train/` | `buffer_size`, `buffer_online_frac`, `model_won`, `added_to_buffer`, `episodes_collected`, `model_steps`, `oracle_steps`, `efficiency_ratio`, `lr`, `grad_norm`, `global_gate` |
+| `train/` | `buffer_size`, `buffer_online_frac`, `model_won`, `added_to_buffer`, `episodes_collected`, `model_steps`, `oracle_steps`, `efficiency_ratio`, `lr`, `grad_norm`, `global_gate`, `env_steps`, `progress` |
 | `speed/` | `iter_time_sec`, `collect_time_sec`, `train_step_time_sec`, `samples_per_sec`, `env_steps_per_sec`, `gpu_memory_mb` |
 | `perf/` | `iter_time_s`, `collect_time_s`, `train_time_s`, `grad_steps_per_sec` (legacy compat) |
 | `model/` | `param_norm`, `param_drift_from_init`, `ema_gate_value` (every 10 iters) |
@@ -475,7 +509,7 @@ minihack-ReMDM-planner/
 | `curriculum/{env}/` | `win_rate` per training environment |
 | `ckpt_eval_id/`, `ckpt_eval_ood/` | Per-env metrics at checkpoint time |
 | `ckpt_eval/` | `id_winrate`, `ood_winrate` |
-| `offline/` | `final_loss`, `total_steps`, `epochs` (summary only) |
+| `offline/` | `final_loss`, `total_steps`, `total_timesteps` (summary only) |
 
 ---
 
@@ -491,12 +525,14 @@ minihack-ReMDM-planner/
     "scheduler_state_dict": ...,
     "curriculum_state":     {...},
     "iteration":            int,
+    "env_steps":            int,   # cumulative env.step() calls so far
     "wandb_run_id":         str | None,
     "rng_states":           {"torch", "numpy", "python"},
 }
 ```
 
-**Offline BC checkpoint** (epoch-level, saved when `offline_checkpoint_every > 0`):
+**Offline BC checkpoint** (step-level, file `offline_step{N}.pth`, saved when
+`checkpoint_every_timesteps > 0`):
 
 ```python
 {
@@ -504,8 +540,8 @@ minihack-ReMDM-planner/
     "ema_state_dict":       ...,
     "optimizer_state_dict": ...,
     "scheduler_state_dict": ...,
-    "epoch":                int,
     "step":                 int,
+    "env_steps":            int,   # step * offline_batch_size
     "wandb_run_id":         str | None,
 }
 ```
@@ -550,7 +586,7 @@ python main.py --mode dagger --checkpoint checkpoints/iter2000.pth
 
 # Offline BC: automatic
 python main.py --mode offline --data dataset.pt \
-    --checkpoint checkpoints/offline_epoch10.pth
+    --checkpoint checkpoints/offline_step2000.pth
 
 # Manual override (e.g. checkpoint saved before this feature was added):
 python main.py --mode dagger --checkpoint old_checkpoint.pth \

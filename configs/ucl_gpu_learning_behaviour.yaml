@@ -52,11 +52,16 @@ replan_every: 16
 # Not active in the reference evaluation pipeline; off by default.
 physics_aware_sampling: false
 
+# ── Training budget (unified) ────────────────────────────────────────
+total_timesteps: 20000000
+id_eval_every_timesteps: 250000
+ood_eval_every_timesteps: 250000
+checkpoint_every_timesteps: 1250000
+
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
 offline_batch_size: 6144
 offline_grad_clip: 1.0
-offline_epochs: 30
 aux_loss_weight: 0.5
 
 # ── DAgger ────────────────────────────────────────────────────────────
@@ -71,10 +76,6 @@ efficiency_multiplier: 1.5
 curriculum_queue_size: 100
 # Pre-seed curriculum queues with 50/50 prior for uniform early sampling.
 curriculum_preseed: true
-max_iterations: 8000
-id_eval_every: 50
-ood_eval_every: 50
-checkpoint_every: 250
 eval_episodes_per_env: 50
 checkpoint_eval_episodes: 50
 
