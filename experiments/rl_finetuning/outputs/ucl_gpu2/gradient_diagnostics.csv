@@ -1,4 +1,0 @@
-Method,Cos_Sim,RL_Norm,BC_Norm
-entropy_bonus,0.741,0.3427,0.3924
-t_curriculum,0.932,1.0221,1.173
-trust_region_kl,0.8224,1.4461,0.6367

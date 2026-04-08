@@ -1,5 +1,0 @@
-Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
-ffn_only,150,0.55,150,0.6625,true
-layer_ablation_top1,375,0.5125,500,0.5125,false
-layer_ablation_top2,150,0.525,225,0.6125,true
-layer_ablation_top3,never,0.5625,125,0.6375,true

@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-kl_penalty,A,0.5625,0.0125,0.0125,NEUTRAL

@@ -1,5 +1,0 @@
-Method,Cos_Sim,RL_Norm,BC_Norm
-attention_only,0.4993,0.2882,0.0904
-frozen_backbone,0.2784,0.3686,0.9229
-head_only,0.5266,0.1879,1.0567
-low_t,0.4839,0.4073,0.7146

@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
-kl_penalty,A,0.5625,0.0125,NEUTRAL,If this helps: catastrophic forgetting is the primary cause; soft regularisation suffices

@@ -1,4 +1,0 @@
-Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
-advantage_clip,200,0.5125,450,0.575,true
-bc_wins,25,0.5375,25,0.5375,false
-normalized_adv,200,0.05,450,0.1125,false

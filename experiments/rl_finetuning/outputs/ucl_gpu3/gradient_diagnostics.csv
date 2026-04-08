@@ -1,5 +1,0 @@
-Method,Cos_Sim,RL_Norm,BC_Norm
-advantage_clip,0.8195,0.8252,0.6126
-bc_wins,0.7604,0.2355,0.3171
-gradient_surgery,0.7407,1.3426,1.0795
-normalized_adv,0.9992,1858.948,18784.2461

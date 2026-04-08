@@ -1,5 +1,0 @@
-Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
-ffn_only,C,0.6375,0.025,NEUTRAL,If FFN-only works: stored knowledge (FFN as memory) needs updating; not attention
-layer_ablation_top1,C,0.6,-0.0125,NEUTRAL,Minimal unfrozen depth needed; collapse depth correlates with gradient flow depth
-layer_ablation_top2,C,0.6625,0.05,NEUTRAL,Minimal unfrozen depth needed; collapse depth correlates with gradient flow depth
-layer_ablation_top3,C,0.55,-0.0625,NEUTRAL,Minimal unfrozen depth needed; collapse depth correlates with gradient flow depth

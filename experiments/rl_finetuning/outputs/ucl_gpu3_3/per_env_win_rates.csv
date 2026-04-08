@@ -1,4 +1,0 @@
-Method,MiniHack-Room-Random-5x5-v0,MiniHack-Room-Random-15x15-v0,MiniHack-Corridor-R2-v0,MiniHack-MazeWalk-9x9-v0
-advantage_clip,0.85,0.85,0.45,0.15
-bc_wins,0.8,0.7,0.35,0.3
-normalized_adv,0.25,0.2,0.0,0.0

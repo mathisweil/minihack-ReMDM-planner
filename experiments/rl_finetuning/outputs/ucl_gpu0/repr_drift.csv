@@ -1,4 +1,0 @@
-Method,KL_mean,KL_low_t,KL_mid_t,KL_high_t
-baseline_rl,0.5987,0.7777,0.5996,0.3991
-ewc,0.3276,0.3602,0.3282,0.2777
-kl_penalty,0.3253,0.426,0.3261,0.198

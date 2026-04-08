@@ -1,4 +1,0 @@
-Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
-advantage_clip,B,0.475,-0.1375,COLLAPSE,If clipping helps: large advantage magnitudes destabilise training
-bc_wins,B,0.6,-0.0125,NEUTRAL,If BC on wins helps: the return weighting is the specific cause
-normalized_adv,B,0.0688,-0.5438,COLLAPSE,If std normalisation helps: simple mean normalisation is too loose

@@ -1,4 +1,0 @@
-Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
-baseline_rl,Baseline,0.5375,0.0,NEUTRAL,Diagnoses whether the RL signal alone causes collapse
-ewc,A,0.6375,0.1,IMPROVEMENT,If EWC helps: forgetting pretrained representations is the proximate cause
-kl_penalty,A,0.55,0.0125,NEUTRAL,If this helps: catastrophic forgetting is the primary cause; soft regularisation suffices

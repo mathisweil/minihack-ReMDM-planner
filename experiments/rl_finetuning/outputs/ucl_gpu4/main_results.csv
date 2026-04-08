@@ -1,5 +1,0 @@
-Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
-attention_only,C,0.625,0.0875,0.0875,IMPROVEMENT
-head_only,C,0.5875,0.05,0.05,IMPROVEMENT
-frozen_backbone,C,0.5625,0.025,0.025,NEUTRAL
-low_t,B,0.5375,0.0,0.0,NEUTRAL

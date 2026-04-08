@@ -1,2 +1,0 @@
-Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
-baseline_rl,Baseline,0.575,0.0,NEUTRAL,Diagnoses whether the RL signal alone causes collapse

@@ -1,5 +1,0 @@
-Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
-action_diversity,D,0.6,-0.0125,NEUTRAL,If diversity filtering helps: degenerate plans corrupt training
-reward_filtering,D,0.6,-0.0125,NEUTRAL,If filtering helps: noisy/low-return data poisons gradients
-reward_model,D,0.6,-0.0125,NEUTRAL,If reward model helps: raw returns are too sparse; learned model smooths signal
-running_stats,D,0.6375,0.025,NEUTRAL,If running stats help: batch normalisation is too noisy for small batches

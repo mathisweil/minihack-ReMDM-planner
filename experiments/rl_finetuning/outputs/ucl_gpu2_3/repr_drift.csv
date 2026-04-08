@@ -1,3 +1,0 @@
-Method,KL_mean,KL_low_t,KL_mid_t,KL_high_t
-entropy_bonus,0.5352,0.7146,0.55,0.3463
-t_curriculum,0.4921,0.654,0.4893,0.361

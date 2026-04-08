@@ -1,4 +1,0 @@
-Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
-entropy_bonus,B,0.5375,-0.075,NEUTRAL,If entropy bonus helps: collapse is mode-collapse; not a gradient problem
-t_curriculum,B,0.475,-0.1375,COLLAPSE,If curriculum helps: ordering of learning signals matters
-trust_region_kl,A,0.55,-0.0625,NEUTRAL,If hard constraint helps: soft KL is insufficient -- a hard boundary is needed

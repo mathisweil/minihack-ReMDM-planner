@@ -1,4 +1,0 @@
-Method,Cos_Sim,RL_Norm,BC_Norm
-advantage_clip,0.7978,0.6074,0.3839
-bc_wins,0.993,0.7482,0.7554
-normalized_adv,NaN,NaN,NaN

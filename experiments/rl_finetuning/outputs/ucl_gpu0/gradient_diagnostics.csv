@@ -1,4 +1,0 @@
-Method,Cos_Sim,RL_Norm,BC_Norm
-baseline_rl,0.9321,0.868,0.8158
-ewc,0.9935,5.0613,4.9267
-kl_penalty,0.4009,1.3037,0.9067

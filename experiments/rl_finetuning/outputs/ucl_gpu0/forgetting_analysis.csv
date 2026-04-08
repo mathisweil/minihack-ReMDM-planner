@@ -1,4 +1,0 @@
-Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
-baseline_rl,25,0.525,100,0.525,false
-ewc,25,0.5375,350,0.6875,true
-kl_penalty,25,0.5875,175,0.65,true

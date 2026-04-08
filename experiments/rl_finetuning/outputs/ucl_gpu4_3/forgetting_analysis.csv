@@ -1,4 +1,0 @@
-Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
-attention_only,never,0.5625,150,0.6125,true
-frozen_backbone,never,0.5625,50,0.6,true
-head_only,never,0.5375,250,0.625,true
