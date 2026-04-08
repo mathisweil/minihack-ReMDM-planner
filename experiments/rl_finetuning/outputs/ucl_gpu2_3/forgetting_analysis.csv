@@ -1,0 +1,3 @@
+Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
+entropy_bonus,never,0.5375,450,0.6125,true
+t_curriculum,never,0.5125,175,0.5625,true

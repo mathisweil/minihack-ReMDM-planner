@@ -1,0 +1,4 @@
+Method,KL_mean,KL_low_t,KL_mid_t,KL_high_t
+advantage_clip,0.3544,0.4156,0.3381,0.3298
+bc_wins,0.2456,0.3073,0.2523,0.1845
+normalized_adv,28586.3184,17135.9902,28442.7812,39272.2734

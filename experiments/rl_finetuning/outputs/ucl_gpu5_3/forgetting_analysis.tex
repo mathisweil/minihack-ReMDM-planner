@@ -1,0 +1,14 @@
+\begin{table}[htbp]
+\centering
+\caption{Forgetting analysis}
+\label{tab:forgetting}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{First\_Collapse} & \textbf{Min\_Score} & \textbf{Min\_Score\_Iter} & \textbf{Final\_Score} & \textbf{Recovered} \\
+\midrule
+layer\_ablation\_top1 & 150 & 0.5000 & 150 & 0.5875 & True \\
+layer\_ablation\_top2 & 75 & 0.5000 & 100 & 0.5875 & True \\
+layer\_ablation\_top3 & 425 & 0.5125 & 425 & 0.6250 & True \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,3 @@
+Method,MiniHack-Room-Random-5x5-v0,MiniHack-Room-Random-15x15-v0,MiniHack-Corridor-R2-v0,MiniHack-MazeWalk-9x9-v0
+entropy_bonus,1.0,0.75,0.4,0.3
+t_curriculum,1.0,0.75,0.3,0.2

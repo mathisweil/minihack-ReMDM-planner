@@ -1,0 +1,3 @@
+Method,Cos_Sim,RL_Norm,BC_Norm
+entropy_bonus,0.9023,0.7517,0.7107
+t_curriculum,0.8084,0.6173,0.4824

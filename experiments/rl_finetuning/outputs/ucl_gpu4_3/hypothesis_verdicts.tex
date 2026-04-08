@@ -1,0 +1,14 @@
+\begin{table}[htbp]
+\centering
+\caption{Hypothesis verdicts}
+\label{tab:hyp-verdicts}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{Group} & \textbf{Score} & \textbf{Delta\_Baseline} & \textbf{Verdict} & \textbf{Hypothesis} \\
+\midrule
+attention\_only & C & 0.6125 & 0.0375 & NEUTRAL & If attention-only works: model needs routing updates, not feature updates \\
+frozen\_backbone & C & 0.6437 & 0.0687 & IMPROVEMENT & If frozen backbone helps: deep gradient flow into backbone causes collapse \\
+head\_only & C & 0.6000 & 0.0250 & NEUTRAL & If head-only works: backbone representations are fine; only decision boundary needs updating \\
+\bottomrule
+\end{tabular}
+\end{table}

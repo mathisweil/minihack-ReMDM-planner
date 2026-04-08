@@ -1,0 +1,4 @@
+Method,MiniHack-Room-Random-5x5-v0,MiniHack-Room-Random-15x15-v0,MiniHack-Corridor-R2-v0,MiniHack-MazeWalk-9x9-v0
+action_diversity,0.95,0.75,0.3,0.4
+reward_model,0.9,0.7,0.3,0.2
+running_stats,0.9,0.95,0.35,0.15

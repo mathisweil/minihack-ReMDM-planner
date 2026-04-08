@@ -1,0 +1,2 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+ewc,A,0.6813,0.1688,IMPROVEMENT,If EWC helps: forgetting pretrained representations is the proximate cause

@@ -1,0 +1,4 @@
+Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
+layer_ablation_top1,150,0.5,150,0.5875,true
+layer_ablation_top2,75,0.5,100,0.5875,true
+layer_ablation_top3,425,0.5125,425,0.625,true

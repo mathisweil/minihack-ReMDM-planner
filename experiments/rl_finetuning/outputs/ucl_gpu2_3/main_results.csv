@@ -1,0 +1,3 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+t_curriculum,B,0.6438,0.0938,0.0938,IMPROVEMENT
+entropy_bonus,B,0.5875,0.0375,0.0375,NEUTRAL

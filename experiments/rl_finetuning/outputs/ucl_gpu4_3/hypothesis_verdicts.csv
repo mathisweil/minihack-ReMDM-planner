@@ -1,0 +1,4 @@
+Method,Group,Score,Delta_Baseline,Verdict,Hypothesis
+attention_only,C,0.6125,0.0375,NEUTRAL,"If attention-only works: model needs routing updates, not feature updates"
+frozen_backbone,C,0.6437,0.0687,IMPROVEMENT,If frozen backbone helps: deep gradient flow into backbone causes collapse
+head_only,C,0.6,0.025,NEUTRAL,If head-only works: backbone representations are fine; only decision boundary needs updating

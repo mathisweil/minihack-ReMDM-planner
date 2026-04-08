@@ -1,0 +1,2 @@
+Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
+kl_penalty,never,0.5375,450,0.6375,true

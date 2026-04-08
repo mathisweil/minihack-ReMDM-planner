@@ -1,0 +1,4 @@
+Method,Group,Score,Delta_Pretrained,Delta_Baseline,Verdict
+frozen_backbone,C,0.6437,0.0687,0.0687,IMPROVEMENT
+attention_only,C,0.6125,0.0375,0.0375,NEUTRAL
+head_only,C,0.6,0.025,0.025,NEUTRAL

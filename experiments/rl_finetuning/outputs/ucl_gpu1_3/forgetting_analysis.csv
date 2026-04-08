@@ -1,0 +1,3 @@
+Method,First_Collapse,Min_Score,Min_Score_Iter,Final_Score,Recovered
+lora,175,0.5375,175,0.6375,true
+mixed_replay,450,0.4875,475,0.5125,false

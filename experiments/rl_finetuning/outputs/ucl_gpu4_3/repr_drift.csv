@@ -1,0 +1,4 @@
+Method,KL_mean,KL_low_t,KL_mid_t,KL_high_t
+attention_only,0.4404,0.4886,0.4639,0.3596
+frozen_backbone,0.2632,0.3676,0.2451,0.2065
+head_only,0.305,0.4165,0.2996,0.2221

@@ -1,0 +1,4 @@
+Method,KL_mean,KL_low_t,KL_mid_t,KL_high_t
+action_diversity,0.2979,0.3829,0.2856,0.2326
+reward_model,0.3518,0.3823,0.3647,0.3113
+running_stats,0.3037,0.4073,0.3046,0.2189

@@ -1,0 +1,14 @@
+\begin{table}[htbp]
+\centering
+\caption{Forgetting analysis}
+\label{tab:forgetting}
+\begin{tabular}{lrrrrr}
+\toprule
+\textbf{Method} & \textbf{First\_Collapse} & \textbf{Min\_Score} & \textbf{Min\_Score\_Iter} & \textbf{Final\_Score} & \textbf{Recovered} \\
+\midrule
+advantage\_clip & 200 & 0.5125 & 450 & 0.5750 & True \\
+bc\_wins & 25 & 0.5375 & 25 & 0.5375 & False \\
+normalized\_adv & 200 & 0.0500 & 450 & 0.1125 & False \\
+\bottomrule
+\end{tabular}
+\end{table}
