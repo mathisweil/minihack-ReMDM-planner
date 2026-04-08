@@ -140,6 +140,12 @@ is controlled by `total_timesteps` — each env-step of the unified budget
 corresponds to one dataset sample, so total gradient steps =
 `total_timesteps // offline_batch_size`.
 
+Periodic ID + OOD evaluation runs during training on the cadence defined by
+`id_eval_every_timesteps` / `ood_eval_every_timesteps` (env-step units,
+converted internally to grad-step deltas via `// offline_batch_size`),
+mirroring the DAgger eval pattern. Results are logged to `eval_id/` and
+`eval_ood/` W&B namespaces.
+
 ```bash
 python main.py --mode offline --data path/to/dataset.pt
 
@@ -159,6 +165,33 @@ Set to `0` to disable:
 ```bash
 python main.py --mode offline --data dataset.pt checkpoint_every_timesteps=0
 ```
+
+#### Compute-match overrides (paper-fair BC vs DAgger)
+
+For research comparisons against a specific DAgger checkpoint, four optional
+offline-only overrides bypass the env-step budget derivation. The
+sample-to-grad-step ratio between the two modes (~50×) makes a single shared
+`total_timesteps` budget unfair to one side; these knobs pin offline metrics
+in grad-step units instead. All default to `null` (backwards compatible).
+
+| Key | Purpose |
+|---|---|
+| `offline_total_grad_steps` | Pin gradient budget. Overrides `total_timesteps // offline_batch_size`. Use to match a DAgger iteration count (e.g. `60000` = 600 iters × 100 grad_steps_per_iter). |
+| `offline_eval_every_grad_steps` | ID/OOD eval cadence in grad-step units. Without this, env-step cadence applied to BC's dense per-sample budget yields hundreds of evals. |
+| `offline_checkpoint_every_grad_steps` | Checkpoint cadence in grad-step units. Same motivation. |
+| `offline_buffer_capacity` | Distinct from `buffer_capacity` (sized for DAgger's small FIFO). The full BC dataset has ~500k–1M sliding windows; using DAgger's cap silently truncates. |
+
+Example: train a fair offline BC baseline matched to DAgger@iter600
+(60k AdamW updates × 2048 batch):
+
+```bash
+python main.py --mode offline --data data/oracle_bc_qmul.pt \
+    --config configs/final_qmul_gpu.yaml
+```
+
+The `final_qmul_gpu.yaml` and `final_ucl_gpu.yaml` configs both ship with
+these overrides pre-set and with cross-cluster-identical training
+hyperparameters (only collection-worker counts and output paths differ).
 
 ### DAgger online training
 
@@ -408,6 +441,8 @@ knob that should change to scale a run up or down.
 | `configs/ucl_gpu_bigger_model.yaml` | UCL GPU with larger model (384D, 6 heads) |
 | `configs/ucl_gpu_learning_behaviour.yaml` | UCL GPU learning behaviour study (eta=0.18, B=6144) |
 | `configs/ucl_gpu_no_amp.yaml` | UCL GPU without AMP (B=3584, 32 workers) |
+| `configs/final_qmul_gpu.yaml` | **Paper run, QMUL H200.** Drives both `--mode dagger` (reproduces the iter600 checkpoint) and `--mode offline` (compute-matched fair BC baseline: 60k grad steps × B=2048). |
+| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti 24 GB.** Identical training hyperparams to the QMUL config for cross-cluster fairness; only `num_collection_workers` and output paths differ. |
 
 ---
 
@@ -451,7 +486,9 @@ minihack-ReMDM-planner/
 │   ├── qmul_gpu.yaml                 QMUL GPU cluster config
 │   ├── ucl_gpu_bigger_model.yaml      UCL GPU (larger model)
 │   ├── ucl_gpu_learning_behaviour.yaml UCL GPU (learning study)
-│   └── ucl_gpu_no_amp.yaml           UCL GPU (no AMP)
+│   ├── ucl_gpu_no_amp.yaml           UCL GPU (no AMP)
+│   ├── final_qmul_gpu.yaml            Paper run: DAgger + fair offline BC (QMUL H200)
+│   └── final_ucl_gpu.yaml             Paper run: DAgger + fair offline BC (UCL 3090 Ti)
 ├── environments/                      Custom .des scenario files
 ├── src/
 │   ├── config.py                      YAML config loader with CLI overrides
@@ -510,6 +547,10 @@ minihack-ReMDM-planner/
 | `ckpt_eval_id/`, `ckpt_eval_ood/` | Per-env metrics at checkpoint time |
 | `ckpt_eval/` | `id_winrate`, `ood_winrate` |
 | `offline/` | `final_loss`, `total_steps`, `total_timesteps` (summary only) |
+
+Both DAgger and offline BC emit to `eval_id/` and `eval_ood/` namespaces.
+Offline mode reuses the same `Evaluator` and EMA-weight evaluation path as
+DAgger, so curves are directly comparable across modes.
 
 ---
 

@@ -83,21 +83,27 @@ replan_every: 16
 physics_aware_sampling: false
 
 # ── Shared training budget (DAgger only) ─────────────────────────────
-# 3.0M env-steps targets the env-step budget consumed at iter600 of
-# the original DAgger run (~600 iters × ~4-5k env-steps/iter, mid of
-# the early-iter random-policy long-rollout regime and the late-iter
-# converged short-rollout regime). Used by `--mode dagger` only.
-# Offline mode bypasses this entirely via `offline_total_grad_steps`
-# below — the unified env-step budget is fundamentally unfair when
-# the sample-to-grad-step ratio differs by ~50× between modes.
-total_timesteps: 3000000
+# 5.65M env-steps reproduces the env-step budget consumed at iter600
+# of the original DAgger run. This figure is calibrated against a real
+# DAgger run with the same recipe (`p7wfp67q`, episodes_per_iteration=30,
+# grad_steps_per_iteration=100): summing the per-iter env steps over
+# the first 600 iterations gives 30 × 600 × mean(model_steps + oracle_steps)
+# ≈ 30 × 600 × (198 + 116) ≈ 5.65 M real env.step() calls.
+# (The earlier 3M figure was based on the buggy single-episode env-step
+# accounting in `online.py:155-169` — fixed in the same commit as this
+# config bump.) Used by `--mode dagger` only. Offline mode bypasses
+# this via `offline_total_grad_steps` below — the unified env-step
+# budget is fundamentally unfair when the sample-to-grad-step ratio
+# differs by ~50× between modes.
+total_timesteps: 5650000
 
 # Eval/checkpoint cadence in env-step units (DAgger mode).
-# 250k → ~12 ID/OOD evals over the run.
-# 500k → ~6 checkpoints over the run.
-id_eval_every_timesteps: 250000
-ood_eval_every_timesteps: 250000
-checkpoint_every_timesteps: 500000
+# Scaled with the corrected total_timesteps so the run still produces
+# ~12 ID/OOD evals and ~6 checkpoints over its full duration.
+# 470k → ~12 evals; 940k → ~6 checkpoints.
+id_eval_every_timesteps: 470000
+ood_eval_every_timesteps: 470000
+checkpoint_every_timesteps: 940000
 
 # Final-eval episode count (used by both ID/OOD eval triggers and
 # checkpoint-time evals; matches the original DAgger run).

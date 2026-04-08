@@ -16,6 +16,7 @@ from typing import Callable
 
 import torch
 import torch.nn as nn
+import yaml
 
 from src.buffer import ReplayBuffer
 from src.config import make_run_dir
@@ -23,8 +24,14 @@ from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
 from src.models.denoiser import ModelEMA, make_model, try_compile
-from src.planners.inference import Evaluator
-from src.planners.logging import Logger
+from src.planners.inference import Evaluator, save_eval_json
+from src.planners.logging import (
+    Logger,
+    compute_param_drift,
+    compute_param_norm,
+    gpu_memory_mb,
+    reset_gpu_memory_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +195,19 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         last_id_eval_env_steps = step * cfg.offline_batch_size
         last_ood_eval_env_steps = step * cfg.offline_batch_size
 
+        # Snapshot of initial weights for `model/param_drift_from_init`.
+        # Mirrors online.py:Trainer.__init__.
+        _init_state = {
+            k: v.detach().clone()
+            for k, v in _ema_source.state_dict().items()
+            if v.is_floating_point()
+        }
+        # Counts logging emissions (not raw grad steps), used to gate
+        # the once-per-10-windows model health metrics analogously to
+        # online.py's `iteration % 10 == 0` cadence.
+        log_windows = 0
+        reset_gpu_memory_stats()
+
         while step < total_grad_steps:
             batch = buffer.sample(cfg.offline_batch_size)
             if batch is None:
@@ -247,25 +267,66 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
 
             if log is not None and step % log_every == 0:
                 step_time = time.perf_counter() - _batch_start
+                log_windows += 1
+
+                # Buffer state — for offline mode `offline_size` always
+                # equals `len(buffer)` (no online appends), so the
+                # online fraction is always 0.0. Logged anyway for
+                # symmetry with the DAgger curves.
+                buf_total = len(buffer)
+                buf_online_frac = (
+                    (buf_total - buffer.offline_size) / max(buf_total, 1)
+                    if hasattr(buffer, "offline_size")
+                    else 0.0
+                )
+
+                # Throughput: samples processed in this logging window.
+                samples_window = log_every * cfg.offline_batch_size
+                samples_per_sec = samples_window / max(step_time, 1e-6)
+
+                _ema_source_ref = _ema_source
                 metrics = {
                     "diffusion/loss": loss.item(),
                     "diffusion/loss_diff": loss_diff.item(),
                     "diffusion/loss_aux": loss_aux.item(),
+                    "train/buffer_size": buf_total,
+                    "train/buffer_online_frac": buf_online_frac,
                     "train/lr": scheduler.get_last_lr()[0],
                     "train/env_steps": env_steps,
                     "train/progress": step / total_grad_steps,
                     "train/grad_norm": grad_norm.item(),
+                    "speed/train_step_time_sec": step_time,
+                    "speed/samples_per_sec": samples_per_sec,
+                    "speed/gpu_memory_mb": gpu_memory_mb(),
+                    # Legacy `perf/` mirror keys (kept for backward compat
+                    # with existing dashboards / DAgger curves).
+                    "perf/train_time_s": step_time,
                     "perf/grad_steps_per_sec": (
                         log_every / max(step_time, 1e-6)
                     ),
                 }
-                _ema_source_ref = _ema_source
                 if hasattr(_ema_source_ref, "global_gate"):
-                    metrics["train/global_gate"] = torch.sigmoid(
+                    gate_val = torch.sigmoid(
                         _ema_source_ref.global_gate,
                     ).item()
+                    metrics["train/global_gate"] = gate_val
+                    metrics["model/ema_gate_value"] = gate_val
+
+                # Model health (every 10 logging windows to keep overhead
+                # low — matches online.py's `iteration % 10 == 0`).
+                if log_windows % 10 == 1:
+                    metrics["model/param_norm"] = compute_param_norm(
+                        _ema_source_ref,
+                    )
+                    metrics["model/param_drift_from_init"] = (
+                        compute_param_drift(
+                            _ema_source_ref, _init_state,
+                        )
+                    )
+
                 log.log(metrics, step=step)
                 _batch_start = time.perf_counter()
+                reset_gpu_memory_stats()
                 logger.info(
                     f"step {step}/{total_grad_steps} "
                     f"(env_steps={env_steps}) loss={loss.item():.4f}"
@@ -334,6 +395,10 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 _save_offline_checkpoint(
                     _ema_source, ema_model, optimizer, scheduler,
                     step, cfg, log,
+                    evaluator=evaluator,
+                    id_envs=id_envs,
+                    ood_envs=ood_envs,
+                    device=device,
                 )
                 last_ckpt_step = step
 
@@ -360,17 +425,40 @@ def _save_offline_checkpoint(
     step: int,
     cfg: SimpleNamespace,
     log: Logger | None,
+    evaluator: Evaluator | None = None,
+    id_envs: list[str] | None = None,
+    ood_envs: list[str] | None = None,
+    device: torch.device | str | None = None,
 ) -> None:
-    """Save an offline training checkpoint with W&B run ID.
+    """Save an offline training checkpoint, eval, and W&B artifact.
+
+    Mirrors the DAgger ``Trainer.save_checkpoint`` flow:
+        1. Persist model + EMA + optimizer + scheduler state to disk.
+        2. Save a YAML config snapshot alongside the checkpoint.
+        3. Run an EMA-weight ID + OOD eval and emit ``ckpt_eval_*``
+           metrics + an eval JSON sidecar.
+        4. Upload the checkpoint + config snapshot as a W&B artifact.
+
+    Steps 3 and 4 are skipped gracefully when ``evaluator`` / envs /
+    ``device`` are not provided, so callers that just want the bare
+    state dump still work.
 
     Args:
-        model: Raw (uncompiled) model.
+        model: Raw (uncompiled) model — used both for ``state_dict``
+            persistence and as the source argument to
+            ``ema_model.make_eval_model``.
         ema_model: EMA tracker.
         optimizer: Optimizer.
         scheduler: LR scheduler.
-        step: Global gradient step count.
+        step: Global gradient step count (used in filenames + metadata).
         cfg: Config namespace.
-        log: Logger (used to extract W&B run ID).
+        log: Logger (used to extract W&B run ID, log eval metrics,
+            and upload artifact).
+        evaluator: Optional evaluator. When ``None``, the checkpoint
+            eval is skipped.
+        id_envs: ID env IDs for the checkpoint eval.
+        ood_envs: OOD env IDs for the checkpoint eval.
+        device: Torch device for the checkpoint eval.
     """
     wandb_run_id: str | None = None
     if log is not None and log._use_wandb and log._run is not None:
@@ -392,6 +480,119 @@ def _save_offline_checkpoint(
         path,
     )
     logger.info(f"Offline checkpoint saved: {path}")
+
+    # Save config snapshot alongside checkpoint (mirrors DAgger).
+    config_path: Path | None = ckpt_dir / f"config_offline_step{step}.yaml"
+    try:
+        cfg_dict = {
+            k: v for k, v in vars(cfg).items() if not k.startswith("_")
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(cfg_dict, f, default_flow_style=False)
+    except Exception:
+        logger.error("Failed to save config snapshot", exc_info=True)
+        config_path = None
+
+    # Checkpoint-time eval — mirrors Trainer.save_checkpoint in online.py.
+    # Skipped when the caller did not thread an evaluator through.
+    if (
+        evaluator is not None
+        and id_envs
+        and ood_envs
+        and device is not None
+    ):
+        try:
+            eval_model = ema_model.make_eval_model(model)
+            id_results = evaluator.evaluate(
+                id_envs, eval_model, cfg.checkpoint_eval_episodes,
+                cfg, device,
+            )
+            ood_results = evaluator.evaluate(
+                ood_envs, eval_model, cfg.checkpoint_eval_episodes,
+                cfg, device,
+            )
+
+            id_winrate = (
+                sum(s["win_rate"] for s in id_results.values())
+                / len(id_results)
+            ) if id_results else 0.0
+            ood_winrate = (
+                sum(s["win_rate"] for s in ood_results.values())
+                / len(ood_results)
+            ) if ood_results else 0.0
+
+            current_lr = scheduler.get_last_lr()[0]
+            training_meta = {
+                "step": step,
+                "env_steps": step * cfg.offline_batch_size,
+                "total_timesteps": cfg.total_timesteps,
+                "lr": current_lr,
+                "offline_batch_size": cfg.offline_batch_size,
+                "aux_loss_weight": cfg.aux_loss_weight,
+                "ema_decay": cfg.ema_decay,
+                "id_winrate": id_winrate,
+                "ood_winrate": ood_winrate,
+                "per_env_id": {
+                    env_id: {
+                        "win_rate": s["win_rate"],
+                        "wins": s.get("wins", 0),
+                        "avg_reward": s["avg_reward"],
+                        "avg_steps": s["avg_steps"],
+                        "n_episodes": s["n_episodes"],
+                    }
+                    for env_id, s in id_results.items()
+                },
+                "per_env_ood": {
+                    env_id: {
+                        "win_rate": s["win_rate"],
+                        "wins": s.get("wins", 0),
+                        "avg_reward": s["avg_reward"],
+                        "avg_steps": s["avg_steps"],
+                        "n_episodes": s["n_episodes"],
+                    }
+                    for env_id, s in ood_results.items()
+                },
+            }
+
+            json_path = ckpt_dir / f"eval_offline_step{step}.json"
+            save_eval_json(
+                {"id": id_results, "ood": ood_results},
+                str(json_path),
+                metadata=training_meta,
+            )
+
+            if log is not None:
+                log.log_eval(
+                    id_results, step=step, prefix="ckpt_eval_id",
+                )
+                log.log_eval(
+                    ood_results, step=step, prefix="ckpt_eval_ood",
+                )
+                log.log(
+                    {
+                        "ckpt_eval/id_winrate": id_winrate,
+                        "ckpt_eval/ood_winrate": ood_winrate,
+                    },
+                    step=step,
+                )
+                log.log_summary({
+                    f"ckpt_offline_step{step}/id_winrate": id_winrate,
+                    f"ckpt_offline_step{step}/ood_winrate": ood_winrate,
+                })
+        except Exception:
+            logger.error(
+                "Offline checkpoint eval failed", exc_info=True,
+            )
+
+    # W&B artifact upload (no-op when wandb is not initialised).
+    if log is not None:
+        log.log_checkpoint_artifact(
+            checkpoint_path=str(path),
+            config_path=str(config_path) if config_path else None,
+            iteration=step,
+            metadata={"step": step, "mode": "offline"},
+            artifact_name=f"checkpoint-offline-step{step}",
+        )
 
 
 def load_offline_dataset(
