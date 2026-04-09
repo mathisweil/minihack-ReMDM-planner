@@ -1,18 +1,18 @@
 """One-shot uploader for the COMP0258 demo HuggingFace repo.
 
-Stages everything `demo.ipynb` needs (source code, stripped checkpoint,
-ablation assets) into a public HF repo so that the marker only has to
-upload the `.ipynb` file to Colab.
+Stages everything ``demo_minihack.ipynb`` needs (source code, stripped
+checkpoint, ablation assets) into a public HF repo so that the marker only
+has to upload the ``.ipynb`` file to Colab.
 
 Usage
 -----
     export HF_TOKEN=hf_xxx           # write-token from huggingface.co/settings/tokens
     .venv/bin/python scripts/hf_upload_demo.py \
-        --repo-id <user>/remdm-minihack-demo \
+        --repo-id <user>/remdm-minihack \
         --staging tmp/hf_staging
 
-If `tmp/hf_staging` does not exist, run the staging step first (see the
-`stage` subcommand below).
+If ``tmp/hf_staging`` does not exist, the staging step runs automatically
+before the upload (skip with ``--upload-only``).
 
 Files staged
 ------------
@@ -21,10 +21,17 @@ Files staged
 - environments/              # custom .des scenario files (if any)
 - main.py, pyproject.toml, README.md
 - checkpoint_inference.pth   # ema_state_dict only (~21 MB)
-- assets/{score_comparison,group_comparison,per_env_delta,
-          grad_alignment,score_delta,gradient_conflict_map,
-          repr_drift,diagnosis_decision_tree}.png
-- assets/{main_results,hypothesis_verdicts}.csv
+- ablation_assets/{score_comparison,group_comparison,per_env_delta,
+                   grad_alignment,score_delta,gradient_conflict_map,
+                   repr_drift,diagnosis_decision_tree}.png
+- ablation_assets/{main_results,hypothesis_verdicts,
+                   per_env_win_rates,group_summary}.csv
+- ablation_assets/results.json
+
+The staged layout matches what ``demo_minihack.ipynb`` expects:
+``snapshot_download`` pulls everything into ``remdm-minihack/`` and the
+notebook reads ``checkpoint_inference.pth`` from the snapshot root and
+ablation PNGs/CSVs from ``ablation_assets/``.
 """
 
 from __future__ import annotations
@@ -41,17 +48,35 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-ASSETS_TO_STAGE = (
+# Source paths inside the repo.
+CHECKPOINT_SRC = (
+    PROJECT_ROOT / "checkpoints" / "online"
+    / "Minihack-OnlineDiffusion-DAgger-123M" / "iter600.pth"
+)
+ABLATION_SRC = (
+    PROJECT_ROOT / "experiments" / "rl_finetuning"
+    / "outputs" / "minihack_final_results"
+)
+
+# Required assets — stage fails loudly if any of these are missing.
+REQUIRED_ASSETS = (
     "score_comparison.png",
     "group_comparison.png",
     "per_env_delta.png",
     "grad_alignment.png",
     "score_delta.png",
+    "main_results.csv",
+    "hypothesis_verdicts.csv",
+)
+
+# Optional assets — staged when present, warned on when absent.
+OPTIONAL_ASSETS = (
     "gradient_conflict_map.png",
     "repr_drift.png",
     "diagnosis_decision_tree.png",
-    "main_results.csv",
-    "hypothesis_verdicts.csv",
+    "per_env_win_rates.csv",
+    "group_summary.csv",
+    "results.json",
 )
 
 IGNORE_PATTERNS = (
@@ -76,12 +101,17 @@ def stage(staging_dir: Path) -> None:
 
     Args:
         staging_dir: Where to assemble the upload tree.
+
+    Raises:
+        FileNotFoundError: If a required asset listed in
+            ``REQUIRED_ASSETS`` is missing from ``ABLATION_SRC``.
     """
     if staging_dir.exists():
         logger.info(f"clearing existing staging dir: {staging_dir}")
         shutil.rmtree(staging_dir)
     staging_dir.mkdir(parents=True)
-    (staging_dir / "assets").mkdir()
+    ablation_dst = staging_dir / "ablation_assets"
+    ablation_dst.mkdir()
 
     # Source trees
     for sub in ("src", "configs", "environments"):
@@ -97,32 +127,45 @@ def stage(staging_dir: Path) -> None:
             shutil.copy2(src, staging_dir / fname)
             logger.info(f"  staged {fname}")
 
-    # Stripped checkpoint (must be created beforehand by strip_checkpoint())
-    ckpt_src = PROJECT_ROOT / "checkpoint_inference.pth"
-    if not ckpt_src.exists():
-        logger.info("  checkpoint_inference.pth missing -- stripping now")
-        strip_checkpoint(
-            PROJECT_ROOT / "checkpoint_final" / "online" / "final.pth",
-            ckpt_src,
+    # Stripped checkpoint — created on demand from the DAgger iter600 ckpt.
+    ckpt_dst = staging_dir / "checkpoint_inference.pth"
+    stripped_cache = PROJECT_ROOT / "checkpoint_inference.pth"
+    if stripped_cache.exists():
+        shutil.copy2(stripped_cache, ckpt_dst)
+        logger.info(
+            f"  staged checkpoint_inference.pth from cache "
+            f"({stripped_cache.stat().st_size / 1e6:.1f} MB)"
         )
-    shutil.copy2(ckpt_src, staging_dir / "checkpoint_inference.pth")
-    logger.info(
-        f"  staged checkpoint_inference.pth "
-        f"({ckpt_src.stat().st_size / 1e6:.1f} MB)"
-    )
+    else:
+        logger.info(
+            f"  checkpoint_inference.pth cache missing -- stripping "
+            f"{CHECKPOINT_SRC.name}"
+        )
+        strip_checkpoint(CHECKPOINT_SRC, ckpt_dst)
 
-    # Ablation assets
-    asset_dir = (
-        PROJECT_ROOT / "experiments" / "rl_finetuning"
-        / "outputs" / "minihack_final"
-    )
-    for name in ASSETS_TO_STAGE:
-        src = asset_dir / name
+    # Ablation assets — required ones MUST be present.
+    missing_required: list[str] = []
+    for name in REQUIRED_ASSETS:
+        src = ABLATION_SRC / name
         if not src.exists():
-            logger.warning(f"  asset missing, skipping: {name}")
+            missing_required.append(name)
             continue
-        shutil.copy2(src, staging_dir / "assets" / name)
-        logger.info(f"  staged assets/{name}")
+        shutil.copy2(src, ablation_dst / name)
+        logger.info(f"  staged ablation_assets/{name}")
+    if missing_required:
+        raise FileNotFoundError(
+            f"Required ablation assets missing from {ABLATION_SRC}: "
+            f"{missing_required}"
+        )
+
+    # Optional assets — warn but do not fail.
+    for name in OPTIONAL_ASSETS:
+        src = ABLATION_SRC / name
+        if not src.exists():
+            logger.warning(f"  optional asset missing, skipping: {name}")
+            continue
+        shutil.copy2(src, ablation_dst / name)
+        logger.info(f"  staged ablation_assets/{name}")
 
     total_mb = sum(
         f.stat().st_size for f in staging_dir.rglob("*") if f.is_file()
@@ -144,10 +187,14 @@ def strip_checkpoint(src: Path, dst: Path) -> None:
     import torch
 
     if not src.exists():
-        raise FileNotFoundError(f"checkpoint not found: {src}")
+        raise FileNotFoundError(
+            f"checkpoint not found: {src}. Expected the DAgger iter600 "
+            f"checkpoint at this path."
+        )
     full = torch.load(src, map_location="cpu", weights_only=False)
-    if "ema_state_dict" not in full:
+    if not isinstance(full, dict) or "ema_state_dict" not in full:
         raise KeyError(f"checkpoint {src} has no ema_state_dict key")
+    dst.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"ema_state_dict": full["ema_state_dict"]}, dst)
     logger.info(
         f"stripped {src.name} ({src.stat().st_size / 1e6:.1f} MB) -> "
@@ -190,7 +237,8 @@ def upload(repo_id: str, staging_dir: Path, token: str) -> None:
     )
     logger.info(f"\ndone -- repo URL: https://huggingface.co/{repo_id}")
     logger.info(
-        f"now find-and-replace TODO_HF_REPO_ID with {repo_id!r} in demo.ipynb"
+        f"now find-and-replace TODO_HF_REPO_ID with {repo_id!r} in "
+        "demo_minihack.ipynb (Cell 1, HF_REPO_ID constant)"
     )
 
 
