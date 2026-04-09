@@ -2,7 +2,7 @@
 
 PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) for action-sequence planning in [MiniHack](https://github.com/facebookresearch/minihack) navigation environments. A dual-stream transformer generates 64-step action plans by iteratively denoising masked token sequences, conditioned on a 9x9 local crop and the full 21x79 dungeon map.
 
-The primary training method is **DAgger** with BFS oracle supervision: the buffer is seeded with pure expert trajectories on the first iteration, providing an implicit behavioural cloning warm-start. An optional standalone offline BC mode is available for pre-training on collected datasets. Generalises **zero-shot** from 4 in-distribution environments to 3 out-of-distribution environments.
+> The primary training method is **DAgger** with BFS oracle supervision: the model is trained from scratch, with the buffer seeded by pure expert trajectories on the first iteration. A standalone **offline BC** mode is also available as an independent baseline trained on pre-collected datasets. The paper compares both methods head-to-head; neither depends on the other. An offline BC checkpoint can optionally warm-start DAgger, but this is not used in the paper. Generalises **zero-shot** from 4 in-distribution environments to 3 out-of-distribution environments.
 
 ---
 
@@ -17,14 +17,15 @@ The primary training method is **DAgger** with BFS oracle supervision: the buffe
 [Evaluate] ID + OOD evaluation             main.py --mode inference --checkpoint iter8000.pth
 ```
 
-**Optional standalone modes:**
 ```
+**Other modes:**
+
 [Collect]     Collect oracle demonstrations main.py --mode collect
 [Offline BC]  Train on pre-collected data   main.py --mode offline --data dataset.pt
 [Smoke test]  Quick end-to-end check        main.py --mode smoke
-```
 
-DAgger with implicit warm-start is the recommended pipeline. The `--mode collect` + `--mode offline` path is available for explicit two-stage pre-training on oracle demonstrations before DAgger.
+DAgger trains from scratch and is the recommended pipeline. Offline BC (`--mode collect` + `--mode offline`) is an independent training method compared against DAgger in the paper. An offline BC checkpoint can optionally warm-start DAgger via `--checkpoint`, but this was not used in the paper results.
+```
 
 ---
 
