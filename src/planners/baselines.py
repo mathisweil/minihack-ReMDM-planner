@@ -601,6 +601,8 @@ def _train_bc(
         _BCDataset(loc_arr, glob_arr, acts_arr),
         batch_size=int(cfg.baselines_bc_batch_size),
         shuffle=True,
+        num_workers=4,
+        pin_memory=torch.cuda.is_available(),
     )
 
     lr = float(cfg.baselines_bc_lr)
@@ -612,8 +614,15 @@ def _train_bc(
         features_extractor_kwargs={"features_dim": 256},
     ).to(device)
 
-    optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
     n_epochs = int(cfg.baselines_bc_epochs)
+    optimizer = torch.optim.AdamW(
+        policy.parameters(),
+        lr=lr,
+        weight_decay=float(cfg.weight_decay),
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=n_epochs,
+    )
     policy.train()
     for epoch in range(n_epochs):
         total_loss = 0.0
@@ -627,10 +636,20 @@ def _train_bc(
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
             optimizer.step()
             total_loss += loss.item()
+        scheduler.step()
         avg_loss = total_loss / max(1, len(bc_loader))
-        log.log({"train/bc_loss": avg_loss, "train/epoch": epoch + 1}, step=epoch + 1)
+        current_lr = scheduler.get_last_lr()[0]
+        log.log(
+            {
+                "train/bc_loss": avg_loss,
+                "train/lr": current_lr,
+                "train/epoch": epoch + 1,
+            },
+            step=epoch + 1,
+        )
         logger.info(
-            "BC epoch %02d/%02d | loss=%.4f", epoch + 1, n_epochs, avg_loss,
+            "BC epoch %02d/%02d | loss=%.4f | lr=%.2e",
+            epoch + 1, n_epochs, avg_loss, current_lr,
         )
 
     seed_metrics: dict[str, float] = {}
