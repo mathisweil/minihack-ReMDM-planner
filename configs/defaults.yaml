@@ -208,23 +208,27 @@ baselines_eval_episodes_per_env: null
 
 # ── BC baseline ──────────────────────────────────────────────────────
 # Oracle trajectories collected per ID environment (seeds 0..N-1).
-baselines_bc_oracle_episodes_per_env: 50
-baselines_bc_epochs: 10
+# 5000 matches the offline BC dataset scale used by ReMDM.
+baselines_bc_oracle_episodes_per_env: 5000
+baselines_bc_epochs: 50
 baselines_bc_batch_size: 256
-baselines_bc_lr: 0.001
+baselines_bc_lr: 0.0003
 
 # ── Decision Transformer baseline ────────────────────────────────────
-baselines_dt_oracle_episodes_per_env: 100
-baselines_dt_epochs: 20
-baselines_dt_context_len: 30
-baselines_dt_embed_dim: 128
-baselines_dt_n_layers: 3
+# 5000 trajectories per ID env to match the BC / ReMDM data scale.
+baselines_dt_oracle_episodes_per_env: 5000
+baselines_dt_epochs: 50
+baselines_dt_context_len: 64
+baselines_dt_embed_dim: 256
+baselines_dt_n_layers: 4
 baselines_dt_n_heads: 4
-baselines_dt_lr: 0.0001
-baselines_dt_batch_size: 64
+baselines_dt_lr: 0.0003
+baselines_dt_batch_size: 256
 # Maximum episode length covered by DT positional embeddings. MUST be
 # >= the longest oracle trajectory observed during data collection.
-baselines_dt_max_ep_len: 500
+# Aligned with baselines_dt_eval_max_steps so positional embeddings
+# cover the full eval-cap horizon.
+baselines_dt_max_ep_len: 200
 # DT eval rollout cap (steps before truncating an episode as a loss).
 baselines_dt_eval_max_steps: 200
 

@@ -285,7 +285,14 @@ python main.py --mode baselines --algo dt --seeds 0 1 2
 
 # Override the aggregated-results JSON destination
 python main.py --mode baselines --algo ppo --output results/ppo_smoke.json
+
+# Paper-fair comparison against the ReMDM online budget (~5.65M env-steps)
+python main.py --mode baselines --algo ppo total_timesteps=5650000
 ```
+
+The BC and DT defaults (50 epochs, 5000 oracle trajectories per ID env, 64-token
+DT context, 256-D DT embedding) are tuned to match the data and compute scale of
+the offline BC and ReMDM runs reported in the paper.
 
 ### CLI flags
 
