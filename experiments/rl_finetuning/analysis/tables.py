@@ -92,6 +92,52 @@ def _save_table(
 # ---------------------------------------------------------------------------
 
 
+def write_significance_test(results: dict[str, dict], out_dir: Path) -> None:
+    """C-002 (F-035): baseline vs best condition, exact permutation test + bootstrap CI.
+
+    Writes ``significance_test.txt``. With three seeds per condition the
+    permutation test is exact (C(6,3) = 20 relabellings).
+    """
+    base = results.get("baseline_rl")
+    if not base or not base.get("all_scores"):
+        return
+    others = {
+        n: r for n, r in results.items()
+        if n != "baseline_rl" and len(r.get("all_scores", [])) >= 2
+    }
+    if not others or len(base["all_scores"]) < 2:
+        return
+    import itertools
+    best = max(others, key=lambda n: float(np.mean(others[n]["all_scores"])))
+    a = [float(x) for x in base["all_scores"]]
+    b = [float(x) for x in others[best]["all_scores"]]
+    obs = float(np.mean(b) - np.mean(a))
+    pooled = a + b
+    n_b = len(b)
+    count = total = 0
+    for idx in itertools.combinations(range(len(pooled)), n_b):
+        grp_b = [pooled[i] for i in idx]
+        grp_a = [pooled[i] for i in range(len(pooled)) if i not in idx]
+        if abs(float(np.mean(grp_b) - np.mean(grp_a))) >= abs(obs) - 1e-12:
+            count += 1
+        total += 1
+    p_perm = count / total
+    rng = np.random.default_rng(0)
+    boots = [
+        float(np.mean(rng.choice(b, len(b))) - np.mean(rng.choice(a, len(a))))
+        for _ in range(10000)
+    ]
+    lo, hi = np.percentile(boots, [2.5, 97.5])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "significance_test.txt").write_text(
+        f"baseline_rl scores: {a}\nbest condition: {best} scores: {b}\n"
+        f"mean difference (best - baseline): {obs:.4f}\n"
+        f"exact permutation test (two-sided, {total} relabellings): p = {p_perm:.3f}\n"
+        f"bootstrap 95% CI of the difference (10000 resamples, seed 0): "
+        f"[{lo:.4f}, {hi:.4f}]\n"
+    )
+
+
 def make_main_results_table(
     results: dict[str, dict],
     pretrained_score: float,
@@ -126,6 +172,7 @@ def make_main_results_table(
             "Method": name,
             "Group": group,
             "Score": round(score, 4),
+            "Score_Std": round(float(res.get("score_std", 0.0)), 4),  # C-002 (F-035): popstd over seeds
             "Delta_Pretrained": round(delta_pre, 4),
             "Delta_Baseline": round(delta_bl, 4),
             "Verdict": verdict,
@@ -254,9 +301,22 @@ def make_per_env_table(
     """
     rows: list[dict] = []
     for name, res in sorted(results.items()):
+        # C-002 (F-024): average per-seed final win rates when recorded;
+        # fall back to the legacy single merged history otherwise.
+        finals = [
+            f["per_env_win_rates"] for f in res.get("per_seed_finals", [])
+            if isinstance(f, dict) and isinstance(f.get("per_env_win_rates"), dict)
+        ]
+        if finals:
+            row = {"Method": name}
+            for k in sorted({k for f in finals for k in f}):
+                vals = [f[k] for f in finals if k in f]
+                row[k] = round(float(np.mean(vals)), 4)
+            rows.append(row)
+            continue
         h: AblationHistory = res["history"]
         if h.per_env_win_rates:
-            row: dict = {"Method": name}
+            row = {"Method": name}
             row.update(h.per_env_win_rates[-1])
             rows.append(row)
 
@@ -423,6 +483,7 @@ def generate_summary_tables(
             env_df, out_dir / "per_env_win_rates",
             caption="Per-environment win rates", label="tab:per-env",
         )
+    write_significance_test(results, out_dir)  # C-002 (F-035)
 
     forg_df = make_forgetting_analysis_table(results, pretrained_score)
     if forg_df.shape[0] > 0:
