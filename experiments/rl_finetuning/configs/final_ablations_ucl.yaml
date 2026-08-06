@@ -78,4 +78,4 @@ ablation_use_wandb: true
 ablation_wandb_project: "remdm-minihack-ablations"
 
 # -- Multi-seed ---------------------------------------------------------------
-num_seeds: 1
+num_seeds: 3  # C-001 (D7/F-048): three literal seeds (base 0 -> 0, 1, 2), matching the published 3-run tables

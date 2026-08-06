@@ -124,6 +124,14 @@ class AdvancedObservationEnv(gym.Env):
         Returns:
             ``((local_crop, global_map), info)``
         """
+        # C-001/F-057: gymnasium's reset(seed=...) does not reach the NetHack
+        # core RNG, so dungeons were entropy-random regardless of the seed
+        # (verified: identical seed+actions diverge). Seed the NLE core
+        # explicitly; reseed=False keeps it fixed for this env instance.
+        if seed is not None:
+            _u = getattr(self._inner, "unwrapped", self._inner)
+            if hasattr(_u, "seed"):
+                _u.seed(core=seed, disp=seed, reseed=False)
         obs, info = self._inner.reset(seed=seed, options=options)
         self.last_raw_obs = obs
         self._prev_bfs_dist = self._get_bfs_distance(obs)

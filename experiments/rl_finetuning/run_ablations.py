@@ -40,6 +40,7 @@ import argparse
 import datetime
 import logging
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -220,6 +221,8 @@ def _results_to_json(
                 "score_std": res.get("score_std", 0.0),
                 "all_scores": res.get("all_scores", [res["score"]]),
                 "history": res["history"].to_dict(),
+                # C-001 (D7): seeds and wall clock recorded when present
+                **{k: res[k] for k in ("base_seed", "seeds", "wall_clock_s") if k in res},
             }
             for name, res in results.items()
         },
@@ -252,6 +255,9 @@ def _results_from_json(
             "all_scores": res_data.get("all_scores", [score]),
             "history": AblationHistory.from_dict(res_data["history"]),
         }
+        for _k in ("base_seed", "seeds", "wall_clock_s"):  # C-001 (D7)
+            if _k in res_data:
+                results[name][_k] = res_data[_k]
     return results, pretrained_score, config
 
 
@@ -287,11 +293,17 @@ def _merge_result_files(
                     "score_std": res.get("score_std", 0.0),
                     "all_scores": list(res.get("all_scores", [res["score"]])),
                     "history": res["history"],
+                    # C-001 (D7): carry seed and wall-clock records through merge
+                    **{k: list(res[k]) for k in ("seeds", "wall_clock_s") if k in res},
+                    **({"base_seed": res["base_seed"]} if "base_seed" in res else {}),
                 }
             else:
                 # Concatenate scores from this file
                 new_scores = list(res.get("all_scores", [res["score"]]))
                 merged[name]["all_scores"].extend(new_scores)
+                for _k in ("seeds", "wall_clock_s"):  # C-001 (D7)
+                    if _k in res:
+                        merged[name].setdefault(_k, []).extend(res[_k])
                 # Recompute mean/std over all seeds
                 all_s = merged[name]["all_scores"]
                 merged[name]["score"] = float(np.mean(all_s))
@@ -512,7 +524,13 @@ def main(argv: list[str] | None = None) -> None:
     logger.info("Selected ablations (%d): %s", len(selected), selected)
 
     # Evaluate pretrained baseline
-    logger.info("Evaluating pretrained model...")
+    # C-001 (D7/D14): seed the pretrained evaluation with the base seed
+    import random as _random
+    _eval_seed = args.seed if args.seed is not None else (getattr(cfg, "seed", None) or 0)
+    torch.manual_seed(_eval_seed)
+    np.random.seed(_eval_seed)
+    _random.seed(_eval_seed)
+    logger.info("Evaluating pretrained model (seed %d)...", _eval_seed)
     pretrained_score = _evaluate_pretrained(checkpoint_path, cfg, device)
     logger.info("Pretrained baseline ID win rate: %.4f", pretrained_score)
 
@@ -553,16 +571,20 @@ def main(argv: list[str] | None = None) -> None:
         spec = REGISTRY[abl_name]
         seed_scores: list[float] = []
         seed_histories: list[AblationHistory] = []
+        seeds_used: list[int] = []
+        seed_times: list[float] = []
         trained_model: torch.nn.Module | None = None
 
         try:
             for seed_idx in range(num_seeds):
-                abl_seed = base_seed + seed_idx * 1000
+                abl_seed = base_seed + seed_idx  # C-001 (D7): literal seed set base+idx (default 0, 1, 2)
+                seeds_used.append(abl_seed)
                 logger.info(
                     "Running %s (seed %d/%d)...",
                     abl_name, seed_idx + 1, num_seeds,
                 )
 
+                _t0 = time.monotonic()
                 history, final_score, trained_model = run_ablation(
                     spec=spec,
                     cfg=cfg,
@@ -572,6 +594,7 @@ def main(argv: list[str] | None = None) -> None:
                     wandb_step_offset=wandb_global_step,
                 )
                 wandb_global_step += max_iter
+                seed_times.append(round(time.monotonic() - _t0, 1))  # C-001: per-seed wall clock
                 seed_scores.append(final_score)
                 seed_histories.append(history)
         except Exception:
@@ -592,6 +615,9 @@ def main(argv: list[str] | None = None) -> None:
             "score": mean_score,
             "score_std": std_score,
             "all_scores": seed_scores,
+            "base_seed": base_seed,         # C-001 (D7)
+            "seeds": seeds_used,            # C-001 (D7)
+            "wall_clock_s": seed_times,     # C-001: per-seed wall clock
         }
 
         # W&B summary for this ablation
