@@ -73,14 +73,20 @@ def _compute_remask_prob(
     eta: float,
     sigma_max: float,
     confidence: Tensor | None,
+    committed: Tensor | None = None,
 ) -> Tensor | float:
     """Compute per-token remasking probability.
+
+    C-003 (F-047, D6/D9): unified with the craftax implementation.
 
     Args:
         strategy: One of ``"rescale"``, ``"cap"``, ``"conf"``.
         eta: Base remasking strength hyperparameter.
-        sigma_max: ``1 - alpha_t(ratio)`` at current step.
+        sigma_max: ReMDM eq 7 value ``min(1, (1 - alpha_s) / alpha_t)``,
+            computed by the caller (previously ``1 - alpha_t(ratio)``).
         confidence: Per-token confidence scores. Shape ``[B, L]``.
+            Required only for the ``"conf"`` strategy.
+        committed: Boolean mask of committed (non-masked) positions.
             Required only for the ``"conf"`` strategy.
 
     Returns:
@@ -92,7 +98,20 @@ def _compute_remask_prob(
         return min(eta, sigma_max)
     if strategy == "conf":
         assert confidence is not None, "conf strategy requires confidence"
-        return eta * sigma_max * (1.0 - confidence)
+        assert committed is not None, "conf strategy requires the committed mask"
+        # softmax(-confidence) over committed positions, zero elsewhere,
+        # scaled by eta * sigma_max: mirrors craftax ``sigma_conf``.
+        neg = torch.where(
+            committed,
+            -confidence,
+            torch.tensor(float("-inf"), device=confidence.device, dtype=confidence.dtype),
+        )
+        any_committed = committed.any(dim=-1, keepdim=True)
+        safe = torch.where(any_committed, neg, torch.zeros_like(neg))
+        weights = torch.softmax(safe, dim=-1)
+        return torch.where(
+            committed, weights * (eta * sigma_max), torch.zeros_like(weights)
+        )
     raise ValueError(f"Unknown remask strategy: {strategy}")
 
 
@@ -235,13 +254,25 @@ def remdm_sample(
 
             # ReMDM stochastic remasking of committed (non-masked) positions
             is_committed = seq != mask_token  # [B, seq_len]
+            # C-003 (F-047, D6/D9): ReMDM eq 7 sigma_max, unified with the
+            # craftax sampler: alpha_t at the current ratio, alpha_s at the
+            # next (more denoised) step. Previously ``1 - alpha_t(ratio)``.
             alpha_t_ratio = schedule_fn(
                 torch.tensor(ratio, device=device)
             )
-            sigma_max = (1.0 - alpha_t_ratio).item()
+            alpha_s_ratio = schedule_fn(
+                torch.tensor(min(1.0, (k + 1) / K), device=device)
+            )
+            sigma_max = min(
+                1.0,
+                float(
+                    (1.0 - alpha_s_ratio)
+                    / torch.clamp(alpha_t_ratio, min=1e-8)
+                ),
+            )
 
             remask_prob = _compute_remask_prob(
-                cfg.remask_strategy, cfg.eta, sigma_max, conf
+                cfg.remask_strategy, cfg.eta, sigma_max, conf, is_committed
             )
             if isinstance(remask_prob, Tensor):
                 do_remask = (
