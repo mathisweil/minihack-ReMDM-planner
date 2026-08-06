@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,8 +80,11 @@ class Evaluator:
                     eval_targets.append((stem, fh.read()))
 
         for env_id, des_content in eval_targets:
+            # C-001/F-057: Python's hash() is salted per process, so the old
+            # derivation drew different environment seeds on every invocation
+            # and no evaluation was reproducible. crc32 is process-stable.
             seeds = [
-                42 + hash((env_id, ep)) % (2**31)
+                42 + zlib.crc32(f"{env_id}:{ep}".encode()) % (2**31)
                 for ep in range(n_episodes)
             ]
             ep_results = self._run_episodes_batched(
