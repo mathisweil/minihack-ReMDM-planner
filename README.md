@@ -564,7 +564,8 @@ minihack-ReMDM-planner/
 │       ├── diagnostics/               Gradient, representation, timestep metrics
 │       └── analysis/                  Plots, tables, reports
 ├── scripts/
-│   ├── hf_upload.py                   HuggingFace Hub upload utility
+│   ├── hf_release.py                  Publish checkpoints to the HuggingFace Hub
+│   ├── hf_upload.py                   HuggingFace Hub upload utility (training hook)
 │   └── profile_dagger.py             DAgger iteration profiler
 ├── main.py                            CLI entry point (smoke/collect/offline/dagger/inference/baselines)
 ├── pyproject.toml                     PEP 621 project metadata + dependencies
@@ -595,6 +596,122 @@ minihack-ReMDM-planner/
 Both DAgger and offline BC emit to `eval_id/` and `eval_ood/` namespaces.
 Offline mode reuses the same `Evaluator` and EMA-weight evaluation path as
 DAgger, so curves are directly comparable across modes.
+
+---
+
+## Pretrained Checkpoints
+
+Trained weights are not in git (`checkpoints/` is gitignored). They live on the
+Hugging Face Hub: **[MathisW78/remdm-minihack-checkpoints](https://huggingface.co/MathisW78/remdm-minihack-checkpoints)**
+
+| Directory | Method | Selected at | Sample-equivalents |
+|---|---|---|---|
+| `checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M` | DAgger (paper's main result) | iteration 600 | 123M |
+| `checkpoints/offline/Minihack-OfflineDiffusion-BC-82M` | Offline BC baseline | gradient step 40,000 | 82M |
+
+Both are best-of-N selections over the periodic checkpoints, chosen on the
+50-episode ID + OOD evaluation that each checkpoint save runs. The offline run
+was given the DAgger-matched budget of 60,000 gradient steps and its best
+checkpoint fell at 40,000, so the two published models sit at different points
+on a matched budget. Directory suffixes are the sample-equivalents consumed at
+the selected step (gradient steps × batch size); file names carry each trainer's
+own counter.
+
+Each directory ships:
+
+| File | Contents |
+|---|---|
+| `<step>.pth` | Full training state: weights, EMA shadow, optimizer, scheduler, plus curriculum and RNG state for DAgger. Use this to resume training. |
+| `model.safetensors` | EMA weights only, for inference. No pickle. |
+| `config_<step>.yaml` | Config snapshot the run was trained under. |
+| `selection.json` | Selected step, candidate cadence, eval protocol. |
+
+### Download
+
+Repo paths mirror this one, so downloading into a clone drops the weights
+straight into `checkpoints/`.
+
+```bash
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='MathisW78/remdm-minihack-checkpoints', local_dir='.')
+"
+```
+
+For inference weights only (~21 MB each instead of ~84 MB):
+
+```python
+snapshot_download(
+    repo_id="MathisW78/remdm-minihack-checkpoints",
+    local_dir=".",
+    allow_patterns=["**/model.safetensors", "**/config*.yaml"],
+)
+```
+
+### Evaluate a downloaded checkpoint
+
+Always pass the checkpoint's own config snapshot. `configs/defaults.yaml` tracks
+the current code, not the run that produced the weights.
+
+```bash
+DIR=checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M
+python main.py --mode inference \
+    --config $DIR/config_iter600.yaml \
+    --checkpoint $DIR/iter600.pth
+```
+
+### Load programmatically
+
+From the safetensors export (inference; already EMA weights):
+
+```python
+from safetensors.torch import load_file
+from src.config import load_config
+from src.models.denoiser import make_model
+
+DIR = "checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M"
+cfg = load_config(f"{DIR}/config_iter600.yaml")
+
+model = make_model(cfg)
+model.load_state_dict(load_file(f"{DIR}/model.safetensors"))
+model.eval()
+```
+
+From the full `.pth`, to resume training or to choose training vs EMA weights
+explicitly:
+
+```python
+import torch
+from src.config import load_config
+from src.models.denoiser import make_model, ModelEMA
+
+DIR = "checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M"
+cfg = load_config(f"{DIR}/config_iter600.yaml")
+ckpt = torch.load(f"{DIR}/iter600.pth", map_location="cpu", weights_only=False)
+
+model = make_model(cfg)
+model.load_state_dict(ckpt["model_state_dict"])
+
+ema = ModelEMA(model, decay=cfg.ema_decay)
+ema.load_state_dict(ckpt["ema_state_dict"])
+ema.apply_to(model)          # what evaluation uses by default
+model.eval()
+```
+
+### Publishing
+
+`scripts/hf_release.py` stages and uploads: it exports the safetensors, scrubs
+cluster paths and W&B identifiers out of the config snapshots, writes the model
+card and `selection.json`, and pushes.
+
+```bash
+HF_TOKEN=hf_xxx python scripts/hf_release.py \
+    --repo-id MathisW78/remdm-minihack-checkpoints \
+    --selection-metric "<metric the best checkpoint was chosen on>"
+```
+
+Add `--dry-run` to stage and print without uploading, `--private` to create the
+repo unlisted.
 
 ---
 
