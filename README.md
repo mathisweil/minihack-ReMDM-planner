@@ -332,7 +332,13 @@ Output head:    last 64 tokens -> Linear(256, 12) -> action logits
 
 The model takes `(local_obs, global_obs, noisy_action_seq, t_discrete)` and returns `{"actions": [B,64,12], "goal_pred": [B,2]}`.
 
-A `LocalDiffusionPlanner` variant (no global stream, no goal head) is also available for ablation studies.
+A `LocalDiffusionPlanner` variant (no global stream, no goal head) is available for ablation studies via `use_global_stream=false`:
+
+```bash
+python main.py --mode dagger use_global_stream=false
+```
+
+This trains a genuinely local-only model, as opposed to `--blind-global`, which zeroes the global observation of an already-trained dual-stream model at inference. Supported by `--mode offline` and `--mode dagger`; the RL fine-tuning ablation suite under `experiments/` assumes the goal head is present.
 
 ---
 
@@ -377,6 +383,7 @@ A `LocalDiffusionPlanner` variant (no global stream, no goal head) is also avail
 | `dropout` | 0.0 | Transformer dropout (0.0 -- forward masking regularises) |
 | `ema_decay` | 0.999 | EMA smoothing for inference weights |
 | `global_gate_init` | -3.0 | Initial value for global gate logit |
+| `use_global_stream` | true | `false` builds the local-only `LocalDiffusionPlanner` ablation variant |
 
 **Diffusion**
 
@@ -543,7 +550,7 @@ minihack-ReMDM-planner/
 │   │   ├── loss.py                    MDLM ELBO + auxiliary goal loss
 │   │   └── sampling.py                ReMDM reverse sampling with remasking
 │   ├── models/
-│   │   └── denoiser.py                LocalDiffusionPlannerWithGlobal + ModelEMA
+│   │   └── denoiser.py                LocalDiffusionPlannerWithGlobal + LocalDiffusionPlanner + ModelEMA
 │   ├── envs/
 │   │   ├── minihack_env.py            AdvancedObservationEnv + BFS oracle
 │   │   └── discovery.py               Env registry scanner + inference benchmark
@@ -566,7 +573,8 @@ minihack-ReMDM-planner/
 ├── scripts/
 │   ├── hf_release.py                  Publish checkpoints to the HuggingFace Hub
 │   ├── hf_upload.py                   HuggingFace Hub upload utility (training hook)
-│   └── profile_dagger.py             DAgger iteration profiler
+│   ├── hf_upload_demo.py              Stage + upload the demo notebook's HF repo
+│   └── profile_dagger.py              DAgger iteration profiler
 ├── main.py                            CLI entry point (smoke/collect/offline/dagger/inference/baselines)
 ├── pyproject.toml                     PEP 621 project metadata + dependencies
 ├── uv.lock                            Deterministic lockfile
