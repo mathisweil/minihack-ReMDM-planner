@@ -7,8 +7,8 @@ expected by ``ReplayBuffer.load_offline_data()``.
 Usage::
 
     python main.py --mode collect
-    python main.py --mode collect collect_episodes_per_env=2000
-    python main.py --mode collect collect_output=data/small.pt
+    python main.py --mode collect --override collect_episodes_per_env=2000
+    python main.py --mode collect --data data/small.pt
 """
 
 from __future__ import annotations
