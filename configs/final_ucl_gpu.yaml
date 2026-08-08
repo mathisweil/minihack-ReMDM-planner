@@ -5,7 +5,7 @@
 # This single config drives BOTH the final DAgger run and the
 # compute-matched offline BC baseline used for the paper comparison.
 #
-#   --mode dagger    → reproduces the iter600 DAgger checkpoint recipe
+#   --mode online    → reproduces the iter600 DAgger checkpoint recipe
 #   --mode offline   → trains a fair offline BC baseline against it
 #
 # All training hyperparameters are IDENTICAL to `final_qmul_gpu.yaml`
@@ -70,7 +70,7 @@ physics_aware_sampling: false
 # with the same recipe (see QMUL config header for the full derivation).
 # The earlier 3M figure was based on the buggy single-episode env-step
 # accounting in `online.py:155-169` — fixed in the same commit as this
-# config bump. Used by `--mode dagger` only. Offline mode bypasses
+# config bump. Used by `--mode online` only. Offline mode bypasses
 # this via `offline_total_grad_steps` below.
 total_timesteps: 5650000
 

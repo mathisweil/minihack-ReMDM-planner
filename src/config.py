@@ -47,6 +47,17 @@ def _deep_merge(base: dict, override: dict) -> dict:
 # auto-selected at load time and serialised into checkpoint config snapshots.
 _RUN_KEYS = {"device"}
 
+# Keys used by earlier code versions that survive in released checkpoint
+# config snapshots (e.g. config_iter600.yaml on the HF Hub). Accepted so the
+# documented snapshot-evaluation workflow keeps working; nothing reads them.
+_LEGACY_SNAPSHOT_KEYS = {
+    "checkpoint_every",
+    "id_eval_every",
+    "ood_eval_every",
+    "max_iterations",
+    "offline_epochs",
+}
+
 
 def _validate_keys(keys, allowed: set[str], source: str) -> None:
     """Reject unknown config keys instead of silently ignoring them.
@@ -91,6 +102,18 @@ def _cast_override(key: str, raw: str, current) -> object:
 
     if current is None or value is None:
         return value
+
+    # YAML 1.1 reads '1e-4' as a string; accept scientific notation for
+    # numeric keys.
+    if (
+        isinstance(current, (int, float))
+        and not isinstance(current, bool)
+        and isinstance(value, str)
+    ):
+        try:
+            value = float(value)
+        except ValueError:
+            pass
 
     if isinstance(current, bool):
         if not isinstance(value, bool):
@@ -156,7 +179,9 @@ def load_config(
         if config_path_resolved.resolve() != defaults_path.resolve():
             with open(config_path_resolved, "r") as fh:
                 overrides = yaml.safe_load(fh) or {}
-            _validate_keys(overrides, allowed, str(config_path))
+            _validate_keys(
+                overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path)
+            )
             _deep_merge(cfg, overrides)
 
     _validate_keys(cli_overrides, allowed, "--override")
