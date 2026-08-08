@@ -21,6 +21,7 @@ tensorboard scalars automatically. No file in this module calls
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import random
@@ -954,6 +955,12 @@ def _build_sb3_model(
         "features_extractor_class": _MiniHackCNN,
         "features_extractor_kwargs": {"features_dim": 256},
     }
+    # SB3 raises at learn() time if tensorboard_log is set without tensorboard
+    # installed, and tensorboard is not a dependency of this project.
+    if not importlib.util.find_spec("tensorboard"):
+        logger.info("tensorboard not installed; SB3 tensorboard logging off")
+        tb_log_dir = None
+
     if algo == "ppo":
         return PPO(
             "MultiInputPolicy", train_env, policy_kwargs=policy_kwargs,
@@ -984,7 +991,15 @@ def _build_sb3_callbacks(
     log_dir: str,
     model_dir: str,
 ) -> CallbackList:
-    callbacks: list = [WandbCallback(model_save_path=model_dir)]
+    # WandbCallback requires an active run; without one it raises on
+    # construction, which would make every SB3 baseline unrunnable with
+    # use_wandb=false.
+    import wandb
+
+    callbacks: list = []
+    if wandb.run is not None:
+        callbacks.append(WandbCallback(model_save_path=model_dir))
+
     n_eval = _eval_episodes_per_env(cfg)
     eval_freq = max(
         1, int(cfg.baselines_eval_freq_env_steps) // train_env.num_envs,
