@@ -1,0 +1,6 @@
+# Local-only ablation: builds the LocalDiffusionPlanner variant (no global
+# stream, no goal head). Trains a genuinely local-only model, unlike the
+# eval-time --blind-global flag, which zeroes the global observation of an
+# already-trained dual-stream model. Supported by --mode offline and
+# --mode online.
+use_global_stream: false

@@ -457,6 +457,7 @@ def test_main_offline_mode_runs(tiny_config_file, tiny_dataset_file, tmp_path):
         str(tiny_config_file),
         "--data",
         str(tiny_dataset_file),
+        "--override",
         "total_timesteps=8",
     )
 
@@ -488,11 +489,11 @@ def test_main_inference_mode_runs(tiny_config_file, tiny_checkpoint_file, tmp_pa
 
 
 @requires_minihack
-def test_main_dagger_mode_runs(tiny_config_file):
+def test_main_online_mode_runs(tiny_config_file):
     result = run_cli(
         "main.py",
         "--mode",
-        "dagger",
+        "online",
         "--config",
         str(tiny_config_file),
         "--no-warm-start",
@@ -528,12 +529,12 @@ def test_main_baselines_bc_runs(tiny_config_file):
         "0",
         "--config",
         str(tiny_config_file),
-        "baselines_bc_oracle_episodes_per_env=1",
-        "baselines_bc_epochs=1",
-        "baselines_bc_batch_size=8",
-        "baselines_n_envs_per_id=1",
-        "baselines_eval_episodes_per_env=1",
-        "baselines_eval_freq_env_steps=1000000",
+        "--override", "baselines_bc_oracle_episodes_per_env=1",
+        "--override", "baselines_bc_epochs=1",
+        "--override", "baselines_bc_batch_size=8",
+        "--override", "baselines_n_envs_per_id=1",
+        "--override", "baselines_eval_episodes_per_env=1",
+        "--override", "baselines_eval_freq_env_steps=1000000",
     )
 
     assert_cli_ok(result)
@@ -557,10 +558,10 @@ def test_main_baselines_ppo_runs_without_wandb(tiny_config_file):
         "0",
         "--config",
         str(tiny_config_file),
-        "total_timesteps=64",
-        "baselines_n_envs_per_id=1",
-        "baselines_eval_episodes_per_env=1",
-        "baselines_eval_freq_env_steps=1000000",
+        "--override", "total_timesteps=64",
+        "--override", "baselines_n_envs_per_id=1",
+        "--override", "baselines_eval_episodes_per_env=1",
+        "--override", "baselines_eval_freq_env_steps=1000000",
     )
 
     assert_cli_ok(result)

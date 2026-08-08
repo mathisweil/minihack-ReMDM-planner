@@ -4,7 +4,7 @@ Runs a small number of DAgger iterations and reports per-component
 timing breakdowns. Use this to decide which optimisations matter.
 
 Usage:
-    python scripts/profile_dagger.py [key=value ...]
+    python scripts/profile_dagger.py [--override key=value ...]
 """
 
 from __future__ import annotations
@@ -664,7 +664,8 @@ def run_profiling(cfg: SimpleNamespace) -> None:
 
 if __name__ == "__main__":
     cli_overrides = {}
-    for arg in sys.argv[1:]:
+    args = [a for a in sys.argv[1:] if a != "--override"]
+    for arg in args:
         if "=" in arg:
             k, v = arg.split("=", 1)
             cli_overrides[k] = v
