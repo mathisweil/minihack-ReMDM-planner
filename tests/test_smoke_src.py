@@ -1,0 +1,535 @@
+"""End-to-end smoke tests for the ``src/`` diffusion-planner pipeline.
+
+Proves the model builds, runs, trains, round-trips through disk, and that
+every ``main.py`` mode starts and finishes. Nothing here asserts anything
+about result quality.
+"""
+
+from __future__ import annotations
+
+import importlib
+
+import pytest
+import torch
+
+from tests.conftest import (
+    TINY_ENV,
+    assert_cli_ok,
+    discover_modules,
+    requires_cuda,
+    requires_minihack,
+    run_cli,
+)
+
+SRC_MODULES = discover_modules("src")
+
+
+# ── 1. Imports ───────────────────────────────────────────────────────
+
+
+def test_src_module_list_is_not_empty():
+    assert len(SRC_MODULES) > 10, SRC_MODULES
+
+
+@pytest.mark.parametrize("module_name", SRC_MODULES)
+def test_src_module_imports_cleanly(module_name):
+    importlib.import_module(module_name)
+
+
+# ── 2. Instantiation from the real config ────────────────────────────
+
+
+def test_model_instantiates_from_real_config(real_cfg):
+    from src.models.denoiser import LocalDiffusionPlannerWithGlobal, make_model
+
+    model = make_model(real_cfg)
+
+    assert isinstance(model, LocalDiffusionPlannerWithGlobal)
+    assert sum(p.numel() for p in model.parameters()) > 0
+    assert model.head.out_features == real_cfg.action_dim
+
+
+def test_local_only_ablation_instantiates_from_real_config(real_cfg):
+    import copy
+
+    from src.models.denoiser import LocalDiffusionPlanner, make_model
+
+    cfg = copy.copy(real_cfg)
+    cfg.use_global_stream = False
+
+    assert isinstance(make_model(cfg), LocalDiffusionPlanner)
+
+
+def test_ema_wraps_real_config_model(real_cfg):
+    from src.models.denoiser import ModelEMA, make_model
+
+    model = make_model(real_cfg)
+    ema = ModelEMA(model, decay=real_cfg.ema_decay)
+    ema.update(model)
+
+    assert set(ema.state_dict()) == {n for n, _ in model.named_parameters()}
+
+
+# ── 3. Forward pass ──────────────────────────────────────────────────
+
+
+def test_forward_pass_shape_dtype_and_finiteness(tiny_cfg, tiny_batch):
+    from src.models.denoiser import make_model
+
+    local, glob, actions = tiny_batch
+    model = make_model(tiny_cfg).eval()
+
+    with torch.no_grad():
+        out = model(local, glob, actions, torch.zeros(local.shape[0], dtype=torch.long))
+
+    assert set(out) == {"actions", "goal_pred"}
+    assert out["actions"].shape == (
+        local.shape[0],
+        tiny_cfg.seq_len,
+        tiny_cfg.action_dim,
+    )
+    assert out["goal_pred"].shape == (local.shape[0], 2)
+    assert out["actions"].dtype is torch.float32
+    assert out["goal_pred"].dtype is torch.float32
+    assert torch.isfinite(out["actions"]).all()
+    assert torch.isfinite(out["goal_pred"]).all()
+
+
+def test_forward_pass_accepts_scalar_timestep(tiny_cfg, tiny_batch):
+    from src.models.denoiser import make_model
+
+    local, glob, actions = tiny_batch
+    model = make_model(tiny_cfg).eval()
+
+    with torch.no_grad():
+        out = model(local, glob, actions, 0)
+
+    assert torch.isfinite(out["actions"]).all()
+
+
+def test_local_only_forward_pass(tiny_cfg, tiny_batch):
+    import copy
+
+    from src.models.denoiser import make_model
+
+    cfg = copy.copy(tiny_cfg)
+    cfg.use_global_stream = False
+    local, glob, actions = tiny_batch
+    model = make_model(cfg).eval()
+
+    with torch.no_grad():
+        out = model(local, glob, actions, torch.zeros(local.shape[0], dtype=torch.long))
+
+    assert out["actions"].shape == (local.shape[0], cfg.seq_len, cfg.action_dim)
+    assert torch.isfinite(out["actions"]).all()
+
+
+def test_forward_masking_and_loss_are_finite(tiny_cfg, tiny_batch):
+    from src.diffusion.forward import q_sample
+    from src.diffusion.loss import mdlm_loss
+    from src.diffusion.schedules import get_schedule
+    from src.models.denoiser import make_model
+
+    local, glob, actions = tiny_batch
+    schedule_fn = get_schedule(tiny_cfg.noise_schedule)
+    t = torch.rand(actions.shape[0]).clamp(1e-5, 1 - 1e-5)
+
+    zt = q_sample(actions, t, tiny_cfg.mask_token, tiny_cfg.pad_token, schedule_fn)
+    assert zt.shape == actions.shape
+    assert zt.dtype is torch.int64
+
+    model = make_model(tiny_cfg).eval()
+    t_discrete = (t * tiny_cfg.num_diffusion_steps).long().clamp(
+        0, tiny_cfg.num_diffusion_steps - 1
+    )
+    with torch.no_grad():
+        out = model(local, glob, zt, t_discrete)
+
+    loss = mdlm_loss(
+        out["actions"],
+        actions,
+        zt,
+        t,
+        tiny_cfg.mask_token,
+        tiny_cfg.pad_token,
+        schedule_fn,
+    )
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+
+
+@pytest.mark.parametrize("strategy", ["rescale", "cap", "conf"])
+def test_remdm_sampler_runs(tiny_cfg, tiny_batch, strategy):
+    import copy
+
+    from src.diffusion.sampling import remdm_sample
+    from src.models.denoiser import make_model
+
+    cfg = copy.copy(tiny_cfg)
+    cfg.remask_strategy = strategy
+    local, glob, _ = tiny_batch
+    model = make_model(cfg).eval()
+
+    seq = remdm_sample(model, local, glob, cfg, "cpu", physics_aware=False)
+
+    assert seq.shape == (local.shape[0], cfg.seq_len)
+    assert seq.dtype is torch.int64
+    assert (seq != cfg.mask_token).all()
+    assert (seq >= 0).all() and (seq < cfg.action_dim).all()
+
+
+def test_greedy_sampler_runs(tiny_cfg, tiny_batch):
+    from src.diffusion.sampling import greedy_sample
+    from src.models.denoiser import make_model
+
+    local, glob, _ = tiny_batch
+    model = make_model(tiny_cfg).eval()
+
+    seq = greedy_sample(model, local, glob, tiny_cfg, "cpu")
+
+    assert seq.shape == (local.shape[0], tiny_cfg.seq_len)
+    assert (seq >= 0).all() and (seq < tiny_cfg.action_dim).all()
+
+
+# ── 4. One training step ─────────────────────────────────────────────
+
+
+def _make_trainer(cfg, trajectory):
+    """Build a real Trainer with the collector/evaluator/logger left out."""
+    from src.buffer import ReplayBuffer
+    from src.models.denoiser import ModelEMA, make_model
+    from src.planners.online import Trainer
+
+    buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)
+    buffer.add(trajectory)
+
+    model = make_model(cfg)
+    ema = ModelEMA(model, decay=cfg.ema_decay)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.dagger_lr)
+
+    trainer = Trainer(
+        model,
+        ema,
+        optimizer,
+        None,
+        buffer,
+        collector=None,
+        evaluator=None,
+        log=None,
+        cfg=cfg,
+        device="cpu",
+        raw_model=model,
+    )
+    return trainer, model, ema
+
+
+def test_single_training_step_produces_finite_loss(tiny_cfg, tiny_trajectory):
+    trainer, model, ema = _make_trainer(tiny_cfg, tiny_trajectory)
+
+    model.train()
+    metrics = trainer._train_step()
+    ema.update(model)
+
+    for key in ("loss", "loss_diff", "loss_aux", "grad_norm"):
+        assert key in metrics
+        assert torch.isfinite(torch.tensor(metrics[key])), (key, metrics[key])
+
+
+def test_training_step_updates_parameters(tiny_cfg, tiny_trajectory):
+    trainer, model, _ = _make_trainer(tiny_cfg, tiny_trajectory)
+    before = model.head.weight.detach().clone()
+
+    model.train()
+    trainer._train_step()
+
+    assert not torch.equal(before, model.head.weight.detach())
+
+
+def test_training_step_on_empty_buffer_is_a_no_op(tiny_cfg):
+    from src.buffer import ReplayBuffer
+    from src.models.denoiser import ModelEMA, make_model
+    from src.planners.online import Trainer
+
+    model = make_model(tiny_cfg)
+    trainer = Trainer(
+        model,
+        ModelEMA(model, decay=tiny_cfg.ema_decay),
+        torch.optim.AdamW(model.parameters(), lr=tiny_cfg.dagger_lr),
+        None,
+        ReplayBuffer(tiny_cfg.buffer_capacity, tiny_cfg.seq_len, tiny_cfg.pad_token),
+        collector=None,
+        evaluator=None,
+        log=None,
+        cfg=tiny_cfg,
+        device="cpu",
+        raw_model=model,
+    )
+
+    assert trainer._train_step() == {
+        "loss": 0.0,
+        "loss_diff": 0.0,
+        "loss_aux": 0.0,
+        "grad_norm": 0.0,
+    }
+
+
+@requires_cuda
+def test_amp_training_step_on_cuda(tiny_cfg, tiny_trajectory):
+    import copy
+
+    cfg = copy.copy(tiny_cfg)
+    cfg.device = "cuda"
+    cfg.use_amp = True
+
+    from src.buffer import ReplayBuffer
+    from src.models.denoiser import ModelEMA, make_model
+    from src.planners.online import Trainer
+
+    buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)
+    buffer.add(tiny_trajectory)
+    model = make_model(cfg).to("cuda")
+    trainer = Trainer(
+        model,
+        ModelEMA(model, decay=cfg.ema_decay),
+        torch.optim.AdamW(model.parameters(), lr=cfg.dagger_lr),
+        None,
+        buffer,
+        collector=None,
+        evaluator=None,
+        log=None,
+        cfg=cfg,
+        device="cuda",
+        raw_model=model,
+    )
+
+    model.train()
+    assert torch.isfinite(torch.tensor(trainer._train_step()["loss"]))
+
+
+# ── 5. Save and reload ───────────────────────────────────────────────
+
+
+def test_checkpoint_roundtrip_preserves_output(tiny_cfg, tiny_batch, tmp_path):
+    from src.models.denoiser import ModelEMA, make_model
+
+    local, glob, actions = tiny_batch
+    t = torch.zeros(local.shape[0], dtype=torch.long)
+
+    model = make_model(tiny_cfg).eval()
+    ema = ModelEMA(model, decay=tiny_cfg.ema_decay)
+    with torch.no_grad():
+        before = model(local, glob, actions, t)
+
+    path = tmp_path / "checkpoint.pth"
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "ema_state_dict": ema.state_dict(),
+        },
+        path,
+    )
+
+    reloaded = make_model(tiny_cfg)
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    reloaded.load_state_dict(ckpt["model_state_dict"])
+    reloaded.eval()
+    with torch.no_grad():
+        after = reloaded(local, glob, actions, t)
+
+    assert torch.equal(before["actions"], after["actions"])
+    assert torch.equal(before["goal_pred"], after["goal_pred"])
+
+
+def test_ema_weights_roundtrip(tiny_cfg, tiny_batch, tmp_path):
+    from src.models.denoiser import ModelEMA, make_model
+
+    local, glob, actions = tiny_batch
+    t = torch.zeros(local.shape[0], dtype=torch.long)
+
+    model = make_model(tiny_cfg)
+    ema = ModelEMA(model, decay=0.5)
+    ema.update(model)
+
+    path = tmp_path / "ema.pth"
+    torch.save({"ema_state_dict": ema.state_dict()}, path)
+
+    eval_model = ema.make_eval_model(model)
+    with torch.no_grad():
+        before = eval_model(local, glob, actions, t)["actions"]
+
+    reloaded = make_model(tiny_cfg)
+    reloaded_ema = ModelEMA(reloaded, decay=0.5)
+    reloaded_ema.load_state_dict(
+        torch.load(path, map_location="cpu", weights_only=False)["ema_state_dict"]
+    )
+    after_model = reloaded_ema.make_eval_model(reloaded)
+    with torch.no_grad():
+        after = after_model(local, glob, actions, t)["actions"]
+
+    assert torch.equal(before, after)
+
+
+# ── 6. Entry points ──────────────────────────────────────────────────
+
+
+def test_main_help():
+    result = run_cli("main.py", "--help")
+
+    assert_cli_ok(result)
+    assert "--mode" in result.stdout
+
+
+def test_main_rejects_unknown_mode():
+    assert run_cli("main.py", "--mode", "not-a-mode").returncode != 0
+
+
+def test_main_inference_requires_a_checkpoint(tiny_config_file):
+    result = run_cli(
+        "main.py", "--mode", "inference", "--config", str(tiny_config_file)
+    )
+
+    assert result.returncode != 0
+    assert "checkpoint" in (result.stdout + result.stderr).lower()
+
+
+@requires_minihack
+def test_main_smoke_mode_runs(tiny_config_file):
+    result = run_cli("main.py", "--mode", "smoke", "--config", str(tiny_config_file))
+
+    assert_cli_ok(result)
+    assert "Smoke Results" in result.stdout
+
+
+@requires_minihack
+def test_main_collect_mode_runs(tiny_config_file, tmp_path):
+    result = run_cli("main.py", "--mode", "collect", "--config", str(tiny_config_file))
+
+    assert_cli_ok(result)
+    assert (tmp_path / "dataset.pt").exists()
+
+
+def test_main_offline_mode_runs(tiny_config_file, tiny_dataset_file, tmp_path):
+    result = run_cli(
+        "main.py",
+        "--mode",
+        "offline",
+        "--config",
+        str(tiny_config_file),
+        "--data",
+        str(tiny_dataset_file),
+        "total_timesteps=8",
+    )
+
+    assert_cli_ok(result)
+    assert list((tmp_path / "checkpoints").glob("offline_*/offline_final.pth"))
+
+
+@requires_minihack
+def test_main_inference_mode_runs(tiny_config_file, tiny_checkpoint_file, tmp_path):
+    output = tmp_path / "eval.json"
+    result = run_cli(
+        "main.py",
+        "--mode",
+        "inference",
+        "--config",
+        str(tiny_config_file),
+        "--checkpoint",
+        str(tiny_checkpoint_file),
+        "--envs",
+        TINY_ENV,
+        "--episodes",
+        "1",
+        "--output",
+        str(output),
+    )
+
+    assert_cli_ok(result)
+    assert output.exists()
+
+
+@requires_minihack
+def test_main_dagger_mode_runs(tiny_config_file):
+    result = run_cli(
+        "main.py",
+        "--mode",
+        "dagger",
+        "--config",
+        str(tiny_config_file),
+        "--no-warm-start",
+    )
+
+    assert_cli_ok(result)
+
+
+def test_main_baselines_mode_validates_algo(tiny_config_file):
+    result = run_cli(
+        "main.py",
+        "--mode",
+        "baselines",
+        "--algo",
+        "not-an-algo",
+        "--config",
+        str(tiny_config_file),
+    )
+
+    assert result.returncode != 0
+
+
+@requires_minihack
+@pytest.mark.slow
+def test_main_baselines_bc_runs(tiny_config_file):
+    """The `bc` baseline is the only baseline family that runs offline.
+
+    The SB3 families (ppo/a2c/dqn/ppo-rnn) cannot: see
+    ``test_main_baselines_sb3_is_broken_without_wandb``.
+    """
+    result = run_cli(
+        "main.py",
+        "--mode",
+        "baselines",
+        "--algo",
+        "bc",
+        "--seeds",
+        "0",
+        "--config",
+        str(tiny_config_file),
+        "baselines_bc_oracle_episodes_per_env=1",
+        "baselines_bc_epochs=1",
+        "baselines_bc_batch_size=8",
+        "baselines_n_envs_per_id=1",
+        "baselines_eval_episodes_per_env=1",
+        "baselines_eval_freq_env_steps=1000000",
+    )
+
+    assert_cli_ok(result)
+
+
+@requires_minihack
+@pytest.mark.slow
+@pytest.mark.xfail(
+    reason=(
+        "Known defect: src/planners/baselines.py:987 builds WandbCallback "
+        "unconditionally, so every SB3 baseline dies with "
+        "'You must call wandb.init() before WandbCallback()' when "
+        "use_wandb is false."
+    ),
+    strict=False,
+)
+def test_main_baselines_sb3_is_broken_without_wandb(tiny_config_file):
+    result = run_cli(
+        "main.py",
+        "--mode",
+        "baselines",
+        "--algo",
+        "ppo",
+        "--seeds",
+        "0",
+        "--config",
+        str(tiny_config_file),
+        "total_timesteps=64",
+        "baselines_n_envs_per_id=1",
+        "baselines_eval_episodes_per_env=1",
+        "baselines_eval_freq_env_steps=1000000",
+    )
+
+    assert_cli_ok(result)
