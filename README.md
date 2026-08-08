@@ -628,7 +628,7 @@ Each directory ships:
 
 ### Download
 
-Download all six (~470 MB):
+Download all:
 
 ```bash
 uv run hf download MathisW78/remdm-minihack-checkpoints --include "checkpoints/**" --local-dir .
