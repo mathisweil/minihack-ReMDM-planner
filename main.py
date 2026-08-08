@@ -4,7 +4,6 @@ import argparse
 import logging
 import random
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
@@ -29,17 +28,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+WANDB_PREFIX = "wandb:"
+
 
 # =============================================================================
 # Utils
 # =============================================================================
 
-def _parse_overrides(extras: list[str]) -> dict[str, Any]:
-    return {
-        k.lstrip("-"): v
-        for item in extras if "=" in item
-        for k, v in [item.split("=", 1)]
-    }
+def _parse_overrides(pairs: list[str]) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    for item in pairs:
+        if "=" not in item:
+            raise ValueError(
+                f"--override expects KEY=VALUE, got '{item}'"
+            )
+        key, value = item.split("=", 1)
+        overrides[key] = value
+    return overrides
 
 
 def _set_seed(seed: int | None) -> int:
@@ -59,7 +64,7 @@ def _set_seed(seed: int | None) -> int:
 # CLI
 # =============================================================================
 
-def parse_args() -> tuple[argparse.Namespace, list[str]]:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="ReMDM-MiniHack: Masked Diffusion Planner",
     )
@@ -68,10 +73,24 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         "--mode",
         required=True,
         choices=[
-            "smoke", "offline", "dagger", "inference", "collect", "baselines",
+            "smoke", "offline", "online", "inference", "collect", "baselines",
         ],
     )
-    parser.add_argument("--config", default="configs/defaults.yaml")
+    parser.add_argument(
+        "--config", default="configs/defaults.yaml",
+        help="Experiment config, deep-merged onto configs/defaults.yaml",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help="Run seed (overrides the config value)",
+    )
+    parser.add_argument(
+        "--override", action="append", default=[], metavar="KEY=VALUE",
+        help=(
+            "Config override, repeatable. Keys are validated against "
+            "configs/defaults.yaml; unknown keys are an error."
+        ),
+    )
     parser.add_argument(
         "--algo", default=None, choices=list(ALL_BASELINE_ALGOS),
         help="Baseline algorithm (required for --mode baselines)",
@@ -84,20 +103,25 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         ),
     )
     parser.add_argument(
-        "--n-seeds", type=int, default=None,
+        "--num-seeds", type=int, default=None,
         help=(
             "Number of seeds starting from 0 (alternative to --seeds; "
             "only used by --mode baselines)."
         ),
     )
 
-    parser.add_argument("--data", default=None)
-    parser.add_argument("--checkpoint", default=None)
     parser.add_argument(
-        "--wandb-artifact", default=None,
+        "--data", default=None,
         help=(
-            "W&B artifact reference to download as checkpoint, e.g. "
-            "'entity/project/checkpoint-iter1000:latest'"
+            "Dataset path: read by --mode offline, written by "
+            "--mode collect (default: collect_output from config)"
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint", default=None,
+        help=(
+            "Checkpoint .pth path, or a W&B artifact reference "
+            "'wandb:entity/project/checkpoint-iter1000:latest'"
         ),
     )
     parser.add_argument("--no-warm-start", action="store_true")
@@ -108,26 +132,35 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         "--des", nargs="+", default=None,
         help="Paths to .des scenario files for custom environment evaluation",
     )
-    parser.add_argument("--episodes", type=int, default=50)
+    parser.add_argument(
+        "--episodes", type=int, default=None,
+        help=(
+            "Episodes per environment at inference "
+            "(default: eval_episodes_per_env from config)"
+        ),
+    )
     parser.add_argument("--output", default=None)
     parser.add_argument(
         "--blind-global", action="store_true",
         help="Zero out global map observations (local-only ablation)",
     )
 
-    return parser.parse_known_args()
+    return parser.parse_args()
 
 
 # =============================================================================
 # Config
 # =============================================================================
 
-def build_config(args, extras):
+def build_config(args):
     config_path = args.config
     if args.mode == "smoke" and config_path == "configs/defaults.yaml":
         config_path = "configs/smoke.yaml"
 
-    cfg = load_config(config_path, _parse_overrides(extras))
+    cfg = load_config(config_path, _parse_overrides(args.override))
+
+    if args.seed is not None:
+        cfg.seed = args.seed
 
     seed = _set_seed(cfg.seed)
     logger.info(f"Seed: {seed}")
@@ -140,10 +173,8 @@ def build_config(args, extras):
 # =============================================================================
 
 def validate(args) -> None:
-    if args.mode == "inference" and not args.checkpoint and not args.wandb_artifact:
-        raise ValueError(
-            "--checkpoint or --wandb-artifact required for inference mode"
-        )
+    if args.mode == "inference" and not args.checkpoint:
+        raise ValueError("--checkpoint required for inference mode")
     if args.mode == "baselines" and args.algo is None:
         raise ValueError(
             "--algo is required for --mode baselines "
@@ -155,13 +186,13 @@ def _resolve_seeds(args, cfg) -> list[int]:
     """Build the seed list for --mode baselines."""
     if args.seeds is not None:
         return list(args.seeds)
-    if args.n_seeds is not None:
-        return list(range(int(args.n_seeds)))
+    if args.num_seeds is not None:
+        return list(range(int(args.num_seeds)))
     return [cfg.seed if cfg.seed is not None else 0]
 
 
 # =============================================================================
-# Dispatch (no lambdas, cleaner)
+# Dispatch
 # =============================================================================
 
 def _resolve_path(p: str | None) -> str | None:
@@ -171,20 +202,18 @@ def _resolve_path(p: str | None) -> str | None:
     return str(Path(p).resolve())
 
 
-def _resolve_checkpoint(args, cfg) -> str | None:
-    """Return a local checkpoint path from --checkpoint or --wandb-artifact."""
-    if args.checkpoint:
-        return _resolve_path(args.checkpoint)
-    artifact_ref = args.wandb_artifact
-    if artifact_ref:
+def _resolve_checkpoint(args) -> str | None:
+    """Return a local checkpoint path from --checkpoint (path or wandb: ref)."""
+    ref = args.checkpoint
+    if not ref:
+        return None
+    if ref.startswith(WANDB_PREFIX):
         from src.planners.logging import download_artifact
-        path = download_artifact(artifact_ref)
+        path = download_artifact(ref[len(WANDB_PREFIX):])
         if path is None:
-            raise RuntimeError(
-                f"Failed to download W&B artifact: {artifact_ref}"
-            )
+            raise RuntimeError(f"Failed to download W&B artifact: {ref}")
         return path
-    return None
+    return _resolve_path(ref)
 
 
 def run_mode(mode: str, cfg, args) -> None:
@@ -199,14 +228,16 @@ def run_mode(mode: str, cfg, args) -> None:
         run_smoke(cfg)
 
     elif mode == "offline":
-        ckpt = _resolve_checkpoint(args, cfg)
+        ckpt = _resolve_checkpoint(args)
         run_offline(cfg, data_path, checkpoint_path=ckpt)
 
-    elif mode == "dagger":
-        ckpt = _resolve_checkpoint(args, cfg)
+    elif mode == "online":
+        ckpt = _resolve_checkpoint(args)
         run_dagger(cfg, ckpt, args.no_warm_start)
 
     elif mode == "collect":
+        if data_path is not None:
+            cfg.collect_output = data_path
         run_collect(cfg)
 
     elif mode == "baselines":
@@ -218,17 +249,19 @@ def run_mode(mode: str, cfg, args) -> None:
         )
 
     elif mode == "inference":
-        ckpt = _resolve_checkpoint(args, cfg)
+        ckpt = _resolve_checkpoint(args)
         if ckpt is None:
-            raise ValueError(
-                "--checkpoint or --wandb-artifact required for inference"
-            )
+            raise ValueError("--checkpoint required for inference")
+        episodes = (
+            args.episodes if args.episodes is not None
+            else cfg.eval_episodes_per_env
+        )
         log = Logger(cfg)
         run_inference(
             cfg,
             ckpt,
             args.envs,
-            args.episodes,
+            episodes,
             output_path,
             not args.no_ema,
             log=log,
@@ -243,9 +276,9 @@ def run_mode(mode: str, cfg, args) -> None:
 # =============================================================================
 
 def main() -> None:
-    args, extras = parse_args()
+    args = parse_args()
     validate(args)
-    cfg = build_config(args, extras)
+    cfg = build_config(args)
     if torch.cuda.is_available():
         torch.set_float32_matmul_precision("high")
     run_mode(args.mode, cfg, args)

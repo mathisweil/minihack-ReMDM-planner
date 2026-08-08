@@ -191,6 +191,46 @@ def test_greedy_sampler_runs(tiny_cfg, tiny_batch):
     assert (seq >= 0).all() and (seq < tiny_cfg.action_dim).all()
 
 
+# ── Environment sanity ───────────────────────────────────────────────
+
+
+@requires_minihack
+def test_environment_exposes_a_goal_staircase(real_cfg):
+    """Regression: MiniHack's nhdat patch step can fail silently.
+
+    When it does, every env falls back to the same default level with no
+    staircase, so the BFS oracle has nothing to target and no episode can
+    ever be won.
+    """
+    from src.envs.minihack_env import make_env
+
+    env = make_env(TINY_ENV, None, real_cfg)
+    try:
+        env.reset(seed=0)
+        raw = env.last_raw_obs
+        assert (raw["chars"] == ord(">")).sum() >= 1, "no staircase on the map"
+        assert env._get_bfs_distance(raw) is not None
+    finally:
+        env.close()
+
+
+@requires_minihack
+def test_distinct_envs_produce_distinct_levels(real_cfg):
+    """A silent nhdat failure collapses every env onto one default level."""
+    from src.envs.minihack_env import make_env
+
+    sizes = []
+    for env_id in ("MiniHack-Room-Random-5x5-v0", "MiniHack-Room-Random-15x15-v0"):
+        env = make_env(env_id, None, real_cfg)
+        try:
+            env.reset(seed=0)
+            sizes.append(int((env.last_raw_obs["chars"] != ord(" ")).sum()))
+        finally:
+            env.close()
+
+    assert sizes[0] != sizes[1], f"both envs rendered {sizes[0]} cells"
+
+
 # ── 4. One training step ─────────────────────────────────────────────
 
 
@@ -417,6 +457,7 @@ def test_main_offline_mode_runs(tiny_config_file, tiny_dataset_file, tmp_path):
         str(tiny_config_file),
         "--data",
         str(tiny_dataset_file),
+        "--override",
         "total_timesteps=8",
     )
 
@@ -448,11 +489,11 @@ def test_main_inference_mode_runs(tiny_config_file, tiny_checkpoint_file, tmp_pa
 
 
 @requires_minihack
-def test_main_dagger_mode_runs(tiny_config_file):
+def test_main_online_mode_runs(tiny_config_file):
     result = run_cli(
         "main.py",
         "--mode",
-        "dagger",
+        "online",
         "--config",
         str(tiny_config_file),
         "--no-warm-start",
@@ -478,11 +519,6 @@ def test_main_baselines_mode_validates_algo(tiny_config_file):
 @requires_minihack
 @pytest.mark.slow
 def test_main_baselines_bc_runs(tiny_config_file):
-    """The `bc` baseline is the only baseline family that runs offline.
-
-    The SB3 families (ppo/a2c/dqn/ppo-rnn) cannot: see
-    ``test_main_baselines_sb3_is_broken_without_wandb``.
-    """
     result = run_cli(
         "main.py",
         "--mode",
@@ -493,12 +529,12 @@ def test_main_baselines_bc_runs(tiny_config_file):
         "0",
         "--config",
         str(tiny_config_file),
-        "baselines_bc_oracle_episodes_per_env=1",
-        "baselines_bc_epochs=1",
-        "baselines_bc_batch_size=8",
-        "baselines_n_envs_per_id=1",
-        "baselines_eval_episodes_per_env=1",
-        "baselines_eval_freq_env_steps=1000000",
+        "--override", "baselines_bc_oracle_episodes_per_env=1",
+        "--override", "baselines_bc_epochs=1",
+        "--override", "baselines_bc_batch_size=8",
+        "--override", "baselines_n_envs_per_id=1",
+        "--override", "baselines_eval_episodes_per_env=1",
+        "--override", "baselines_eval_freq_env_steps=1000000",
     )
 
     assert_cli_ok(result)
@@ -506,16 +542,12 @@ def test_main_baselines_bc_runs(tiny_config_file):
 
 @requires_minihack
 @pytest.mark.slow
-@pytest.mark.xfail(
-    reason=(
-        "Known defect: src/planners/baselines.py:987 builds WandbCallback "
-        "unconditionally, so every SB3 baseline dies with "
-        "'You must call wandb.init() before WandbCallback()' when "
-        "use_wandb is false."
-    ),
-    strict=False,
-)
-def test_main_baselines_sb3_is_broken_without_wandb(tiny_config_file):
+def test_main_baselines_ppo_runs_without_wandb(tiny_config_file):
+    """Regression: SB3 baselines used to die before their first env step.
+
+    ``WandbCallback`` was built unconditionally, and behind it SB3 refused to
+    start because ``tensorboard_log`` was set without tensorboard installed.
+    """
     result = run_cli(
         "main.py",
         "--mode",
@@ -526,10 +558,10 @@ def test_main_baselines_sb3_is_broken_without_wandb(tiny_config_file):
         "0",
         "--config",
         str(tiny_config_file),
-        "total_timesteps=64",
-        "baselines_n_envs_per_id=1",
-        "baselines_eval_episodes_per_env=1",
-        "baselines_eval_freq_env_steps=1000000",
+        "--override", "total_timesteps=64",
+        "--override", "baselines_n_envs_per_id=1",
+        "--override", "baselines_eval_episodes_per_env=1",
+        "--override", "baselines_eval_freq_env_steps=1000000",
     )
 
     assert_cli_ok(result)

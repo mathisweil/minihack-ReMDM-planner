@@ -370,7 +370,7 @@ def test_run_ablations_requires_a_checkpoint(tmp_path):
         "--ablations",
         "baseline_rl",
         "--fast",
-        "--output_dir",
+        "--output-dir",
         str(tmp_path / "out"),
     )
 
@@ -385,7 +385,7 @@ def test_run_ablations_rejects_unknown_ablation(tmp_path, tiny_checkpoint_file):
         "not-an-ablation",
         "--checkpoint",
         str(tiny_checkpoint_file),
-        "--output_dir",
+        "--output-dir",
         str(tmp_path / "out"),
     )
 

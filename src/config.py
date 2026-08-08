@@ -43,29 +43,98 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return base
 
 
-def _cast_value(value: str) -> int | float | bool | str | None:
-    """Best-effort cast of a CLI string to a Python scalar.
+# Valid config keys that do not appear in defaults.yaml: `device` is
+# auto-selected at load time and serialised into checkpoint config snapshots.
+_RUN_KEYS = {"device"}
+
+# Keys used by earlier code versions that survive in released checkpoint
+# config snapshots (e.g. config_iter600.yaml on the HF Hub). Accepted so the
+# documented snapshot-evaluation workflow keeps working; nothing reads them.
+_LEGACY_SNAPSHOT_KEYS = {
+    "checkpoint_every",
+    "id_eval_every",
+    "ood_eval_every",
+    "max_iterations",
+    "offline_epochs",
+}
+
+
+def _validate_keys(keys, allowed: set[str], source: str) -> None:
+    """Reject unknown config keys instead of silently ignoring them.
 
     Args:
-        value: Raw string from the command line.
+        keys: Keys to check.
+        allowed: The full set of valid config keys.
+        source: Label for the error message (file path or 'override').
+
+    Raises:
+        KeyError: If any key is not a known config key.
+    """
+    unknown = sorted(set(keys) - allowed)
+    if unknown:
+        raise KeyError(
+            f"Unknown config key(s) {unknown} in {source}. "
+            "Valid keys are defined in configs/defaults.yaml."
+        )
+
+
+def _cast_override(key: str, raw: str, current) -> object:
+    """Cast a CLI override string to the type of the current config value.
+
+    Args:
+        key: Config key being overridden.
+        raw: Raw string from the command line.
+        current: Current (default or config-file) value, used for typing.
 
     Returns:
-        Parsed Python value (int, float, bool, str, or None).
+        Parsed Python value.
+
+    Raises:
+        TypeError: If the value cannot be interpreted as the key's type.
     """
-    if value.lower() in ("true", "yes"):
-        return True
-    if value.lower() in ("false", "no"):
-        return False
-    if value.lower() == "null":
-        return None
+    if isinstance(current, str):
+        return raw
+
     try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
+        value = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        value = raw
+
+    if current is None or value is None:
+        return value
+
+    # YAML 1.1 reads '1e-4' as a string; accept scientific notation for
+    # numeric keys.
+    if (
+        isinstance(current, (int, float))
+        and not isinstance(current, bool)
+        and isinstance(value, str)
+    ):
+        try:
+            value = float(value)
+        except ValueError:
+            pass
+
+    if isinstance(current, bool):
+        if not isinstance(value, bool):
+            raise TypeError(f"'{key}' expects a boolean, got '{raw}'")
+        return value
+    if isinstance(current, int):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"'{key}' expects an integer, got '{raw}'")
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise TypeError(f"'{key}' expects an integer, got '{raw}'")
+            value = int(value)
+        return value
+    if isinstance(current, float):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"'{key}' expects a number, got '{raw}'")
         return float(value)
-    except ValueError:
-        pass
+    if isinstance(current, list):
+        if not isinstance(value, list):
+            raise TypeError(f"'{key}' expects a list, got '{raw}'")
+        return value
     return value
 
 
@@ -101,6 +170,8 @@ def load_config(
     with open(defaults_path, "r") as fh:
         cfg = yaml.safe_load(fh)
 
+    allowed = set(cfg) | _RUN_KEYS
+
     if config_path is not None:
         config_path_resolved = Path(config_path)
         if not config_path_resolved.is_absolute():
@@ -108,11 +179,15 @@ def load_config(
         if config_path_resolved.resolve() != defaults_path.resolve():
             with open(config_path_resolved, "r") as fh:
                 overrides = yaml.safe_load(fh) or {}
+            _validate_keys(
+                overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path)
+            )
             _deep_merge(cfg, overrides)
 
+    _validate_keys(cli_overrides, allowed, "--override")
     for key, value in cli_overrides.items():
         if isinstance(value, str):
-            value = _cast_value(value)
+            value = _cast_override(key, value, cfg.get(key))
         cfg[key] = value
 
     # Device selection

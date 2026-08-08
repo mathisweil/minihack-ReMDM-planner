@@ -18,7 +18,7 @@ Usage::
 
     # Use a W&B artifact as checkpoint
     python experiments/rl_finetuning/run_ablations.py \\
-        --checkpoint wandb://entity/project/artifact:version \\
+        --checkpoint wandb:entity/project/artifact:version \\
         --ablations baseline_rl kl_penalty --fast
 
     # List registered ablations
@@ -26,12 +26,12 @@ Usage::
 
     # Analysis only (load existing results)
     python experiments/rl_finetuning/run_ablations.py \\
-        --analyze_only --results_path outputs/run_xyz/results.json
+        --analyze-only --results-path outputs/run_xyz/results.json
 
     # Merge results from independent runs (spread across GPUs)
     python experiments/rl_finetuning/run_ablations.py \\
         --merge outputs/gpu0/results.json outputs/gpu1/results.json \\
-        --output_dir outputs/merged
+        --output-dir outputs/merged
 """
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Main config (configs/defaults.yaml).",
     )
     p.add_argument(
-        "--ablations_config", type=str,
+        "--ablations-config", type=str,
         default=str(
             _PROJECT_ROOT
             / "experiments/rl_finetuning/configs/ablations_default.yaml"
@@ -139,7 +139,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Pretrained DAgger checkpoint. Accepts a local .pth path "
             "or a W&B artifact reference: "
-            "wandb://entity/project/artifact:version"
+            "wandb:entity/project/artifact:version"
         ),
     )
 
@@ -154,8 +154,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument("--fast", action="store_true", help="Fast smoke-test.")
-    p.add_argument("--analyze_only", action="store_true")
-    p.add_argument("--results_path", type=str, default=None)
+    p.add_argument("--analyze-only", action="store_true")
+    p.add_argument("--results-path", type=str, default=None)
     p.add_argument(
         "--merge", nargs="+", metavar="JSON",
         help=(
@@ -165,25 +165,25 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    p.add_argument("--output_dir", type=str, default=None)
-    p.add_argument("--run_id", type=str, default=None)
-    p.add_argument("--num_seeds", type=int, default=None)
+    p.add_argument("--output-dir", type=str, default=None)
+    p.add_argument("--run-id", type=str, default=None)
+    p.add_argument("--num-seeds", type=int, default=None)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--device", type=str, default=None)
 
-    p.add_argument("--use_wandb", action="store_true", default=False)
-    p.add_argument("--wandb_project", type=str, default=None)
+    p.add_argument("--use-wandb", action="store_true", default=False)
+    p.add_argument("--wandb-project", type=str, default=None)
     p.add_argument(
-        "--wandb_resume_id", type=str, default=None,
+        "--wandb-resume-id", type=str, default=None,
         help=(
             "W&B run ID to resume (curve continuity). "
             "Find it in the W&B dashboard URL: wandb.ai/.../runs/<id>"
         ),
     )
 
-    p.add_argument("--max_iter", type=int, default=None)
-    p.add_argument("--batch_size", type=int, default=None)
-    p.add_argument("--eval_every", type=int, default=None)
+    p.add_argument("--max-iter", type=int, default=None)
+    p.add_argument("--batch-size", type=int, default=None)
+    p.add_argument("--eval-every", type=int, default=None)
     p.add_argument("--lr", type=float, default=None)
 
     return p
@@ -400,8 +400,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # Analysis-only mode
     if args.analyze_only:
-        # Resolve results path: explicit --results_path, or results.json
-        # inside --output_dir
+        # Resolve results path: explicit --results-path, or results.json
+        # inside --output-dir
         results_path = (
             str(Path(args.results_path).resolve())
             if args.results_path else None
@@ -412,8 +412,8 @@ def main(argv: list[str] | None = None) -> None:
                 results_path = str(candidate)
             else:
                 parser.error(
-                    "--analyze_only requires --results_path or an "
-                    "--output_dir containing results.json"
+                    "--analyze-only requires --results-path or an "
+                    "--output-dir containing results.json"
                 )
 
         logger.info("Loading results from %s", results_path)
@@ -517,9 +517,9 @@ def main(argv: list[str] | None = None) -> None:
     # Checkpoint (resolve W&B artifact if needed)
     if not args.checkpoint:
         parser.error("--checkpoint is required for training mode.")
-    if args.checkpoint.startswith("wandb://"):
+    if args.checkpoint.startswith("wandb:"):
         from src.planners.logging import download_artifact
-        artifact_ref = args.checkpoint[len("wandb://"):]
+        artifact_ref = args.checkpoint[len("wandb:"):]
         resolved = download_artifact(artifact_ref)
         if resolved is None:
             parser.error(
@@ -564,7 +564,11 @@ def main(argv: list[str] | None = None) -> None:
         else:
             resume_id = args.wandb_resume_id
             wandb_run = wandb.init(
-                project=args.wandb_project or "remdm-minihack-ablations",
+                project=(
+                    args.wandb_project
+                    or getattr(cfg, "wandb_project", None)
+                    or "remdm-minihack-ablations"
+                ),
                 name=run_id,
                 config=vars(cfg),
                 tags=["ablations"] + selected,
