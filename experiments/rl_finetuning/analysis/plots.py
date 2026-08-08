@@ -202,7 +202,7 @@ def plot_score_comparison(
 
     with plt.rc_context(_STYLE):
         fig, ax = plt.subplots(figsize=(max(10.0, len(names) * 0.6), 5))
-        bars = ax.bar(range(len(names)), scores, color=colors)
+        ax.bar(range(len(names)), scores, color=colors)
         ax.axhline(pretrained_score, ls="--", color="black", label="Pretrained")
         ax.set_xticks(range(len(names)))
         ax.set_xticklabels(names, rotation=45, ha="right")

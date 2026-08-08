@@ -45,7 +45,6 @@ from experiments.rl_finetuning.ablations.optimizers import (
     FROZEN_BACKBONE,
     FROZEN_EXCEPT_ATTENTION,
     FROZEN_EXCEPT_FFN,
-    FROZEN_EXCEPT_LAST_LAYER,
     make_optimizer_frozen,
     make_optimizer_llrd,
     make_optimizer_standard,
@@ -79,7 +78,6 @@ class AblationSpec:
         running_stats: If True, normalise advantages with running EMA.
         action_diversity_filter: If True, discard degenerate plans.
         reward_model_weighting: If True, weight with learned reward model.
-        extra_loss_kwargs: Extra kwargs forwarded to ``loss_factory``.
     """
 
     name: str
@@ -99,7 +97,6 @@ class AblationSpec:
     running_stats: bool = False
     action_diversity_filter: bool = False
     reward_model_weighting: bool = False
-    extra_loss_kwargs: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -143,13 +140,6 @@ def _ffn_only_opt(
 ) -> "torch.optim.Optimizer":
     """Freeze everything except FFN sublayers."""
     return make_optimizer_frozen(cfg, model, FROZEN_EXCEPT_FFN)
-
-
-def _last_layer_opt(
-    cfg: SimpleNamespace, model: nn.Module,
-) -> "torch.optim.Optimizer":
-    """Freeze everything except the last transformer layer + head."""
-    return make_optimizer_frozen(cfg, model, FROZEN_EXCEPT_LAST_LAYER)
 
 
 def _layer_ablation_top_n_opt(n: int) -> OptimizerFactory:
@@ -213,7 +203,6 @@ REGISTRY: dict[str, AblationSpec] = {
         ),
         loss_factory=make_loss_ewc,
         optimizer_factory=_std_opt,
-        extra_loss_kwargs={"fisher": None},
     ),
     "llrd": AblationSpec(
         name="llrd",

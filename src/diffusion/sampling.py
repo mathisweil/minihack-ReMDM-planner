@@ -393,37 +393,3 @@ def greedy_sample(
         seq = torch.where(still_masked, preds, seq)
 
     return seq
-
-
-def select_action(
-    model: torch.nn.Module,
-    local_obs: Tensor,
-    global_obs: Tensor,
-    cfg: SimpleNamespace,
-    device: torch.device | str,
-    physics_aware: bool = True,
-    blind_global: bool = False,
-) -> int:
-    """Sample a single action from a length-1 batch.
-
-    Args:
-        model: Denoising model.
-        local_obs: Shape ``[9, 9]`` or ``[1, 9, 9]``.
-        global_obs: Shape ``[21, 79]`` or ``[1, 21, 79]``.
-        cfg: Config namespace.
-        device: Torch device.
-        physics_aware: Forward to ``remdm_sample``.
-        blind_global: Forward to ``remdm_sample``.
-
-    Returns:
-        The first action of the generated plan (int).
-    """
-    if local_obs.ndim == 2:
-        local_obs = local_obs.unsqueeze(0)
-    if global_obs.ndim == 2:
-        global_obs = global_obs.unsqueeze(0)
-    seq = remdm_sample(
-        model, local_obs, global_obs, cfg, device,
-        physics_aware=physics_aware, blind_global=blind_global,
-    )
-    return seq[0, 0].item()

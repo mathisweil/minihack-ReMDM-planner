@@ -216,7 +216,6 @@ class DataCollector:
         device: torch.device | str,
     ) -> None:
         self._ema = ema
-        self._model_template = model
         # Materialise an eval-mode copy; refreshed before each rollout
         self.ema_model = ema.make_eval_model(model)
         self.buffer = buffer

@@ -238,24 +238,6 @@ FROZEN_EXCEPT_FFN: list[str] = [
     "head.",
 ]
 
-# Freeze everything except the last transformer layer + head
-FROZEN_EXCEPT_LAST_LAYER: list[str] = [
-    "embedding.",
-    "cnn.",
-    "global_embedding.",
-    "global_cnn.",
-    "global_pool.",
-    "global_proj.",
-    "global_gate",
-    "goal_head.",
-    "action_emb.",
-    "timestep_emb.",
-    "pos_emb.",
-    "transformer.layers.0.",
-    "transformer.layers.1.",
-    "transformer.layers.2.",
-]
-
 
 # ---------------------------------------------------------------------------
 # Group A: LoRA via torch.nn.utils.parametrize
@@ -389,29 +371,12 @@ def make_optimizer_lora(
 # ---------------------------------------------------------------------------
 
 
-def collect_gradients(model: nn.Module) -> dict[str, Tensor]:
-    """Snapshot current ``.grad`` for every parameter with a gradient.
-
-    Args:
-        model: Model after a backward pass.
-
-    Returns:
-        Dict mapping parameter name to detached gradient clone.
-    """
-    grads: dict[str, Tensor] = {}
-    for name, param in model.named_parameters():
-        if param.grad is not None:
-            grads[name] = param.grad.detach().clone()
-    return grads
-
-
 def apply_gradients(model: nn.Module, grads: dict[str, Tensor]) -> None:
     """Write gradient dict back into model ``.grad`` attributes.
 
     Args:
         model: Target model.
-        grads: Gradient dict from ``collect_gradients`` or
-               ``gradient_surgery``.
+        grads: Gradient dict from ``gradient_surgery``.
     """
     for name, param in model.named_parameters():
         if name in grads:
