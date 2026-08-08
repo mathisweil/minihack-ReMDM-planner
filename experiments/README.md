@@ -59,7 +59,7 @@ python experiments/rl_finetuning/run_ablations.py \
 **Using a W&B artifact as checkpoint:**
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
-    --checkpoint wandb://entity/project/checkpoint-iter8000:latest \
+    --checkpoint wandb:entity/project/checkpoint-iter8000:latest \
     --ablations baseline_rl kl_penalty \
     --fast
 ```
@@ -69,8 +69,8 @@ python experiments/rl_finetuning/run_ablations.py \
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint path/to/dagger_checkpoint.pth \
     --all \
-    --num_seeds 3 \
-    --use_wandb
+    --num-seeds 3 \
+    --use-wandb
 ```
 
 **Specific ablations:**
@@ -83,13 +83,13 @@ python experiments/rl_finetuning/run_ablations.py \
 **Re-plot from saved results (no training):**
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
-    --analyze_only --output_dir outputs/run_20260331_120000
+    --analyze-only --output-dir outputs/run_20260331_120000
 ```
 
 **Re-plot a subset of ablations:**
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
-    --analyze_only --output_dir outputs/run_20260331_120000 \
+    --analyze-only --output-dir outputs/run_20260331_120000 \
     --ablations baseline_rl kl_penalty ewc
 ```
 
@@ -102,18 +102,18 @@ Run independent subsets on different machines or GPUs, then combine:
 CUDA_VISIBLE_DEVICES=0 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint ckpt.pth \
     --ablations baseline_rl kl_penalty ewc llrd lora mixed_replay \
-    --output_dir outputs/gpu0
+    --output-dir outputs/gpu0
 
 # GPU 1
 CUDA_VISIBLE_DEVICES=1 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint ckpt.pth \
     --ablations trust_region_kl low_t t_curriculum entropy_bonus \
-    --output_dir outputs/gpu1
+    --output-dir outputs/gpu1
 
 # Merge and regenerate all analysis
 python experiments/rl_finetuning/run_ablations.py \
     --merge outputs/gpu0/results.json outputs/gpu1/results.json \
-    --output_dir outputs/combined
+    --output-dir outputs/combined
 ```
 
 `--merge` accepts any number of `results.json` files. When the same ablation
@@ -124,22 +124,22 @@ per-seed scores are concatenated and mean/std are recomputed over the union:
 # Seed 0 on GPU 0
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint ckpt.pth --ablations baseline_rl --seed 0 \
-    --output_dir outputs/seed0
+    --output-dir outputs/seed0
 
 # Seed 1000 on GPU 1
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint ckpt.pth --ablations baseline_rl --seed 1000 \
-    --output_dir outputs/seed1
+    --output-dir outputs/seed1
 
 # Merge: aggregates both seeds into one entry
 python experiments/rl_finetuning/run_ablations.py \
     --merge outputs/seed0/results.json outputs/seed1/results.json \
-    --output_dir outputs/merged
+    --output-dir outputs/merged
 # -> baseline_rl: 0.6250 +/- 0.0250 (2 seeds)
 ```
 
 The merged `results.json` is identical in format to a single-run file and can
-be used with `--analyze_only` for further filtering or re-plotting.
+be used with `--analyze-only` for further filtering or re-plotting.
 
 ### Ablations
 
@@ -217,38 +217,38 @@ experiments/rl_finetuning/outputs/{run_id}/
 ```
 
 `results.json` is written incrementally after each ablation completes -- a partial file
-with N of 25 ablations is fully valid and loadable by `--analyze_only` or `--merge`.
+with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--merge`.
 
 ### CLI reference
 
 | Flag | Description |
 |---|---|
-| `--checkpoint PATH` | Pretrained DAgger checkpoint (`.pth` or `wandb://` artifact) |
+| `--checkpoint PATH` | Pretrained DAgger checkpoint (`.pth` or `wandb:` artifact) |
 | `--config PATH` | Main config override (default: `configs/defaults.yaml`) |
-| `--ablations_config PATH` | Ablations-specific config (default: `ablations_default.yaml`) |
+| `--ablations-config PATH` | Ablations-specific config (default: `ablations_default.yaml`) |
 | `--all` | Run all 25 ablations |
 | `--ablations NAME [NAME ...]` | Run specific ablations by name |
 | `--list` | Print registered ablations and exit |
 | `--fast` | Smoke-test mode (50 iterations, 20 eval episodes) |
-| `--num_seeds N` | Number of seeds per ablation (default: 1) |
+| `--num-seeds N` | Number of seeds per ablation (default: 1) |
 | `--seed N` | Base random seed |
-| `--output_dir DIR` | Output directory (default: auto-timestamped) |
-| `--run_id ID` | Custom run ID for output directory naming |
-| `--analyze_only` | Skip training, regenerate analysis from existing results |
-| `--results_path PATH` | Explicit path to `results.json` (with `--analyze_only`) |
+| `--output-dir DIR` | Output directory (default: auto-timestamped) |
+| `--run-id ID` | Custom run ID for output directory naming |
+| `--analyze-only` | Skip training, regenerate analysis from existing results |
+| `--results-path PATH` | Explicit path to `results.json` (with `--analyze-only`) |
 | `--merge JSON [JSON ...]` | Merge multiple `results.json` files and regenerate analysis |
-| `--use_wandb` | Enable W&B logging |
-| `--wandb_project NAME` | W&B project name (default: `remdm-minihack-ablations`) |
-| `--wandb_resume_id ID` | W&B run ID for curve continuity |
-| `--max_iter N` | Override max training iterations |
-| `--batch_size N` | Override batch size |
-| `--eval_every N` | Override evaluation frequency |
+| `--use-wandb` | Enable W&B logging |
+| `--wandb-project NAME` | W&B project name (default: `remdm-minihack-ablations`) |
+| `--wandb-resume-id ID` | W&B run ID for curve continuity |
+| `--max-iter N` | Override max training iterations |
+| `--batch-size N` | Override batch size |
+| `--eval-every N` | Override evaluation frequency |
 | `--lr FLOAT` | Override learning rate |
 | `--device DEVICE` | Torch device (default: auto-detect) |
 
 ### W&B logging
 
-When `--use_wandb` is passed, all training dynamics are logged in real time:
+When `--use-wandb` is passed, all training dynamics are logged in real time:
 
 | Namespace | Metrics | Frequency |
 |---|---|---|

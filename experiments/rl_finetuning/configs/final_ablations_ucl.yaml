@@ -74,8 +74,9 @@ reward_model_lr: 1.0e-3
 reward_model_train_steps: 50
 
 # -- Output / Logging --------------------------------------------------------
-ablation_use_wandb: true
-ablation_wandb_project: "remdm-minihack-ablations"
+# W&B logging is enabled by the --use-wandb CLI flag; this key is not read.
+use_wandb: true
+wandb_project: "remdm-minihack-ablations"
 
 # -- Multi-seed ---------------------------------------------------------------
 num_seeds: 3  # C-001 (D7/F-048): three literal seeds (base 0 -> 0, 1, 2), matching the published 3-run tables
