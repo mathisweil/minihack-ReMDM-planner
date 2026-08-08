@@ -37,8 +37,8 @@ rl_finetuning/
 └── configs/
     ├── ablations_default.yaml   # Full-run hyperparameters
     ├── ablations_fast.yaml      # Smoke-test overrides (50 iterations)
-    ├── ablations_qmul_gpu.yaml  # QMUL H200 overrides (AMP, B=512, eval/diag every 50)
-    └── ablations_ucl_gpu.yaml   # UCL 3090 Ti overrides (AMP, B=4608, default cadences)
+    ├── final_ablations_qmul.yaml  # QMUL H200 overrides (AMP, B=512, eval/diag every 50)
+    └── final_ablations_ucl.yaml   # UCL 3090 Ti overrides (AMP, B=4608, default cadences)
 ```
 
 ### Usage
