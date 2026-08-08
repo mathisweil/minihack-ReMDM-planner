@@ -6,7 +6,7 @@ wandb/
 res/
 runs/
 data/
-checkpoints/*
+checkpoints/
 !checkpoints/*.pth
 play_data/
 texture_cache.pbz2

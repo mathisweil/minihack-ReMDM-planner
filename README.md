@@ -628,24 +628,16 @@ Each directory ships:
 
 ### Download
 
-Repo paths mirror this one, so downloading into a clone drops the weights
-straight into `checkpoints/`.
+Download all six (~470 MB):
 
 ```bash
-python -c "
-from huggingface_hub import snapshot_download
-snapshot_download(repo_id='MathisW78/remdm-minihack-checkpoints', local_dir='.')
-"
+uv run hf download MathisW78/remdm-minihack-checkpoints --include "checkpoints/**" --local-dir .
 ```
 
-For inference weights only (~21 MB each instead of ~84 MB):
+Or fetch a single checkpoint:
 
-```python
-snapshot_download(
-    repo_id="MathisW78/remdm-minihack-checkpoints",
-    local_dir=".",
-    allow_patterns=["**/model.safetensors", "**/config*.yaml"],
-)
+```bash
+uv run hf download MathisW78/remdm-minihack-checkpoints --include "checkpoints/online/Minihack-*/**" --local-dir .
 ```
 
 ### Evaluate a downloaded checkpoint
