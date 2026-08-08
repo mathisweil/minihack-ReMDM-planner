@@ -6,7 +6,7 @@
 # `checkpoint_final/online/final.pth` AND the compute-matched offline
 # BC baseline used for the paper comparison.
 #
-#   --mode dagger    → reproduces the iter600 DAgger checkpoint recipe
+#   --mode online    → reproduces the iter600 DAgger checkpoint recipe
 #   --mode offline   → trains a fair offline BC baseline against it
 #
 # ── Fairness analysis ───────────────────────────────────────────────
@@ -91,7 +91,7 @@ physics_aware_sampling: false
 # ≈ 30 × 600 × (198 + 116) ≈ 5.65 M real env.step() calls.
 # (The earlier 3M figure was based on the buggy single-episode env-step
 # accounting in `online.py:155-169` — fixed in the same commit as this
-# config bump.) Used by `--mode dagger` only. Offline mode bypasses
+# config bump.) Used by `--mode online` only. Offline mode bypasses
 # this via `offline_total_grad_steps` below — the unified env-step
 # budget is fundamentally unfair when the sample-to-grad-step ratio
 # differs by ~50× between modes.
