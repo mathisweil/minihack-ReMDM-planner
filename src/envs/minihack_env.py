@@ -10,6 +10,11 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium as gym
@@ -20,6 +25,98 @@ logger = logging.getLogger(__name__)
 
 # Suppress noisy NLE INFO spam ("Not saving any NLE data." on every env create)
 logging.getLogger("nle.env.base").setLevel(logging.WARNING)
+
+
+# ── nhdat patching on paths containing whitespace ────────────────────
+
+
+_nhdat_patch_checked = False
+
+
+def _patch_nhdat_py(self, des_file: str) -> None:
+    """Python port of MiniHack's ``mh_patch_nhdat.sh``.
+
+    Behaviour matches the shell script step for step, but paths are passed
+    as argv entries instead of being interpolated into a command line.
+    """
+    import minihack.base as mh_base
+
+    if not des_file.endswith(".des"):
+        fpath = os.path.join(self.nethack._vardir, "mylevel.des")
+        with open(fpath, "w") as fh:
+            fh.writelines(des_file)
+        des_file = fpath
+
+    des_path = os.path.abspath(des_file)
+    if not os.path.exists(des_path):
+        des_path = os.path.abspath(
+            os.path.join(mh_base.PATH_DAT_DIR, des_file)
+        )
+    if not os.path.exists(des_path):
+        raise FileNotFoundError(f"des file not found: {des_path}")
+
+    vardir = Path(self.nethack._vardir)
+    libdir = vardir / "lib"
+    if not libdir.is_dir():
+        shutil.copytree(mh_base.LIB_DIR, libdir)
+
+    shutil.copy(des_path, libdir / "mylevel.des")
+    _run_nethack_tool(
+        [os.path.join(mh_base.HACKDIR, "lev_comp"), "mylevel.des"], libdir,
+    )
+    (libdir / "mylevel.des").unlink()
+
+    # Bash `*` skips dotfiles and sorts; match that so the archive contents
+    # are identical to the shell implementation's.
+    contents = sorted(
+        p.name for p in libdir.iterdir() if not p.name.startswith(".")
+    )
+    _run_nethack_tool(
+        [os.path.join(mh_base.HACKDIR, "dlb"), "cf", "nhdat", *contents],
+        libdir,
+    )
+    shutil.move(str(libdir / "nhdat"), str(vardir / "nhdat"))
+
+
+def _run_nethack_tool(cmd: list[str], cwd: Path) -> None:
+    """Run a NetHack build tool, surfacing its output when it fails."""
+    result = subprocess.run(
+        cmd, cwd=cwd, capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} failed ({result.returncode}) in {cwd}\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+
+
+def _ensure_nhdat_patch_works() -> None:
+    """Replace MiniHack's nhdat patch step when its shell script would fail.
+
+    ``mh_patch_nhdat.sh`` interpolates its path arguments unquoted, so any
+    whitespace in the install path splits them into separate words. The
+    script then fails without a non-zero exit status that MiniHack checks:
+    no nhdat file is produced, every environment silently falls back to the
+    same default level with no goal staircase, and the BFS oracle has
+    nothing to navigate towards. Swap in the Python port in that case and
+    leave the upstream path alone everywhere else.
+    """
+    global _nhdat_patch_checked
+    if _nhdat_patch_checked:
+        return
+    _nhdat_patch_checked = True
+
+    import minihack.base as mh_base
+
+    paths = (mh_base.LIB_DIR, mh_base.HACKDIR, mh_base.PATH_DAT_DIR)
+    if not any(re.search(r"\s", p) for p in paths):
+        return
+
+    mh_base.MiniHack._patch_nhdat = _patch_nhdat_py
+    logger.warning(
+        "MiniHack is installed under a path containing whitespace; using the "
+        "Python nhdat patcher because mh_patch_nhdat.sh would fail silently."
+    )
 
 
 # ── Staircase detection ──────────────────────────────────────────────
@@ -83,6 +180,7 @@ class AdvancedObservationEnv(gym.Env):
         cfg: SimpleNamespace,
     ) -> None:
         super().__init__()
+        _ensure_nhdat_patch_works()
         self.env_id = env_id
         self._cfg = cfg
         self._crop_half = cfg.crop_size // 2

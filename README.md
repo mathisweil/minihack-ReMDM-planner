@@ -316,6 +316,26 @@ the offline BC and ReMDM runs reported in the paper.
 
 ---
 
+## Testing
+
+```bash
+uv run pytest            # full suite, ~35s
+uv run pytest -m slow    # adds the BC + PPO baseline entry points, ~45s
+```
+
+`tests/test_smoke_src.py` and `tests/test_smoke_experiments.py` cover the two
+pipelines: every module imports, the model builds from `configs/defaults.yaml`,
+a forward pass returns the expected shape and dtype with no NaNs, one training
+step gives a finite loss, save/reload reproduces identical output, and each
+entry point runs. The experiments suite steps all 25 registry ablations.
+
+These assert that things *run*, not that results are good. CPU-only, seeded,
+tiny synthetic data and a shrunken model; no real datasets, checkpoints or
+network calls, and nothing written outside `tmp_path`. Tests needing MiniHack
+or CUDA skip with a reason. For a real quality signal, use `--mode smoke`.
+
+---
+
 ## Architecture
 
 **`LocalDiffusionPlannerWithGlobal`** (~5.2M parameters):
@@ -575,6 +595,10 @@ minihack-ReMDM-planner/
 │   ├── hf_upload.py                   HuggingFace Hub upload utility (training hook)
 │   ├── hf_upload_demo.py              Stage + upload the demo notebook's HF repo
 │   └── profile_dagger.py              DAgger iteration profiler
+├── tests/
+│   ├── conftest.py                    Shared fixtures (tiny config, synthetic data, CLI runner)
+│   ├── test_smoke_src.py              Smoke tests for the src/ pipeline
+│   └── test_smoke_experiments.py      Smoke tests for the RL fine-tuning suite
 ├── main.py                            CLI entry point (smoke/collect/offline/dagger/inference/baselines)
 ├── pyproject.toml                     PEP 621 project metadata + dependencies
 ├── uv.lock                            Deterministic lockfile
