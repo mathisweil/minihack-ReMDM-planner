@@ -363,7 +363,7 @@ This trains a genuinely local-only model, as opposed to `--blind-global`, which 
 |---|---|---|
 | `rescale` | `p = eta * sigma_max` | Proportional to noise level |
 | `cap` | `p = min(eta, sigma_max)` | Fixed upper bound |
-| `conf` | `p = eta * sigma_max * (1 - confidence)` | Low-confidence tokens remasked more |
+| `conf` | `softmax(-confidence` | Low-confidence tokens remasked more |
 
 ---
 
