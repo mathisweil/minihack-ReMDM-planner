@@ -13,7 +13,6 @@ dependencies = [
     "numpy>=2.4.4",
     "orjson>=3.11.8",
     "polars>=1.39.3",
-    "pytest>=9.1.1",
     "pyyaml>=6.0.3",
     "safetensors>=0.8.0",
     "sb3-contrib>=2.8.0",
@@ -23,8 +22,22 @@ dependencies = [
     "wandb>=0.25.1",
 ]
 
+[project.optional-dependencies]
+# GPU torch (NVIDIA CUDA 12.6, Linux). CPU/default torch installs without it.
+cuda = ["torch==2.11.*"]
+
 [dependency-groups]
 dev = ["pytest>=8.0"]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu126", extra = "cuda", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
