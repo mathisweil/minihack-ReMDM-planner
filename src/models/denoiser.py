@@ -281,14 +281,17 @@ class LocalDiffusionPlanner(nn.Module):
 
 
 def make_model(cfg: SimpleNamespace) -> nn.Module:
-    """Instantiate the default MiniHack denoising model.
+    """Instantiate the MiniHack denoising model.
 
     Args:
         cfg: Config namespace.
 
     Returns:
-        ``LocalDiffusionPlannerWithGlobal`` instance.
+        ``LocalDiffusionPlannerWithGlobal``, or ``LocalDiffusionPlanner``
+        when ``cfg.use_global_stream`` is False (local-only ablation).
     """
+    if not getattr(cfg, "use_global_stream", True):
+        return LocalDiffusionPlanner(cfg)
     return LocalDiffusionPlannerWithGlobal(cfg)
 
 

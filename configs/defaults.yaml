@@ -22,6 +22,9 @@ n_layer: 4
 n_global_tokens: 8
 seq_len: 64
 global_gate_init: -3.0
+# Global stream + goal head. Set false to build the LocalDiffusionPlanner
+# ablation variant (local crop only). Offline BC and DAgger only.
+use_global_stream: true
 # Transformer dropout. 0.0 is deliberate — discrete diffusion forward masking
 # already regularises; dropout on top is redundant.
 dropout: 0.0
