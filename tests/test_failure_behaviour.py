@@ -85,7 +85,8 @@ def test_offline_snapshot_save_failure_raises(tiny_cfg, tmp_path, monkeypatch):
 def test_resume_refuses_corrupt_rng_state(tiny_cfg, tmp_path):
     """FIX-B4: rng_states present but unrestorable raises instead of
     continuing with fresh randomness under a resume's identity; a
-    checkpoint without rng_states (legacy) still resumes with a warning."""
+    checkpoint without rng_states raises (all current checkpoints
+    carry it, so absence means malformed)."""
     import torch
 
     from src.buffer import ReplayBuffer
@@ -134,7 +135,26 @@ def test_resume_refuses_corrupt_rng_state(tiny_cfg, tmp_path):
     with pytest.raises(RuntimeError, match="rng_states"):
         trainer.load_checkpoint(str(corrupt))
 
-    legacy = tmp_path / "legacy.pth"
-    torch.save(base, legacy)
-    resume_from, env_steps = trainer.load_checkpoint(str(legacy))
+    missing = tmp_path / "missing_rng.pth"
+    torch.save(base, missing)
+    with pytest.raises(RuntimeError, match="rng_states"):
+        trainer.load_checkpoint(str(missing))
+
+    intact = tmp_path / "intact.pth"
+    import random
+
+    import numpy as np
+
+    torch.save(
+        {
+            **base,
+            "rng_states": {
+                "torch": torch.get_rng_state(),
+                "numpy": np.random.get_state(),
+                "python": random.getstate(),
+            },
+        },
+        intact,
+    )
+    resume_from, env_steps = trainer.load_checkpoint(str(intact))
     assert resume_from == 4 and env_steps == 100

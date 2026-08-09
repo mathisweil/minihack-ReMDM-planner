@@ -636,25 +636,26 @@ class Trainer:
         # FIX-B4: a resume that cannot restore the saved RNG state would
         # silently continue with fresh randomness while claiming to be a
         # resume, corrupting the seed provenance the interval estimates
-        # depend on. Present-but-unusable state raises; absent state
-        # (pre-rng_states checkpoints) warns.
+        # depend on. All checkpoints from the current code carry
+        # rng_states, so absent or unusable state means a malformed
+        # checkpoint and raises.
         rng = ckpt.get("rng_states", {})
         if not rng:
-            logger.warning(
-                "Checkpoint has no rng_states (pre-provenance format); "
-                "resuming with fresh RNG state",
+            raise RuntimeError(
+                f"Checkpoint {path} has no rng_states; refusing to resume "
+                "with fresh RNG. Resume from a checkpoint written by the "
+                "current code."
             )
-        else:
-            try:
-                torch.set_rng_state(rng["torch"])
-                np.random.set_state(rng["numpy"])
-                random.setstate(rng["python"])
-            except Exception as err:
-                raise RuntimeError(
-                    f"Checkpoint {path} carries rng_states that could not "
-                    "be restored; refusing to resume with fresh RNG. "
-                    "Retrain or resume from an intact checkpoint."
-                ) from err
+        try:
+            torch.set_rng_state(rng["torch"])
+            np.random.set_state(rng["numpy"])
+            random.setstate(rng["python"])
+        except Exception as err:
+            raise RuntimeError(
+                f"Checkpoint {path} carries rng_states that could not "
+                "be restored; refusing to resume with fresh RNG. "
+                "Retrain or resume from an intact checkpoint."
+            ) from err
 
         iteration = ckpt.get("iteration", 0)
         env_steps = ckpt.get("env_steps", 0)
