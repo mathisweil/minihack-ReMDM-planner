@@ -7,10 +7,10 @@ with optional auxiliary goal loss.
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from pathlib import Path
-import logging
 from types import SimpleNamespace
 from typing import Callable
 

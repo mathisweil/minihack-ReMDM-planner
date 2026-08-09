@@ -19,21 +19,21 @@ import yaml
 
 from src.buffer import ReplayBuffer
 from src.config import make_run_dir
+from src.curriculum import DynamicCurriculum
 from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
+from src.envs.minihack_env import collect_oracle_trajectory
 from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import DataCollector
 from src.planners.inference import Evaluator, save_eval_json
 from src.planners.logging import (
     Logger,
+    compute_param_drift,
+    compute_param_norm,
     gpu_memory_mb,
     reset_gpu_memory_stats,
-    compute_param_norm,
-    compute_param_drift,
 )
-from src.curriculum import DynamicCurriculum
-from src.envs.minihack_env import collect_oracle_trajectory
 
 logger = logging.getLogger(__name__)
 
