@@ -1,0 +1,11 @@
+{
+  "git_commit": "657b3d7eba61c863623769eecda73e7f893219d3",
+  "metrics": {
+    "avg_reward": 6.766666666666666,
+    "avg_steps": 82.66666666666667,
+    "n_episodes": 3,
+    "win_rate": 0.3333333333333333,
+    "wins": 1
+  },
+  "note": "FIX-3 sampler-corrected, old weights"
+}
