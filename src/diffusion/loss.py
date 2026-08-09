@@ -1,5 +1,8 @@
 """MDLM ELBO loss with SUBS parameterisation.
 
+Shared pseudocode lines 2-6 (METHOD_PARITY 2.1); the craftax twin is
+src/diffusion/loss.py:compute_loss.
+
 Ported from the Craftax JAX implementation (src/diffusion/loss.py).
 Computes continuous-time loss on masked positions only, with analytic
 SUBS weighting clipped for numerical stability.

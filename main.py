@@ -280,6 +280,8 @@ def main() -> None:
     validate(args)
     cfg = build_config(args)
     if torch.cuda.is_available():
+        # (A) precision policy: enables TF32 matmuls on CUDA; this repo only.
+        # The craftax repo runs JAX defaults (METHOD_PARITY 2.3).
         torch.set_float32_matmul_precision("high")
     run_mode(args.mode, cfg, args)
 

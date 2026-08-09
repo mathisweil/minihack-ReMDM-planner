@@ -172,6 +172,8 @@ class Trainer:
                 "oracle_steps": oracle_steps_iter,
             }
 
+            # (B-11, documented): this budget charges oracle env.step() calls;
+            # the craftax repo counts learner frames only (METHOD_PARITY 2.5).
             # Advance the unified env-step budget. Both model and oracle
             # rollouts consume real env.step() calls (the oracle rollout
             # runs in its own env instance in collect_oracle_trajectory),
