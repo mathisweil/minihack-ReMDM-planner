@@ -80,7 +80,7 @@ def run_model_episode(
         step_in_plan = 0
 
         model.eval()
-        for step_idx in range(max_steps):
+        for _step_idx in range(max_steps):
             if plan is None or step_in_plan >= cfg.replan_every:
                 local_t = (
                     torch.from_numpy(local[np.newaxis]).long().to(device)
@@ -435,7 +435,7 @@ class DataCollector:
         for (env_id, _seed), m_res, o_res in zip(
             tasks,
             model_results,
-            oracle_results,
+            oracle_results, strict=False,
         ):
             oracle_steps = len(o_res["actions"]) if o_res else 999
             add = efficiency_filter(
