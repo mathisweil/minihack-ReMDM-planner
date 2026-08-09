@@ -34,6 +34,11 @@ _CARDINAL_OFFSETS: dict[int, tuple[int, int]] = {
 }
 _N_PHYSICS_CHECK = 8  # only inspect the first N plan positions
 
+# Stability guards; values must match the craftax twin exactly.
+_SIGMA_DENOM_EPS = 1e-8  # sigma_max and posterior denominators
+# Demotion value for hazardous actions under the conf strategy (CH-6).
+_HAZARD_DECODE_PROB = 0.001
+
 
 def _check_hazard(local_crop: np.ndarray, action: int) -> bool:
     """Return True if *action* from the agent's centre steps into a hazard.
@@ -250,13 +255,13 @@ def remdm_sample(
                 for pos in range(min(_N_PHYSICS_CHECK, seq_len)):
                     action = int(preds_np[b, pos])
                     if _check_hazard(crop_b, action):
-                        prob_override[b, pos] = 0.001
+                        prob_override[b, pos] = _HAZARD_DECODE_PROB
             decode_prob = prob_override
 
         committed = seq != mask_token  # [B, seq_len]
 
         # Remasking probability sigma in [0, sigma_max] (ReMDM eq 7)
-        sigma_max = min(1.0, (1.0 - alpha_s) / max(alpha_t, 1e-8))
+        sigma_max = min(1.0, (1.0 - alpha_s) / max(alpha_t, _SIGMA_DENOM_EPS))
         sigma = _compute_remask_prob(
             cfg.remask_strategy, cfg.eta, sigma_max, psi, committed
         )
@@ -266,7 +271,7 @@ def remdm_sample(
         # Algorithm 1 posterior: masked tokens unmask w.p.
         # (alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)
         p_unmask = torch.clamp(
-            (alpha_s - (1.0 - sigma) * alpha_t) / max(1.0 - alpha_t, 1e-8),
+            (alpha_s - (1.0 - sigma) * alpha_t) / max(1.0 - alpha_t, _SIGMA_DENOM_EPS),
             0.0,
             1.0,
         )

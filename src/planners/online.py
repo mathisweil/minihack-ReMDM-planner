@@ -123,7 +123,7 @@ class Trainer:
 
             # 1. Collect N episodes per iteration
             n_eps = getattr(cfg, "episodes_per_iteration", 1)
-            num_workers = getattr(cfg, "num_collection_workers", 0)
+            num_workers = getattr(cfg, "num_collection_workers", 0)  # fallback 0 != defaults.yaml (8); partial-config callers rely on it
             model_wins = 0
             added_total = 0
             # Accumulators across all n_eps episodes — must be summed,
