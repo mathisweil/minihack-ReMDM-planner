@@ -60,7 +60,7 @@ remask_strategy: conf
 diffusion_steps_eval: 10
 diffusion_steps_collect: 5
 temperature: 0.5
-top_k: 4
+top_p: 0.9
 replan_every: 16
 physics_aware_sampling: false
 

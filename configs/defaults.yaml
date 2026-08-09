@@ -51,7 +51,7 @@ diffusion_steps_eval: 10
 # collection only needs "good enough" plans for efficiency comparison.
 diffusion_steps_collect: 5
 temperature: 0.5
-top_k: 4
+top_p: 0.9   # nucleus threshold (ReMDM Sec 5; CH-1 replaced top-k filtering)
 replan_every: 16
 # Soft-penalise hazardous cardinal actions during stochastic sampling.
 # Not active in the reference evaluation pipeline; off by default.

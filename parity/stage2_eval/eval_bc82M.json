@@ -1,5 +1,5 @@
 {
-  "git_commit": "657b3d7eba61c863623769eecda73e7f893219d3",
+  "git_commit": "fdc6bfcc305e968681281c9d95de80bd93a937e3",
   "metrics": {
     "avg_reward": 22.429999999999996,
     "avg_steps": 3.6666666666666665,
@@ -7,5 +7,5 @@
     "win_rate": 1.0,
     "wins": 3
   },
-  "note": "FIX-3 sampler-corrected, old weights"
+  "note": "Stage 2 final (FIX-3 + CH-1 nucleus), old weights"
 }
