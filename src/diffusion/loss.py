@@ -63,6 +63,11 @@ def mdlm_loss(
     Returns:
         Scalar loss. Returns ``0.0`` when no masked positions exist.
     """
+    if logits.ndim != 3 or x0.shape != zt.shape or x0.shape != logits.shape[:2]:
+        raise ValueError(
+            "mdlm_loss expects logits [B, L, V] with x0/zt [B, L]; got "
+            f"{tuple(logits.shape)}, {tuple(x0.shape)}, {tuple(zt.shape)}"
+        )
     B, L, V = logits.shape
 
     # Mask: compute loss only on masked, non-PAD positions
