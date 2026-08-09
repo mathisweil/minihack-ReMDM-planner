@@ -3,7 +3,6 @@
 Shared pseudocode line 4 (METHOD_PARITY 2.1); the craftax twin is
 src/diffusion/forward.py:forward_process.
 
-Ported from the Craftax JAX implementation (src/diffusion/forward.py).
 Each token is independently replaced with mask_token with probability
 sigma_t = 1 - alpha_t. PAD positions are never masked.
 """

@@ -87,7 +87,6 @@ def _compute_remask_prob(
 ) -> Tensor | float:
     """Compute per-token remasking probability.
 
-    C-003 (F-047, D6/D9): unified with the craftax implementation.
     FIX-3 (ADJUDICATION B-3): the ``conf`` strategy now consumes the
     stored decoding probability ``psi`` from the step each token was last
     unmasked (ReMDM Sec 4.1), not the current step's fresh confidence.
@@ -222,24 +221,20 @@ def remdm_sample(
             dtype=torch.long, device=device,
         )
 
-        # Forward pass
         out = model(local_obs, global_obs, seq, t_discrete)
         logits = out["actions"]  # [B, seq_len, vocab]
 
         # Mask invalid action tokens (indices >= action_dim)
         logits[:, :, action_dim:] = float("-inf")
 
-        # Temperature scaling
         logits = logits / cfg.temperature
 
         # Nucleus filtering (CH-1)
         logits = top_p_filter(logits, cfg.top_p)
 
-        # Sample predictions
         probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]
         preds = Categorical(probs=probs).sample()  # [B, seq_len]
 
-        # Decoding probability of the sampled token
         decode_prob = probs.gather(
             -1, preds.unsqueeze(-1)
         ).squeeze(-1)  # [B, seq_len]

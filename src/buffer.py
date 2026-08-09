@@ -1,6 +1,6 @@
 """Replay buffer with offline-protected FIFO eviction.
 
-Ported from minihack_reference/src/buffer.py. Stores observation-action
+Stores observation-action
 windows of fixed length ``seq_len``. Offline data is pinned at the front
 and never evicted; online samples use FIFO.
 """
@@ -40,7 +40,6 @@ class ReplayBuffer:
         self._cached_global: np.ndarray | None = None
         self._cached_actions: np.ndarray | None = None
 
-    # ── Offline data ─────────────────────────────────────────────
 
     def load_offline_data(
         self,
@@ -143,7 +142,6 @@ class ReplayBuffer:
             np.asarray(action_seq, dtype=np.int64),
         )
 
-    # ── Online data ──────────���───────────────────────────────────
 
     def _invalidate_cache(self) -> None:
         """Mark the stacked array cache as stale."""
@@ -190,7 +188,6 @@ class ReplayBuffer:
             self._online = self._online[excess:]
         self._invalidate_cache()
 
-    # ── Sampling ─────────────────────────────────────────────────
 
     def sample(
         self, batch_size: int,
@@ -216,7 +213,6 @@ class ReplayBuffer:
             self._cached_actions[indices],
         )
 
-    # ── Properties ─────────��─────────────────────────────────────
 
     def __len__(self) -> int:
         """Total number of windows (offline + online)."""
@@ -232,7 +228,6 @@ class ReplayBuffer:
         """Number of pinned offline windows (alias)."""
         return len(self._offline)
 
-    # ── Internals ───────────────────────────────────────────���────
 
     def _slice_trajectory(
         self, traj: dict,

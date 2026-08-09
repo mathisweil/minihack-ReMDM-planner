@@ -58,10 +58,6 @@ IMITATION_ALGOS: tuple[str, ...] = ("bc", "dt")
 ALL_BASELINE_ALGOS: tuple[str, ...] = SB3_RL_ALGOS + IMITATION_ALGOS
 
 
-# =============================================================================
-# Observation wrapper for SB3 dict-policies
-# =============================================================================
-
 
 class _SB3MiniHackWrapper(gym.Wrapper):
     """Reshape ``AdvancedObservationEnv`` tuple obs into an SB3 dict obs.
@@ -110,10 +106,6 @@ class _SB3MiniHackWrapper(gym.Wrapper):
         }
 
 
-# =============================================================================
-# CNN feature extractor (shared by SB3 RL + BC)
-# =============================================================================
-
 
 class _MiniHackCNN(BaseFeaturesExtractor):
     """Dual-stream CNN for the SB3 dict observation.
@@ -158,10 +150,6 @@ class _MiniHackCNN(BaseFeaturesExtractor):
         glob = self.global_cnn(observations["global"].float())  # [B, F_g]
         return self.linear(torch.cat([loc, glob], dim=1))
 
-
-# =============================================================================
-# Decision Transformer
-# =============================================================================
 
 
 class _MiniHackStateEncoder(nn.Module):
@@ -400,10 +388,6 @@ class _DTDataset(Dataset):
         }
 
 
-# =============================================================================
-# SB3 callbacks + env factory
-# =============================================================================
-
 
 class _PrefixedEvalCallback(EvalCallback):
     """``EvalCallback`` that records mean_reward / avg_steps / win_rate
@@ -448,10 +432,6 @@ def _make_sb3_env_fn(env_id: str, cfg: SimpleNamespace, log_dir: str):
 
     return _init
 
-
-# =============================================================================
-# Helpers
-# =============================================================================
 
 
 def _short(env_id: str) -> str:
@@ -502,10 +482,6 @@ def _init_baseline_logger(
     cfg.wandb_resume_id = None
     return Logger(cfg)
 
-
-# =============================================================================
-# BC training
-# =============================================================================
 
 
 def _collect_bc_dataset(
@@ -674,10 +650,6 @@ def _train_bc(
     log.log(seed_metrics, step=n_epochs + 1)
     return policy, seed_metrics
 
-
-# =============================================================================
-# Decision Transformer training
-# =============================================================================
 
 
 def _collect_dt_trajectories(
@@ -937,10 +909,6 @@ def _train_dt(
     return model, seed_metrics
 
 
-# =============================================================================
-# SB3 RL training
-# =============================================================================
-
 
 def _build_sb3_model(
     algo: str,
@@ -1039,10 +1007,6 @@ def _build_sb3_callbacks(
     return CallbackList(callbacks)
 
 
-# =============================================================================
-# Aggregation
-# =============================================================================
-
 
 def _aggregate(
     all_seed_results: list[dict[str, Any]],
@@ -1111,10 +1075,6 @@ def _save_aggregated(
     out_path.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
     logger.info("Aggregated results written to %s", out_path)
 
-
-# =============================================================================
-# Public entry point
-# =============================================================================
 
 
 def run_baselines(
