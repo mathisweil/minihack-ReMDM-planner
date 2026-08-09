@@ -234,7 +234,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 ## Diffusion
 
 - **Forward process (MDLM):** each action token is independently replaced with `MASK` (12) with probability `1 - alpha(t)`, `alpha(t)` linear or cosine. PAD (13) is never masked.
-- **Loss:** cross-entropy on masked positions only, globally averaged. Optional SUBS importance weighting `w(t) = -alpha'(t) / (1 - alpha(t))` clipped to `[0, 1000]` via `use_importance_weighting: true`; optional `label_smoothing`.
+- **Loss:** continuous-time MDLM NELBO (FIX-1): per sample `w(t) * sum_masked(CE) / L` with `w(t) = -alpha'(t) / (1 - alpha(t))` clipped to `[0, 1000]`; optional `label_smoothing`.
 - **Greedy sampling:** used for DAgger collection. Same MaskGIT loop, argmax decoding, no temperature/top-K/remasking, `diffusion_steps_collect` steps.
 
 **Reverse sampling (ReMDM)**, over `K` steps (default 10):
@@ -271,18 +271,17 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 
 | Parameter | Default | Description |
 |---|---|---|
-| `noise_schedule` | `linear` | `linear` or `cosine` |
+| `noise_schedule` | `linear` | `linear`, `cosine`, or `cosine_sq` (MDLM App E.1 naming) |
 | `num_diffusion_steps` | 100 | Discrete timestep resolution |
 | `diffusion_steps_eval` | 10 | Denoising iterations at inference |
 | `diffusion_steps_collect` | 5 | Denoising iterations during collection |
 | `remask_strategy` | `conf` | `rescale`, `cap`, or `conf` |
 | `eta` | 0.15 | Remasking strength |
 | `temperature` | 0.5 | Sampling temperature |
-| `top_k` | 4 | Top-K filtering |
+| `top_p` | 0.9 | Nucleus threshold (ReMDM Sec 5) |
 | `replan_every` | 16 | Env steps before replanning |
-| `loss_weight_clip` | 1000.0 | SUBS weight clip bound |
+| `loss_weight_clip` | 1000.0 | NELBO weight clip bound |
 | `label_smoothing` | 0.0 | Cross-entropy label smoothing |
-| `use_importance_weighting` | false | SUBS `w(t)` in loss |
 | `physics_aware_sampling` | false | Penalise hazardous actions at inference |
 
 **Training budget (unified).** Offline BC, DAgger and the SB3 baselines share one env-step budget. This is the only knob that should change to scale a run.
@@ -469,7 +468,7 @@ uv run pytest -m slow    # adds BC + PPO baseline entry points, ~45s
 
 ## Implementation notes
 
-- **MDLM loss** returns `0.0` (not NaN) when no masked positions exist. Global averaging by default; SUBS weighting is opt-in.
+- **MDLM loss** returns `0.0` (not NaN) when no masked positions exist. NELBO-weighted per MDLM eq (10); see FIX-1 in CHANGES.md.
 - **PAD tokens** are never masked and are excluded from the loss.
 - **Sampling paths:** evaluation uses stochastic ReMDM (temperature, top-K, remasking, `diffusion_steps_eval`); DAgger collection uses greedy argmax (`diffusion_steps_collect`).
 - **`remdm_sample`** guarantees a fully committed output via a final-step commit and an assertion. A min-keep 10% safety net prevents degenerate all-masked states.

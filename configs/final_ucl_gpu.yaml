@@ -52,7 +52,6 @@ noise_schedule: linear
 num_diffusion_steps: 100
 loss_weight_clip: 1000.0
 label_smoothing: 0.0
-use_importance_weighting: false
 eta: 0.15
 remask_strategy: conf
 
@@ -60,7 +59,7 @@ remask_strategy: conf
 diffusion_steps_eval: 10
 diffusion_steps_collect: 5
 temperature: 0.5
-top_k: 4
+top_p: 0.9
 replan_every: 16
 physics_aware_sampling: false
 

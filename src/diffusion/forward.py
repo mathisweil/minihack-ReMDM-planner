@@ -1,5 +1,8 @@
 """Forward masking process q(z_t | x_0).
 
+Shared pseudocode line 4 (METHOD_PARITY 2.1); the craftax twin is
+src/diffusion/forward.py:forward_process.
+
 Ported from the Craftax JAX implementation (src/diffusion/forward.py).
 Each token is independently replaced with mask_token with probability
 sigma_t = 1 - alpha_t. PAD positions are never masked.
@@ -43,6 +46,8 @@ def q_sample(
 
     zt = torch.where(do_mask, mask_token, x0)
 
+    # (A) benchmark-forced: PAD exists only in this repo (variable-length
+    # oracle trajectories); craftax windows are fixed-length (METHOD_PARITY 2.1)
     # Restore PAD positions — never mask padding
     pad_mask = x0 == pad_token  # [B, L]
     zt = torch.where(pad_mask, pad_token, zt)

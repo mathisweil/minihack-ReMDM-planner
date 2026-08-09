@@ -31,13 +31,10 @@ dropout: 0.0
 ema_decay: 0.999
 
 # ── Diffusion (MDLM) ─────────────────────────────────────────────────
-noise_schedule: linear
+noise_schedule: linear   # linear | cosine | cosine_sq (MDLM App E.1 names; "cosine" = cos, as in craftax)
 num_diffusion_steps: 100
 loss_weight_clip: 1000.0
 label_smoothing: 0.0
-# Use SUBS importance weighting w(t) in loss. Off by default (flat average
-# matching reference). Enable for MDLM ELBO experiments.
-use_importance_weighting: false
 # ReMDM stochastic remask base fraction
 eta: 0.15
 # Remasking strategy: rescale | cap | conf
@@ -51,7 +48,7 @@ diffusion_steps_eval: 10
 # collection only needs "good enough" plans for efficiency comparison.
 diffusion_steps_collect: 5
 temperature: 0.5
-top_k: 4
+top_p: 0.9   # nucleus threshold (ReMDM Sec 5; CH-1 replaced top-k filtering)
 replan_every: 16
 # Soft-penalise hazardous cardinal actions during stochastic sampling.
 # Not active in the reference evaluation pipeline; off by default.

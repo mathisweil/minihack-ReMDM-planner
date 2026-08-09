@@ -103,6 +103,10 @@ def run_model_episode(
                     plan = greedy_sample(
                         model, local_t, glb_t, cfg, device,
                         blind_global=blind_global,
+                        num_steps=getattr(
+                            cfg, "diffusion_steps_collect",
+                            cfg.diffusion_steps_eval,
+                        ),
                     )  # [1, seq_len]
                 step_in_plan = 0
 

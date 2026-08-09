@@ -56,6 +56,12 @@ _LEGACY_SNAPSHOT_KEYS = {
     "ood_eval_every",
     "max_iterations",
     "offline_epochs",
+    # CH-1 (ADJUDICATION B-3): nucleus sampling replaced top-k; snapshots
+    # from earlier runs still carry the key. It is accepted and unread.
+    "top_k",
+    # FIX-1 (ADJUDICATION B-1): the NELBO weight is no longer optional;
+    # snapshots from earlier runs still carry the flag. Accepted, unread.
+    "use_importance_weighting",
 }
 
 

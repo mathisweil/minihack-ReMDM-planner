@@ -1,0 +1,11 @@
+{
+  "git_commit": "fdc6bfcc305e968681281c9d95de80bd93a937e3",
+  "metrics": {
+    "avg_reward": 22.486666666666665,
+    "avg_steps": 8.666666666666666,
+    "n_episodes": 3,
+    "win_rate": 1.0,
+    "wins": 3
+  },
+  "note": "Stage 2 final (FIX-3 + CH-1 nucleus), old weights"
+}

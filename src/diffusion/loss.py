@@ -1,5 +1,8 @@
 """MDLM ELBO loss with SUBS parameterisation.
 
+Shared pseudocode lines 2-6 (METHOD_PARITY 2.1); the craftax twin is
+src/diffusion/loss.py:compute_loss.
+
 Ported from the Craftax JAX implementation (src/diffusion/loss.py).
 Computes continuous-time loss on masked positions only, with analytic
 SUBS weighting clipped for numerical stability.
@@ -13,7 +16,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from src.diffusion.schedules import alpha_prime
+from src.diffusion.schedules import get_schedule_deriv_for
 
 
 _MAX_WEIGHT: float = 1000.0
@@ -27,15 +30,22 @@ def mdlm_loss(
     mask_token: int,
     pad_token: int,
     schedule_fn: Callable[[Tensor], Tensor],
+    schedule_deriv_fn: Callable[[Tensor], Tensor] | None = None,
     weight_clip: float = _MAX_WEIGHT,
     label_smoothing: float = 0.0,
-    use_importance_weighting: bool = False,
 ) -> Tensor:
-    """Compute masked diffusion loss.
+    """Monte-Carlo estimate of the continuous-time MDLM NELBO.
 
-    By default uses a simple masked cross-entropy average (matching the
-    reference implementation).  When ``use_importance_weighting=True``,
-    applies SUBS weighting ``w(t) = -alpha'(t) / (1 - alpha_t)``.
+    Per sample: ``w(t) * sum_masked(CE) / L`` with the analytic weight
+    ``w(t) = -alpha'(t) / (1 - alpha_t)`` clipped at *weight_clip*, then
+    the batch mean. This is the estimator stated by MDLM eq (10) and
+    Shi et al. eq (4) under a constant per-token normalisation.
+
+    FIX-1 (ADJUDICATION B-1): replaces the previous default flat average
+    over all masked tokens in the batch — the MaskGIT loss of Shi et al.
+    App. eq (28), which is not a likelihood bound — and the opt-in
+    ``use_importance_weighting`` path, which divided by the realised
+    masked count (a ``1/(1-alpha_t)`` distortion of the weight).
 
     Args:
         logits: Model output. Shape ``[B, L, vocab]``.
@@ -45,9 +55,10 @@ def mdlm_loss(
         mask_token: MASK token ID.
         pad_token: PAD token ID.
         schedule_fn: Noise schedule returning alpha(t).
-        weight_clip: Upper clamp for SUBS weight (default 1000).
+        schedule_deriv_fn: Analytic d(alpha)/dt; resolved from
+            *schedule_fn* via the registry when ``None``.
+        weight_clip: Upper clamp for w(t) (default 1000).
         label_smoothing: Smoothing epsilon for cross-entropy.
-        use_importance_weighting: If ``True``, apply SUBS w(t) per sample.
 
     Returns:
         Scalar loss. Returns ``0.0`` when no masked positions exist.
@@ -75,23 +86,18 @@ def mdlm_loss(
     # Zero out non-masked positions
     ce = ce * is_masked.float()  # [B, L]
 
-    # Global average over all masked positions (matches reference)
-    n_masked_total = is_masked.float().sum().clamp(min=1.0)
-    loss = ce.sum() / n_masked_total
+    # NELBO weight w(t) = -alpha'(t) / (1 - alpha_t), analytic derivative
+    if schedule_deriv_fn is None:
+        schedule_deriv_fn = get_schedule_deriv_for(schedule_fn)
+    alpha_t = schedule_fn(t)  # [B]
+    w_t = (-schedule_deriv_fn(t)) / torch.clamp(
+        1.0 - alpha_t, min=1e-5,
+    )  # [B]
+    w_t = torch.clamp(w_t, max=weight_clip)  # [B]
 
-    if use_importance_weighting:
-        # SUBS weight: w_t = -alpha'(t) / (1 - alpha_t + eps)
-        alpha_t = schedule_fn(t)  # [B]
-        d_alpha = alpha_prime(t, schedule_fn)  # [B]
-        w_t = (-d_alpha) / (1.0 - alpha_t + 1e-8)  # [B]
-        w_t = w_t.clamp(0.0, weight_clip)  # [B]
-
-        # Per-sample weighted loss (needed for SUBS)
-        n_masked_per = is_masked.float().sum(dim=1).clamp(min=1.0)  # [B]
-        per_sample = ce.sum(dim=1) / n_masked_per  # [B]
-        loss = (per_sample * w_t).mean()
-
-    return loss
+    # Constant per-token normalisation (1/L), NOT the realised masked count
+    per_sample = ce.sum(dim=1) / L  # [B]
+    return (w_t * per_sample).mean()
 
 
 def auxiliary_goal_loss(
