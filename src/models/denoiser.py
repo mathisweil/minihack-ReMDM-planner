@@ -1,6 +1,6 @@
 """Dual-stream denoising transformer for MiniHack.
 
-Ported from minihack_reference/src/model.py. Architecture follows the
+Architecture follows the
 Craftax denoiser conventions (forward return format, obs-encoder pattern)
 while using the MiniHack dual-stream design (local CNN + gated global
 CNN + auxiliary goal head).
@@ -56,7 +56,6 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
 
         self.n_global_tokens = n_global_tokens
 
-        # ── Local stream: 9x9 crop -> 1 token ──────────────────────
         self.embedding = nn.Embedding(6000, 64)
         self.cnn = nn.Sequential(
             nn.Conv2d(64, 32, 3, padding=1),
@@ -67,14 +66,12 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
             nn.Linear(64 * 9 * 9, n_embd),
         )
 
-        # ── Action stream ──────────────────────────────────────────
         self.action_emb = nn.Embedding(action_dim + 2, n_embd)
         self.timestep_emb = nn.Embedding(
             cfg.num_diffusion_steps, n_embd,
         )
         self.pos_emb = nn.Embedding(seq_len, n_embd)
 
-        # ── Transformer ───────────────────────────────────────────
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=n_embd,
             nhead=n_head,
@@ -89,7 +86,6 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
         )
         self.head = nn.Linear(n_embd, action_dim)
 
-        # ── Global stream: 21x79 map -> 8 tokens ──────────────────
         self.global_embedding = nn.Embedding(6000, 32)
         self.global_cnn = nn.Sequential(
             nn.Conv2d(32, 32, 5, stride=2, padding=2),
@@ -103,7 +99,6 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
             torch.tensor(cfg.global_gate_init)
         )
 
-        # ── Auxiliary goal head (before gate) ──────────────────────
         self.goal_head = nn.Sequential(
             nn.Linear(n_embd, 128),
             nn.GELU(),
@@ -277,7 +272,6 @@ class LocalDiffusionPlanner(nn.Module):
         return {"actions": self.head(out[:, 1:, :])}
 
 
-# ── Factory ──────────────────────────────────────────────────────────
 
 
 def make_model(cfg: SimpleNamespace) -> nn.Module:
@@ -336,7 +330,6 @@ def try_compile(model: nn.Module, cfg: SimpleNamespace) -> nn.Module:
     return torch.compile(model, mode="default")  # type: ignore[return-value]
 
 
-# ── EMA ──────────────────────────────────────────────────────────────
 
 
 class ModelEMA:

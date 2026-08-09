@@ -80,9 +80,8 @@ class Evaluator:
                     eval_targets.append((stem, fh.read()))
 
         for env_id, des_content in eval_targets:
-            # C-001/F-057: Python's hash() is salted per process, so the old
-            # derivation drew different environment seeds on every invocation
-            # and no evaluation was reproducible. crc32 is process-stable.
+            # Python's hash() is salted per process; crc32 keeps the derived
+            # environment seeds stable across invocations.
             seeds = [
                 42 + zlib.crc32(f"{env_id}:{ep}".encode()) % (2**31)
                 for ep in range(n_episodes)

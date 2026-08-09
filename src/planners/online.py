@@ -90,7 +90,6 @@ class Trainer:
         )
         self._scaler = torch.amp.GradScaler("cuda", enabled=self._use_amp)
 
-    # ── Main loop ────────────────────────────────────────────────
 
     def train(
         self, start_iter: int = 0, start_env_steps: int = 0,
@@ -352,7 +351,6 @@ class Trainer:
         if cfg.save_policy:
             self.save_checkpoint(iteration, env_steps_total)
 
-    # ── Single gradient step ─────────────────────────────────────
 
     def _train_step(self) -> dict[str, float]:
         """One gradient step on a buffer sample.
@@ -419,7 +417,6 @@ class Trainer:
             "grad_norm": grad_norm.item(),
         }
 
-    # ── Checkpointing ────────────────────────────────────────────
 
     def save_checkpoint(
         self, iteration: int, env_steps: int,

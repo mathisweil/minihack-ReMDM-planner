@@ -232,10 +232,6 @@ class Logger:
                 pass
 
 
-# ---------------------------------------------------------------------------
-# Metric helper functions (used by both src/ and experiments/)
-# ---------------------------------------------------------------------------
-
 
 def gpu_memory_mb() -> float:
     """Return peak GPU memory allocated in MB since last reset.

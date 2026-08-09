@@ -83,7 +83,6 @@ def run_model_episode(
 
         model.eval()
         for step_idx in range(max_steps):
-            # Replan when needed
             if plan is None or step_in_plan >= cfg.replan_every:
                 local_t = torch.from_numpy(
                     local[np.newaxis]
@@ -365,7 +364,6 @@ class DataCollector:
 
         return stats_list
 
-    # ── GPU-batched collection ──────────────────────────────────
 
     def collect_batch_gpu(self, n_episodes: int) -> list[dict]:
         """Collect episodes with GPU-batched model inference.

@@ -1,6 +1,6 @@
 """Dynamic environment curriculum and efficiency filter.
 
-Ported from minihack_reference/src/curriculum.py. Tracks per-environment
+Tracks per-environment
 win rates in a rolling window and uses bucket-based sampling weights to
 focus training on environments where the model is struggling.
 """

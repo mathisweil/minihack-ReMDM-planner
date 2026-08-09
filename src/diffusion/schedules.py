@@ -1,6 +1,5 @@
 """Noise schedule functions for MDLM diffusion.
 
-Ported from the Craftax JAX implementation (src/diffusion/schedules.py).
 All functions operate on PyTorch tensors and are pure (no global state).
 
 Convention: alpha(t) is the fraction of tokens that remain *unmasked*.

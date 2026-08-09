@@ -1,6 +1,6 @@
 """MiniHack environment wrapper with BFS oracle and shaped rewards.
 
-Ported from minihack_reference/src/env.py. Provides dual-stream
+Provides dual-stream
 observations (9x9 local crop + 21x79 global map), a multi-tier BFS
 oracle, and reward shaping (win bonus, BFS progress, exploration, step
 penalty).
@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 logging.getLogger("nle.env.base").setLevel(logging.WARNING)
 
 
-# ── nhdat patching on paths containing whitespace ────────────────────
 
 
 _nhdat_patch_checked = False
@@ -119,7 +118,6 @@ def _ensure_nhdat_patch_works() -> None:
     )
 
 
-# ── Staircase detection ──────────────────────────────────────────────
 
 
 def find_staircase_from_glyphs(global_obs: np.ndarray) -> np.ndarray:
@@ -151,7 +149,6 @@ def find_staircase_from_glyphs(global_obs: np.ndarray) -> np.ndarray:
     return coords
 
 
-# ── Environment wrapper ──────────────────────────────────────────────
 
 
 class AdvancedObservationEnv(gym.Env):
@@ -208,7 +205,6 @@ class AdvancedObservationEnv(gym.Env):
         self._prev_bfs_dist: int | None = None
         self.last_raw_obs: dict | None = None
 
-    # ── gym.Env interface ────────────────────────────────────────────
 
     def reset(
         self, seed: int | None = None, options: dict | None = None,
@@ -222,7 +218,7 @@ class AdvancedObservationEnv(gym.Env):
         Returns:
             ``((local_crop, global_map), info)``
         """
-        # C-001/F-057: gymnasium's reset(seed=...) does not reach the NetHack
+        # gymnasium's reset(seed=...) does not reach the NetHack
         # core RNG, so dungeons were entropy-random regardless of the seed
         # (verified: identical seed+actions diverge). Seed the NLE core
         # explicitly; reseed=False keeps it fixed for this env instance.
@@ -297,7 +293,6 @@ class AdvancedObservationEnv(gym.Env):
         """Close the inner environment."""
         self._inner.close()
 
-    # ── Observation helpers ──────────────────────────────────────────
 
     def _get_obs(
         self, obs: dict,
@@ -384,7 +379,6 @@ class AdvancedObservationEnv(gym.Env):
                     queue.append(((nr, nc), dist + 1))
         return None
 
-    # ── BFS Oracle ───────────────────────────────────────────────────
 
     def get_oracle_action(self, obs: dict) -> int:
         """5-tier BFS oracle action.
@@ -481,7 +475,6 @@ class AdvancedObservationEnv(gym.Env):
         return np.random.randint(0, 4)
 
 
-# ── Factory ──────────────────────────────────────────────────────────
 
 
 def make_env(
