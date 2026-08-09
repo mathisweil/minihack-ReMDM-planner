@@ -35,6 +35,10 @@ def q_sample(
         Noisy sequence z_t. Shape ``[B, L]``, dtype int64.
         PAD positions are preserved unchanged.
     """
+    if x0.ndim != 2 or t.ndim != 1 or x0.shape[0] != t.shape[0]:
+        raise ValueError(
+            f"q_sample expects x0 [B, L] and t [B]; got {tuple(x0.shape)}, {tuple(t.shape)}"
+        )
     alpha_t = schedule_fn(t)  # [B]
     sigma_t = 1.0 - alpha_t  # mask probability per sample
     sigma_t = sigma_t.unsqueeze(-1)  # [B, 1]
