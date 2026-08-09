@@ -30,7 +30,26 @@ def linear_schedule(t: Tensor) -> Tensor:
 
 
 def cosine_schedule(t: Tensor) -> Tensor:
-    """Cosine noise schedule: alpha(t) = cos(pi/2 * t)^2.
+    """Cosine noise schedule: alpha(t) = cos(pi/2 * t).
+
+    MDLM Appendix E.1 eq (92) ("Cosine"); the same function the craftax
+    repo names "cosine".
+
+    Args:
+        t: Diffusion time in [0, 1]. Any shape.
+
+    Returns:
+        Retention probability alpha_t, same shape as *t*.
+    """
+    return torch.cos(t * (math.pi / 2.0))
+
+
+def cosine_sq_schedule(t: Tensor) -> Tensor:
+    """Cosine-squared noise schedule: alpha(t) = cos(pi/2 * t)^2.
+
+    MDLM Appendix E.1 eq (91) ("Cosine Squared", after Nichol & Dhariwal).
+    Previously registered under the name "cosine" in this repo; renamed so
+    the label "cosine" denotes the same function in both repos.
 
     Args:
         t: Diffusion time in [0, 1]. Any shape.
@@ -44,6 +63,7 @@ def cosine_schedule(t: Tensor) -> Tensor:
 _SCHEDULE_MAP: dict[str, Callable[[Tensor], Tensor]] = {
     "linear": linear_schedule,
     "cosine": cosine_schedule,
+    "cosine_sq": cosine_sq_schedule,
 }
 
 
@@ -51,7 +71,7 @@ def get_schedule(name: str) -> Callable[[Tensor], Tensor]:
     """Look up a noise schedule by name.
 
     Args:
-        name: One of ``"linear"`` or ``"cosine"``.
+        name: One of ``"linear"``, ``"cosine"``, ``"cosine_sq"``.
 
     Returns:
         The schedule function ``alpha(t)``.
