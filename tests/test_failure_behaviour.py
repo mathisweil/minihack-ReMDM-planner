@@ -82,6 +82,15 @@ def test_offline_snapshot_save_failure_raises(tiny_cfg, tmp_path, monkeypatch):
         )
 
 
+def test_buffer_rejects_legacy_list_dataset(tiny_cfg):
+    """Legacy drop: the list dataset format raises instead of loading."""
+    from src.buffer import ReplayBuffer
+
+    buffer = ReplayBuffer(8, tiny_cfg.seq_len, tiny_cfg.pad_token)
+    with pytest.raises(TypeError, match="legacy list format"):
+        buffer.load_offline_data([], tiny_cfg.id_envs)
+
+
 def test_inference_rejects_bare_state_dict(tiny_cfg, tmp_path):
     """Checkpoint-read strictness: a bare state-dict file (no
     model_state_dict wrapper) raises instead of loading silently."""
