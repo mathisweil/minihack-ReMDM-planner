@@ -257,8 +257,8 @@ class ReplayBuffer:
                 a[: T - start] = actions_arr[start:]
 
             # Use the observation at the window start
-            l = local_arr[min(start, len(local_arr) - 1)]
-            g = global_arr[min(start, len(global_arr) - 1)]
-            windows.append((l.copy(), g.copy(), a))
+            loc = local_arr[min(start, len(local_arr) - 1)]
+            glob = global_arr[min(start, len(global_arr) - 1)]
+            windows.append((loc.copy(), glob.copy(), a))
 
         return windows
