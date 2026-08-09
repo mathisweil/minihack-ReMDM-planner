@@ -9,7 +9,7 @@ SUBS weighting clipped for numerical stability.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F

@@ -9,7 +9,7 @@ sigma_t = 1 - alpha_t. PAD positions are never masked.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch import Tensor

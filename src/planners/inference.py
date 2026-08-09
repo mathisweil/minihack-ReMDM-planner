@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import zlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -318,7 +318,7 @@ def save_eval_json(
         metadata: Optional extra metadata (e.g. iteration).
     """
     payload = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "results": results,
     }
     if metadata:
