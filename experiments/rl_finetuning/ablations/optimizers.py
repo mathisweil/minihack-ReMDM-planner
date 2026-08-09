@@ -28,10 +28,6 @@ from torch import Tensor
 from torch.nn.utils import parametrize
 
 
-# ---------------------------------------------------------------------------
-# Standard AdamW
-# ---------------------------------------------------------------------------
-
 
 def make_optimizer_standard(
     cfg: SimpleNamespace,
@@ -53,10 +49,6 @@ def make_optimizer_standard(
         eps=1e-5,
     )
 
-
-# ---------------------------------------------------------------------------
-# Group A: LLRD (Layer-wise Learning Rate Decay)
-# ---------------------------------------------------------------------------
 
 
 def _get_llrd_group(name: str) -> str:
@@ -137,10 +129,6 @@ def make_optimizer_llrd(
     return torch.optim.AdamW(param_groups, weight_decay=wd, eps=1e-5)
 
 
-# ---------------------------------------------------------------------------
-# Group A / C: Frozen backbone / parameter isolation
-# ---------------------------------------------------------------------------
-
 
 def make_optimizer_frozen(
     cfg: SimpleNamespace,
@@ -180,10 +168,6 @@ def make_optimizer_frozen(
         eps=1e-5,
     )
 
-
-# ---------------------------------------------------------------------------
-# Frozen-path presets for specific ablations
-# ---------------------------------------------------------------------------
 
 # Freeze everything except the action head
 FROZEN_BACKBONE: list[str] = [
@@ -238,10 +222,6 @@ FROZEN_EXCEPT_FFN: list[str] = [
     "head.",
 ]
 
-
-# ---------------------------------------------------------------------------
-# Group A: LoRA via torch.nn.utils.parametrize
-# ---------------------------------------------------------------------------
 
 
 class _LoRAParametrization(nn.Module):
@@ -365,10 +345,6 @@ def make_optimizer_lora(
         eps=1e-5,
     )
 
-
-# ---------------------------------------------------------------------------
-# Gradient surgery (PCGrad)
-# ---------------------------------------------------------------------------
 
 
 def apply_gradients(model: nn.Module, grads: dict[str, Tensor]) -> None:

@@ -140,10 +140,6 @@ def _save(fig: plt.Figure, path: Path) -> None:
     logger.info("Saved %s", path)
 
 
-# ---------------------------------------------------------------------------
-# Per-ablation training curves
-# ---------------------------------------------------------------------------
-
 
 def plot_training_curve(
     name: str,
@@ -179,10 +175,6 @@ def plot_training_curve(
         _save(fig, out_dir / f"train_{name}.png")
 
 
-# ---------------------------------------------------------------------------
-# Score comparison bar chart
-# ---------------------------------------------------------------------------
-
 
 def plot_score_comparison(
     results: dict[str, dict],
@@ -212,10 +204,6 @@ def plot_score_comparison(
         fig.tight_layout()
         _save(fig, out_dir / "score_comparison.png")
 
-
-# ---------------------------------------------------------------------------
-# Gradient alignment over training
-# ---------------------------------------------------------------------------
 
 
 def plot_grad_alignment(
@@ -249,10 +237,6 @@ def plot_grad_alignment(
         fig.tight_layout()
         _save(fig, out_dir / "grad_alignment.png")
 
-
-# ---------------------------------------------------------------------------
-# KL drift over training
-# ---------------------------------------------------------------------------
 
 
 def plot_repr_drift(
@@ -296,10 +280,6 @@ def plot_repr_drift(
         _save(fig, out_dir / "repr_drift.png")
 
 
-# ---------------------------------------------------------------------------
-# CKA similarity
-# ---------------------------------------------------------------------------
-
 
 def plot_cka(
     results: dict[str, dict],
@@ -332,10 +312,6 @@ def plot_cka(
         fig.tight_layout()
         _save(fig, out_dir / "cka_similarity.png")
 
-
-# ---------------------------------------------------------------------------
-# t-bin gradient norms heatmap
-# ---------------------------------------------------------------------------
 
 
 def plot_t_bin_norms(
@@ -383,10 +359,6 @@ def plot_t_bin_norms(
         _save(fig, out_dir / "t_bin_norms.png")
 
 
-# ---------------------------------------------------------------------------
-# High-t / low-t gradient norm ratio
-# ---------------------------------------------------------------------------
-
 
 def plot_t_ratio(
     results: dict[str, dict],
@@ -427,10 +399,6 @@ def plot_t_ratio(
         _save(fig, out_dir / "t_ratio.png")
 
 
-# ---------------------------------------------------------------------------
-# Win rate evolution
-# ---------------------------------------------------------------------------
-
 
 def plot_win_rate(
     results: dict[str, dict],
@@ -463,10 +431,6 @@ def plot_win_rate(
         fig.tight_layout()
         _save(fig, out_dir / "win_rate.png")
 
-
-# ---------------------------------------------------------------------------
-# Group-level comparison (boxplot)
-# ---------------------------------------------------------------------------
 
 
 def plot_group_comparison(
@@ -505,10 +469,6 @@ def plot_group_comparison(
         fig.tight_layout()
         _save(fig, out_dir / "group_comparison.png")
 
-
-# ---------------------------------------------------------------------------
-# Gradient conflict map (binary heatmap)
-# ---------------------------------------------------------------------------
 
 
 def plot_gradient_conflict_map(
@@ -566,10 +526,6 @@ def plot_gradient_conflict_map(
         _save(fig, out_dir / "gradient_conflict_map.png")
 
 
-# ---------------------------------------------------------------------------
-# Score delta plot (sorted bar chart vs baseline)
-# ---------------------------------------------------------------------------
-
 
 def plot_score_delta(
     results: dict[str, dict],
@@ -602,10 +558,6 @@ def plot_score_delta(
         fig.tight_layout()
         _save(fig, out_dir / "score_delta.png")
 
-
-# ---------------------------------------------------------------------------
-# Per-environment delta heatmap
-# ---------------------------------------------------------------------------
 
 
 def plot_per_env_delta(
@@ -672,10 +624,6 @@ def plot_per_env_delta(
         fig.tight_layout()
         _save(fig, out_dir / "per_env_delta.png")
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 
 def generate_all_plots(

@@ -20,10 +20,6 @@ from src.diffusion.forward import q_sample
 _EPS: float = 1e-5
 
 
-# ---------------------------------------------------------------------------
-# KL drift
-# ---------------------------------------------------------------------------
-
 
 def _kl_at_range(
     model: nn.Module,
@@ -111,10 +107,6 @@ def compute_repr_drift(
     return kl_mean, kl_low, kl_mid, kl_high
 
 
-# ---------------------------------------------------------------------------
-# CKA (Centred Kernel Alignment)
-# ---------------------------------------------------------------------------
-
 
 def _linear_cka(x: Tensor, y: Tensor) -> float:
     """Linear CKA between activation matrices.
@@ -199,10 +191,6 @@ def compute_cka(
 
     return _linear_cka(cur_repr, ref_repr)
 
-
-# ---------------------------------------------------------------------------
-# Activation norm statistics
-# ---------------------------------------------------------------------------
 
 
 @torch.no_grad()

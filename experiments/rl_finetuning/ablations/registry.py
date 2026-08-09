@@ -99,10 +99,6 @@ class AblationSpec:
     reward_model_weighting: bool = False
 
 
-# ---------------------------------------------------------------------------
-# Optimizer factory helpers (PyTorch parameter names)
-# ---------------------------------------------------------------------------
-
 
 def _std_opt(cfg: SimpleNamespace, model: nn.Module) -> "torch.optim.Optimizer":
     """Standard AdamW for all parameters."""
@@ -161,10 +157,6 @@ def _layer_ablation_top_n_opt(n: int) -> OptimizerFactory:
 
     return _opt
 
-
-# ---------------------------------------------------------------------------
-# Registry: 25 ablations
-# ---------------------------------------------------------------------------
 
 REGISTRY: dict[str, AblationSpec] = {
     # -- Baseline ----------------------------------------------------------

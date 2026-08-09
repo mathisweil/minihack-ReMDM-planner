@@ -20,10 +20,6 @@ from experiments.rl_finetuning.ablations.training import AblationHistory
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# LaTeX export
-# ---------------------------------------------------------------------------
-
 
 def _df_to_latex(
     df: pl.DataFrame,
@@ -86,10 +82,6 @@ def _save_table(
     Path(str(path_stem) + ".tex").write_text(tex)
     logger.info("Saved %s.csv/.tex", path_stem)
 
-
-# ---------------------------------------------------------------------------
-# Main results table
-# ---------------------------------------------------------------------------
 
 
 def write_significance_test(results: dict[str, dict], out_dir: Path) -> None:
@@ -181,10 +173,6 @@ def make_main_results_table(
     return pl.DataFrame(rows).sort("Score", descending=True)
 
 
-# ---------------------------------------------------------------------------
-# Group summary table
-# ---------------------------------------------------------------------------
-
 
 def make_group_summary_table(
     results: dict[str, dict],
@@ -222,10 +210,6 @@ def make_group_summary_table(
     return pl.DataFrame(rows)
 
 
-# ---------------------------------------------------------------------------
-# Gradient diagnostics table
-# ---------------------------------------------------------------------------
-
 
 def make_gradient_diagnostics_table(
     results: dict[str, dict],
@@ -251,10 +235,6 @@ def make_gradient_diagnostics_table(
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
-
-# ---------------------------------------------------------------------------
-# Representation drift table
-# ---------------------------------------------------------------------------
 
 
 def make_repr_drift_table(
@@ -282,10 +262,6 @@ def make_repr_drift_table(
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
-
-# ---------------------------------------------------------------------------
-# Per-env win rate table
-# ---------------------------------------------------------------------------
 
 
 def make_per_env_table(
@@ -322,10 +298,6 @@ def make_per_env_table(
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
-
-# ---------------------------------------------------------------------------
-# Forgetting analysis table
-# ---------------------------------------------------------------------------
 
 
 def make_forgetting_analysis_table(
@@ -379,10 +351,6 @@ def make_forgetting_analysis_table(
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
 
-# ---------------------------------------------------------------------------
-# Hypothesis verdict table
-# ---------------------------------------------------------------------------
-
 
 def make_hypothesis_verdict_table(
     results: dict[str, dict],
@@ -430,10 +398,6 @@ def make_hypothesis_verdict_table(
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 
 def generate_summary_tables(

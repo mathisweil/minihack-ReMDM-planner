@@ -86,10 +86,6 @@ def _wandb_log(metrics: dict[str, float], step: int) -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
-# AblationHistory
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class AblationHistory:
@@ -161,10 +157,6 @@ class AblationHistory:
         valid = {f.name for f in dataclasses.fields(cls)}
         return cls(**{k: v for k, v in d.items() if k in valid})
 
-
-# ---------------------------------------------------------------------------
-# Replay buffer for mixed replay (simple ring buffer)
-# ---------------------------------------------------------------------------
 
 
 class MixedReplayBuffer:
@@ -248,10 +240,6 @@ class MixedReplayBuffer:
         return self._count
 
 
-# ---------------------------------------------------------------------------
-# Reward model
-# ---------------------------------------------------------------------------
-
 
 class RewardModel(nn.Module):
     """Lightweight MLP for learned return prediction.
@@ -284,10 +272,6 @@ class RewardModel(nn.Module):
         """
         return self.net(x).squeeze(-1)
 
-
-# ---------------------------------------------------------------------------
-# Advantage computation
-# ---------------------------------------------------------------------------
 
 
 def compute_advantages(
@@ -348,10 +332,6 @@ def _effective_batch_size(advantages: Tensor) -> float:
     sum_w2 = (advantages ** 2).sum()
     return (sum_w ** 2 / sum_w2.clamp(min=1e-10)).item()
 
-
-# ---------------------------------------------------------------------------
-# Episode collection -> training windows
-# ---------------------------------------------------------------------------
 
 
 def _extract_windows(
@@ -644,10 +624,6 @@ def _collect_training_data_gpu(
     )
 
 
-# ---------------------------------------------------------------------------
-# Reward model training step
-# ---------------------------------------------------------------------------
-
 
 def _train_reward_model(
     rm: RewardModel,
@@ -678,10 +654,6 @@ def _train_reward_model(
         loss.backward()
         rm_optim.step()
 
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 
 def run_ablation(
@@ -873,9 +845,6 @@ def run_ablation(
     except Exception:
         pass
 
-    # -------------------------------------------------------------------
-    # Training loop
-    # -------------------------------------------------------------------
     _gpu_collect = str(device).startswith("cuda") and episodes_per_iter > 1
     logger.info(
         "  Collection: %s (K=%d, episodes_per_iter=%d)",
