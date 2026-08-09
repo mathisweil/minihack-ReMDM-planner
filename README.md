@@ -19,7 +19,7 @@ brew install cmake
 # Linux (x86_64), if building from source
 sudo apt-get install build-essential cmake bison flex libbz2-dev
 
-git clone https://github.com/MathisW78/minihack-ReMDM-planner.git
+git clone https://github.com/mathisweil/minihack-ReMDM-planner.git
 cd minihack-ReMDM-planner
 
 # Base environment (CPU / macOS). Installs the dev group (pytest) too.
@@ -178,7 +178,7 @@ Key hyperparameters are documented inline in `configs/defaults.yaml`; the [appen
 
 Training writes to a unique run directory under `checkpoint_dir` (default `checkpoints/`), named `{tag}_{YYYYMMDD}_{HHMMSS}_{hex4}`. DAgger saves `iter{N}.pth` on the `checkpoint_every_timesteps` cadence; offline BC saves `offline_step{N}.pth` and `offline_final.pth`. Checkpoints also upload as versioned W&B artifacts (type `model`) when `use_wandb` is on. All checkpoints store the W&B run ID, so passing them back via `--checkpoint` resumes the same W&B curve automatically.
 
-`checkpoints/` is gitignored. Released weights live on the Hugging Face Hub: **[MathisW78/remdm-minihack-checkpoints](https://huggingface.co/MathisW78/remdm-minihack-checkpoints)**
+`checkpoints/` is gitignored. Released weights live on the Hugging Face Hub: **[mathisweil/remdm-minihack-checkpoints](https://huggingface.co/mathisweil/remdm-minihack-checkpoints)**
 
 | Directory | Method | Selected at | Sample-equivalents |
 |---|---|---|---|
@@ -187,10 +187,10 @@ Training writes to a unique run directory under `checkpoint_dir` (default `check
 
 ```bash
 # All checkpoints
-uv run hf download MathisW78/remdm-minihack-checkpoints --include "checkpoints/**" --local-dir .
+uv run hf download mathisweil/remdm-minihack-checkpoints --include "checkpoints/**" --local-dir .
 
 # One checkpoint
-uv run hf download MathisW78/remdm-minihack-checkpoints \
+uv run hf download mathisweil/remdm-minihack-checkpoints \
     --include "checkpoints/online/Minihack-*/**" --local-dir .
 ```
 
