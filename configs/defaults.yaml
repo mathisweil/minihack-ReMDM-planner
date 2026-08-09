@@ -166,8 +166,8 @@ save_policy: true
 hub_run_id: null
 hub_repo_id: null
 use_wandb: true
-wandb_project: remdm-minihack
-wandb_entity: "mathis-weil-university-college-london-ucl-"
+wandb_project: minihack-ReMDM-planner
+wandb_entity: myopic-planner
 wandb_run_name: null
 wandb_resume_id: null
 offline_log_every: 10
@@ -236,7 +236,7 @@ baselines_dt_eval_max_steps: 200
 # Separate W&B project for baselines (kept distinct from the main
 # remdm-minihack project so baseline runs don't pollute training
 # leaderboards). Set to null to fall back to wandb_project.
-baselines_wandb_project: remdm-baselines
+baselines_wandb_project: minihack-ReMDM-baselines
 # Where per-seed checkpoints, SB3 logs, and aggregated results JSON
 # are written. Resolved relative to the project root unless absolute.
 baselines_output_dir: outputs/baselines

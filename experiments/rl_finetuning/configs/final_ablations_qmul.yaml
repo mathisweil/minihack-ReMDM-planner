@@ -57,3 +57,11 @@ per_layer_every: 50
 t_analysis_n_bins: 10
 # Smaller CKA batch to save memory during the expensive CKA pass.
 cka_batch_size: 32
+
+# W&B logging is enabled by the --use-wandb CLI flag; this key is not read.
+use_wandb: true
+wandb_project: minihack-ReMDM-planner-ablations
+wandb_entity: myopic-planner
+
+# -- Multi-seed ---------------------------------------------------------------
+num_seeds: 3  # C-001 (D7/F-048): three literal seeds (base 0 -> 0, 1, 2), matching the published 3-run tables

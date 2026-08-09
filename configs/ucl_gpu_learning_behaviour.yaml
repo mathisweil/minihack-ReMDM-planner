@@ -95,8 +95,8 @@ save_policy: true
 hub_run_id: null
 hub_repo_id: null
 use_wandb: true
-wandb_project: remdm-minihack
-wandb_entity: "mathis-weil-university-college-london-ucl-"
+wandb_project: minihack-ReMDM-planner
+wandb_entity: myopic-planner
 wandb_run_name: null
 offline_log_every: 10
 seed: null
