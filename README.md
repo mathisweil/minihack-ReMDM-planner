@@ -271,7 +271,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 
 | Parameter | Default | Description |
 |---|---|---|
-| `noise_schedule` | `linear` | `linear` or `cosine` |
+| `noise_schedule` | `linear` | `linear`, `cosine`, or `cosine_sq` (MDLM App E.1 naming) |
 | `num_diffusion_steps` | 100 | Discrete timestep resolution |
 | `diffusion_steps_eval` | 10 | Denoising iterations at inference |
 | `diffusion_steps_collect` | 5 | Denoising iterations during collection |
