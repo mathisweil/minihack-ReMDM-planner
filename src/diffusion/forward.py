@@ -53,6 +53,5 @@ def q_sample(
     # oracle trajectories); craftax windows are fixed-length (METHOD_PARITY 2.1)
     # Restore PAD positions — never mask padding
     pad_mask = x0 == pad_token  # [B, L]
-    zt = torch.where(pad_mask, pad_token, zt)
+    return torch.where(pad_mask, pad_token, zt)
 
-    return zt

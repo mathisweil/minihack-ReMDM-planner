@@ -39,7 +39,7 @@ target-version = "py312"
 [tool.ruff.lint]
 # Conservative explicit baseline; rule families are added one reviewed
 # commit at a time (CLEANUP_PLAN.md). Disabled rules must be justified here.
-select = ["F", "E4", "E7", "E9", "I", "UP", "C4", "SIM"]
+select = ["F", "E4", "E7", "E9", "I", "UP", "C4", "SIM", "RET"]
 
 [tool.uv.sources]
 torch = [
