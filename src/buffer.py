@@ -167,10 +167,10 @@ class ReplayBuffer:
             (n, *a0.shape),
             dtype=a0.dtype,
         )
-        for i, (l, g, a) in enumerate(combined):
-            self._cached_local[i] = l
-            self._cached_global[i] = g
-            self._cached_actions[i] = a
+        for i, (loc, glob, act) in enumerate(combined):
+            self._cached_local[i] = loc
+            self._cached_global[i] = glob
+            self._cached_actions[i] = act
         self._cache_valid = True
 
     def add(self, trajectory: dict) -> None:
