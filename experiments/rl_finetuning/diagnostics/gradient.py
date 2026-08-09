@@ -17,10 +17,6 @@ from torch import Tensor, nn
 from experiments.rl_finetuning.ablations.losses import _core_loss
 
 
-# ---------------------------------------------------------------------------
-# Gradient alignment: cosine similarity between RL and BC gradients
-# ---------------------------------------------------------------------------
-
 
 @torch.no_grad()
 def _collect_flat_grad(model: nn.Module) -> Tensor:
@@ -101,10 +97,6 @@ def compute_grad_alignment(
     return cos_sim, rl_norm, bc_norm
 
 
-# ---------------------------------------------------------------------------
-# Per-layer gradient norms
-# ---------------------------------------------------------------------------
-
 
 def compute_per_layer_grad_norms(
     model: nn.Module,
@@ -125,10 +117,6 @@ def compute_per_layer_grad_norms(
             norms[name] = param.grad.detach().norm().item()
     return norms
 
-
-# ---------------------------------------------------------------------------
-# PCGrad surgery metrics
-# ---------------------------------------------------------------------------
 
 
 def compute_surgery_metrics(

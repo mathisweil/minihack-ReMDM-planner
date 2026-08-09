@@ -70,10 +70,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Config utilities
-# ---------------------------------------------------------------------------
-
 
 def _load_yaml(path: str | None) -> dict:
     """Load a YAML file, returning empty dict if path is None.
@@ -105,10 +101,6 @@ def _merge_to_namespace(*dicts: dict) -> SimpleNamespace:
     return SimpleNamespace(**merged)
 
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -188,10 +180,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
     return p
 
-
-# ---------------------------------------------------------------------------
-# Result serialisation (orjson)
-# ---------------------------------------------------------------------------
 
 
 def _history_finals(history: "AblationHistory") -> dict:
@@ -332,10 +320,6 @@ def _merge_result_files(
     return merged, pretrained_score, config
 
 
-# ---------------------------------------------------------------------------
-# Pretrained evaluation
-# ---------------------------------------------------------------------------
-
 
 def _evaluate_pretrained(
     checkpoint_path: str,
@@ -367,10 +351,6 @@ def _evaluate_pretrained(
     results = evaluator.evaluate(cfg.id_envs, model, n_eps, cfg, device)
     return float(np.mean([v["win_rate"] for v in results.values()]))
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> None:

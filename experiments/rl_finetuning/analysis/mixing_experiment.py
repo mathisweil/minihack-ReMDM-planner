@@ -53,10 +53,6 @@ _DEFAULT_FRACTIONS: list[float] = [1.0, 0.9, 0.7, 0.5, 0.0]
 _INTERMEDIATE_FRACTIONS: list[float] = [0.9, 0.7, 0.5]
 
 
-# -------------------------------------------------------------------
-# Oracle data collection
-# -------------------------------------------------------------------
-
 
 def _collect_oracle_data(
     model: nn.Module,
@@ -122,10 +118,6 @@ def _collect_oracle_data(
         torch.cat(all_returns).to(device),
     )
 
-
-# -------------------------------------------------------------------
-# Single mixing point training
-# -------------------------------------------------------------------
 
 
 def run_mixing_point(
@@ -298,10 +290,6 @@ def run_mixing_point(
     return history, final_id_wr
 
 
-# -------------------------------------------------------------------
-# Monotonicity check
-# -------------------------------------------------------------------
-
 
 def check_monotonicity(
     fractions: list[float],
@@ -328,10 +316,6 @@ def check_monotonicity(
             )
     return len(violations) == 0, violations
 
-
-# -------------------------------------------------------------------
-# Plot generation
-# -------------------------------------------------------------------
 
 
 _COLORS_BY_FRAC: dict[float, str] = {
@@ -474,10 +458,6 @@ def generate_mixing_plots(
     plt.close(fig)
     logger.info("Saved mixing plot: %s", plot_path)
 
-
-# -------------------------------------------------------------------
-# Main entry point
-# -------------------------------------------------------------------
 
 
 def run_mixing_experiment(

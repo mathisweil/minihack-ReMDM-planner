@@ -54,10 +54,6 @@ class LossContext:
     cfg: SimpleNamespace
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
 
 def _per_sample_masked_ce(
     logits: Tensor,
@@ -283,10 +279,6 @@ def _ewc_penalty(
     return penalty
 
 
-# ---------------------------------------------------------------------------
-# Group A: Regularisation / Constraint Methods
-# ---------------------------------------------------------------------------
-
 
 def make_loss_baseline(ctx: LossContext) -> LossFn:
     """Standard return-weighted ELBO -- no modifications.
@@ -436,10 +428,6 @@ def make_loss_mixed_replay(ctx: LossContext) -> LossFn:
     """
     return make_loss_baseline(ctx)
 
-
-# ---------------------------------------------------------------------------
-# Group B: Training Signal Modifications
-# ---------------------------------------------------------------------------
 
 
 def make_loss_bc_wins(ctx: LossContext) -> LossFn:
@@ -638,10 +626,6 @@ def make_loss_normalized_adv(ctx: LossContext) -> LossFn:
     return loss_fn
 
 
-# ---------------------------------------------------------------------------
-# Group C: Architecture / Parameter Isolation -- loss is always baseline
-# ---------------------------------------------------------------------------
-
 
 def make_loss_frozen_backbone(ctx: LossContext) -> LossFn:
     """Baseline loss; backbone freezing handled at optimizer/mask level.
@@ -667,10 +651,6 @@ def make_loss_param_isolation(ctx: LossContext) -> LossFn:
     return make_loss_baseline(ctx)
 
 
-# ---------------------------------------------------------------------------
-# Group D: Reward / Data Quality -- loss is baseline; data transforms external
-# ---------------------------------------------------------------------------
-
 
 def make_loss_reward_quality(ctx: LossContext) -> LossFn:
     """Baseline loss; reward filtering and normalisation handled externally.
@@ -683,10 +663,6 @@ def make_loss_reward_quality(ctx: LossContext) -> LossFn:
     """
     return make_loss_baseline(ctx)
 
-
-# ---------------------------------------------------------------------------
-# Fisher diagonal estimation (for EWC)
-# ---------------------------------------------------------------------------
 
 
 def estimate_fisher_diagonal(

@@ -19,10 +19,6 @@ _EPS: float = 1e-5
 N_BINS: int = 10
 
 
-# ---------------------------------------------------------------------------
-# Internal: flat gradient at a t-range
-# ---------------------------------------------------------------------------
-
 
 def _flat_grad_at_range(
     model: nn.Module,
@@ -68,10 +64,6 @@ def _flat_grad_at_range(
             parts.append(torch.zeros(param.numel(), device=device))
     return torch.cat(parts)
 
-
-# ---------------------------------------------------------------------------
-# t-bin gradient norm analysis
-# ---------------------------------------------------------------------------
 
 
 def compute_t_analysis(
@@ -131,10 +123,6 @@ def compute_t_analysis(
     model.zero_grad()
     return bin_norms, cos, norm_low, norm_high
 
-
-# ---------------------------------------------------------------------------
-# Per-t-bin loss decomposition
-# ---------------------------------------------------------------------------
 
 
 @torch.no_grad()
