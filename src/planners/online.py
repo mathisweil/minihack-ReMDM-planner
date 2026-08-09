@@ -252,13 +252,6 @@ class Trainer:
                 "speed/samples_per_sec": samples_per_sec,
                 "speed/env_steps_per_sec": env_steps_per_sec,
                 "speed/gpu_memory_mb": gpu_memory_mb(),
-                # Keep old perf/ keys for backward compat
-                "perf/iter_time_s": iter_time,
-                "perf/collect_time_s": collect_time,
-                "perf/train_time_s": train_time,
-                "perf/grad_steps_per_sec": (
-                    cfg.grad_steps_per_iteration / max(train_time, 1e-6)
-                ),
             }
             if gate_val is not None:
                 metrics["train/global_gate"] = gate_val

@@ -323,10 +323,6 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     "speed/train_step_time_sec": step_time,
                     "speed/samples_per_sec": samples_per_sec,
                     "speed/gpu_memory_mb": gpu_memory_mb(),
-                    # Legacy `perf/` mirror keys (kept for backward compat
-                    # with existing dashboards / DAgger curves).
-                    "perf/train_time_s": step_time,
-                    "perf/grad_steps_per_sec": (log_every / max(step_time, 1e-6)),
                 }
                 if hasattr(_ema_source_ref, "global_gate"):
                     gate_val = torch.sigmoid(

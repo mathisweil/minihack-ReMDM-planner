@@ -113,7 +113,6 @@ class Logger:
                 for ns in (
                     "diffusion/*",
                     "train/*",
-                    "perf/*",
                     "speed/*",
                     "model/*",
                     "eval_id/*",
