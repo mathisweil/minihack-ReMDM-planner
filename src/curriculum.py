@@ -100,9 +100,7 @@ class DynamicCurriculum:
         return {
             "env_ids": self._env_ids,
             "queue_size": self._queue_size,
-            "queues": {
-                eid: list(q) for eid, q in self._queues.items()
-            },
+            "queues": {eid: list(q) for eid, q in self._queues.items()},
         }
 
     def load_state_dict(self, sd: dict) -> None:

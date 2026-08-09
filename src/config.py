@@ -32,11 +32,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
         The merged dictionary (same object as *base*).
     """
     for key, value in override.items():
-        if (
-            key in base
-            and isinstance(base[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
             _deep_merge(base[key], value)
         else:
             base[key] = value
@@ -185,9 +181,7 @@ def load_config(
         if config_path_resolved.resolve() != defaults_path.resolve():
             with open(config_path_resolved, "r") as fh:
                 overrides = yaml.safe_load(fh) or {}
-            _validate_keys(
-                overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path)
-            )
+            _validate_keys(overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path))
             _deep_merge(cfg, overrides)
 
     _validate_keys(cli_overrides, allowed, "--override")
@@ -203,6 +197,7 @@ def load_config(
     elif "device" not in cfg:
         try:
             import torch
+
             cfg["device"] = "cuda" if torch.cuda.is_available() else "cpu"
         except ImportError:
             cfg["device"] = "cpu"
@@ -214,8 +209,7 @@ def load_config(
         f"mask_token ({ns.mask_token}) must equal action_dim ({ns.action_dim})"
     )
     assert ns.pad_token == ns.action_dim + 1, (
-        f"pad_token ({ns.pad_token}) must equal action_dim + 1 "
-        f"({ns.action_dim + 1})"
+        f"pad_token ({ns.pad_token}) must equal action_dim + 1 ({ns.action_dim + 1})"
     )
 
     return ns

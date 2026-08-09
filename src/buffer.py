@@ -24,7 +24,10 @@ class ReplayBuffer:
     """
 
     def __init__(
-        self, capacity: int, seq_len: int, pad_token: int,
+        self,
+        capacity: int,
+        seq_len: int,
+        pad_token: int,
     ) -> None:
         self._capacity = capacity
         self._seq_len = seq_len
@@ -39,7 +42,6 @@ class ReplayBuffer:
         self._cached_local: np.ndarray | None = None
         self._cached_global: np.ndarray | None = None
         self._cached_actions: np.ndarray | None = None
-
 
     def load_offline_data(
         self,
@@ -106,9 +108,7 @@ class ReplayBuffer:
                 sample_to_env.extend([env_id] * count)
 
             for i, sample in enumerate(data):
-                env_id = (
-                    sample_to_env[i] if i < len(sample_to_env) else None
-                )
+                env_id = sample_to_env[i] if i < len(sample_to_env) else None
                 if env_id is None or env_id in allowed:
                     self._offline.append(self._unpack_legacy_sample(sample))
         else:
@@ -142,7 +142,6 @@ class ReplayBuffer:
             np.asarray(action_seq, dtype=np.int64),
         )
 
-
     def _invalidate_cache(self) -> None:
         """Mark the stacked array cache as stale."""
         self._cache_valid = False
@@ -157,13 +156,16 @@ class ReplayBuffer:
         n = len(combined)
         l0, g0, a0 = combined[0]
         self._cached_local = np.empty(
-            (n, *l0.shape), dtype=l0.dtype,
+            (n, *l0.shape),
+            dtype=l0.dtype,
         )
         self._cached_global = np.empty(
-            (n, *g0.shape), dtype=g0.dtype,
+            (n, *g0.shape),
+            dtype=g0.dtype,
         )
         self._cached_actions = np.empty(
-            (n, *a0.shape), dtype=a0.dtype,
+            (n, *a0.shape),
+            dtype=a0.dtype,
         )
         for i, (l, g, a) in enumerate(combined):
             self._cached_local[i] = l
@@ -188,9 +190,9 @@ class ReplayBuffer:
             self._online = self._online[excess:]
         self._invalidate_cache()
 
-
     def sample(
-        self, batch_size: int,
+        self,
+        batch_size: int,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
         """Random sample from offline + online combined.
 
@@ -213,7 +215,6 @@ class ReplayBuffer:
             self._cached_actions[indices],
         )
 
-
     def __len__(self) -> int:
         """Total number of windows (offline + online)."""
         return len(self._offline) + len(self._online)
@@ -228,9 +229,9 @@ class ReplayBuffer:
         """Number of pinned offline windows (alias)."""
         return len(self._offline)
 
-
     def _slice_trajectory(
-        self, traj: dict,
+        self,
+        traj: dict,
     ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
         """Slice a trajectory into overlapping seq_len windows.
 

@@ -69,12 +69,11 @@ class Evaluator:
         results: dict[str, dict] = {}
 
         # Build list of (env_id, des_content) pairs
-        eval_targets: list[tuple[str, str | None]] = [
-            (eid, None) for eid in env_ids
-        ]
+        eval_targets: list[tuple[str, str | None]] = [(eid, None) for eid in env_ids]
         if des_files:
             for des_path in des_files:
                 from pathlib import Path
+
                 stem = Path(des_path).stem
                 with open(des_path) as fh:
                     eval_targets.append((stem, fh.read()))
@@ -87,7 +86,11 @@ class Evaluator:
                 for ep in range(n_episodes)
             ]
             ep_results = self._run_episodes_batched(
-                model, env_id, n_episodes, cfg, device,
+                model,
+                env_id,
+                n_episodes,
+                cfg,
+                device,
                 seeds=seeds,
                 des_content=des_content,
                 blind_global=blind_global,
@@ -152,7 +155,8 @@ class Evaluator:
         envs: list = []
         cur_local = np.zeros((n, cs, cs), dtype=np.int16)
         cur_global = np.zeros(
-            (n, cfg.map_h, cfg.map_w), dtype=np.int16,
+            (n, cfg.map_h, cfg.map_w),
+            dtype=np.int16,
         )
         failed = np.zeros(n, dtype=bool)
 
@@ -166,7 +170,9 @@ class Evaluator:
             except Exception:
                 logger.warning(
                     "Failed to create env %s (ep %d)",
-                    env_id, i, exc_info=True,
+                    env_id,
+                    i,
+                    exc_info=True,
                 )
                 envs.append(None)
                 failed[i] = True
@@ -185,19 +191,37 @@ class Evaluator:
                 # Batch replan for active envs that need it
                 replan_idx = np.where(need_replan & ~done)[0]
                 if len(replan_idx) > 0:
-                    local_t = torch.from_numpy(
-                        cur_local[replan_idx],
-                    ).long().to(device)  # [B_r, cs, cs]
-                    glb_t = torch.from_numpy(
-                        cur_global[replan_idx],
-                    ).long().to(device)  # [B_r, map_h, map_w]
-                    batch_plans = remdm_sample(
-                        model, local_t, glb_t, cfg, device,
-                        physics_aware=getattr(
-                            cfg, "physics_aware_sampling", False,
-                        ),
-                        blind_global=blind_global,
-                    ).cpu().numpy()  # [B_r, seq_len]
+                    local_t = (
+                        torch.from_numpy(
+                            cur_local[replan_idx],
+                        )
+                        .long()
+                        .to(device)
+                    )  # [B_r, cs, cs]
+                    glb_t = (
+                        torch.from_numpy(
+                            cur_global[replan_idx],
+                        )
+                        .long()
+                        .to(device)
+                    )  # [B_r, map_h, map_w]
+                    batch_plans = (
+                        remdm_sample(
+                            model,
+                            local_t,
+                            glb_t,
+                            cfg,
+                            device,
+                            physics_aware=getattr(
+                                cfg,
+                                "physics_aware_sampling",
+                                False,
+                            ),
+                            blind_global=blind_global,
+                        )
+                        .cpu()
+                        .numpy()
+                    )  # [B_r, seq_len]
                     plans[replan_idx] = batch_plans
                     step_in_plan[replan_idx] = 0
                     need_replan[replan_idx] = False
@@ -211,7 +235,8 @@ class Evaluator:
 
                     action = int(plans[i, step_in_plan[i]])
                     action = max(
-                        0, min(action, cfg.action_dim - 1),
+                        0,
+                        min(action, cfg.action_dim - 1),
                     )
                     step_in_plan[i] += 1
                     n_steps[i] += 1
@@ -220,9 +245,7 @@ class Evaluator:
                         need_replan[i] = True
 
                     try:
-                        obs, reward, term, trunc, info = (
-                            envs[i].step(action)
-                        )
+                        obs, reward, term, trunc, info = envs[i].step(action)
                         local, glb = obs
                         total_reward[i] += reward
                         cur_local[i] = local
@@ -235,7 +258,9 @@ class Evaluator:
                     except Exception:
                         logger.warning(
                             "Episode %d step failed for %s",
-                            i, env_id, exc_info=True,
+                            i,
+                            env_id,
+                            exc_info=True,
                         )
                         done[i] = True
 
@@ -257,7 +282,8 @@ class Evaluator:
 
 
 def format_eval_results(
-    results: dict[str, dict], label: str = "Eval",
+    results: dict[str, dict],
+    label: str = "Eval",
 ) -> str:
     """Format evaluation results as an ASCII table.
 
@@ -269,9 +295,7 @@ def format_eval_results(
         Formatted string.
     """
     lines = [f"{'=' * 60}", f"  {label} Results", f"{'=' * 60}"]
-    lines.append(
-        f"  {'Environment':<35} {'WinRate':>8} {'Steps':>8}"
-    )
+    lines.append(f"  {'Environment':<35} {'WinRate':>8} {'Steps':>8}")
     lines.append(f"  {'-' * 53}")
     for env_id, stats in results.items():
         wr = f"{stats['win_rate']:.2%}"
@@ -326,7 +350,9 @@ def run_inference(
 
     model = make_model(cfg).to(device)
     ckpt = torch.load(
-        checkpoint_path, map_location=device, weights_only=False,
+        checkpoint_path,
+        map_location=device,
+        weights_only=False,
     )
 
     if "model_state_dict" in ckpt:
@@ -345,8 +371,13 @@ def run_inference(
 
     evaluator = Evaluator()
     results = evaluator.evaluate(
-        env_ids, model, episodes, cfg, device,
-        des_files=des_files, blind_global=blind_global,
+        env_ids,
+        model,
+        episodes,
+        cfg,
+        device,
+        des_files=des_files,
+        blind_global=blind_global,
     )
 
     print(format_eval_results(results, label="Inference"))
@@ -354,8 +385,10 @@ def run_inference(
     if log is not None:
         log.log_eval(results, step=0, prefix="inference")
         log.log_summary(
-            {f"inference/{env_id}/win_rate": stats["win_rate"]
-             for env_id, stats in results.items()}
+            {
+                f"inference/{env_id}/win_rate": stats["win_rate"]
+                for env_id, stats in results.items()
+            }
         )
 
     if output_path:

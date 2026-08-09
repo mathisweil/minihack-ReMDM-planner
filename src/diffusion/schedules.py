@@ -121,8 +121,7 @@ def get_schedule(name: str) -> Callable[[Tensor], Tensor]:
     """
     if name not in _SCHEDULE_MAP:
         raise KeyError(
-            f"Unknown schedule '{name}'. "
-            f"Available: {list(_SCHEDULE_MAP.keys())}"
+            f"Unknown schedule '{name}'. Available: {list(_SCHEDULE_MAP.keys())}"
         )
     return _SCHEDULE_MAP[name]
 
@@ -143,6 +142,4 @@ def alpha_prime(
         Approximate derivative, same shape as *t*.
     """
     t_clamped = t.clamp(eps, 1.0 - eps)
-    return (schedule_fn(t_clamped + eps) - schedule_fn(t_clamped - eps)) / (
-        2.0 * eps
-    )
+    return (schedule_fn(t_clamped + eps) - schedule_fn(t_clamped - eps)) / (2.0 * eps)

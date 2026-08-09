@@ -26,8 +26,11 @@ from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import DataCollector
 from src.planners.inference import Evaluator, save_eval_json
 from src.planners.logging import (
-    Logger, gpu_memory_mb, reset_gpu_memory_stats,
-    compute_param_norm, compute_param_drift,
+    Logger,
+    gpu_memory_mb,
+    reset_gpu_memory_stats,
+    compute_param_norm,
+    compute_param_drift,
 )
 from src.curriculum import DynamicCurriculum
 from src.envs.minihack_env import collect_oracle_trajectory
@@ -81,18 +84,20 @@ class Trainer:
         self._schedule_fn = get_schedule(cfg.noise_schedule)
         # Snapshot of initial weights for param drift tracking
         self._init_state = {
-            k: v.clone() for k, v in self._raw_model.state_dict().items()
+            k: v.clone()
+            for k, v in self._raw_model.state_dict().items()
             if v.is_floating_point()
         }
         # AMP scaler: enabled only when use_amp=true and on CUDA
-        self._use_amp = (
-            getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
+        self._use_amp = getattr(cfg, "use_amp", False) and str(device).startswith(
+            "cuda"
         )
         self._scaler = torch.amp.GradScaler("cuda", enabled=self._use_amp)
 
-
     def train(
-        self, start_iter: int = 0, start_env_steps: int = 0,
+        self,
+        start_iter: int = 0,
+        start_env_steps: int = 0,
     ) -> None:
         """Run the DAgger training loop.
 
@@ -129,9 +134,7 @@ class Trainer:
             last_env_id: str = ""
 
             collect_start = time.perf_counter()
-            use_gpu_batch = (
-                str(self.device).startswith("cuda") and n_eps > 1
-            )
+            use_gpu_batch = str(self.device).startswith("cuda") and n_eps > 1
             if use_gpu_batch:
                 # GPU-batched collection (all envs in lockstep)
                 batch_stats = self.collector.collect_batch_gpu(n_eps)
@@ -207,9 +210,7 @@ class Trainer:
             # Global gate value (how open is the global stream)
             gate_val = None
             if hasattr(self._raw_model, "global_gate"):
-                gate_val = torch.sigmoid(
-                    self._raw_model.global_gate
-                ).item()
+                gate_val = torch.sigmoid(self._raw_model.global_gate).item()
 
             # Buffer online fraction
             buf_total = len(self.buffer)
@@ -234,15 +235,12 @@ class Trainer:
                 "train/buffer_size": buf_total,
                 "train/buffer_online_frac": buf_online_frac,
                 "train/model_won": int(collect_stats["model_won"]),
-                "train/added_to_buffer": int(
-                    collect_stats["added_to_buffer"]
-                ),
+                "train/added_to_buffer": int(collect_stats["added_to_buffer"]),
                 "train/episodes_collected": n_eps,
                 "train/model_steps": collect_stats["model_steps"],
                 "train/oracle_steps": collect_stats["oracle_steps"],
                 "train/efficiency_ratio": (
-                    collect_stats["model_steps"]
-                    / max(collect_stats["oracle_steps"], 1)
+                    collect_stats["model_steps"] / max(collect_stats["oracle_steps"], 1)
                 ),
                 "train/lr": current_lr,
                 "train/grad_norm": avg_grad_norm,
@@ -268,9 +266,7 @@ class Trainer:
 
             # Model health (every 10 iters to avoid overhead)
             if iteration % 10 == 0:
-                metrics["model/param_norm"] = compute_param_norm(
-                    self._raw_model
-                )
+                metrics["model/param_norm"] = compute_param_norm(self._raw_model)
                 metrics["model/param_drift_from_init"] = compute_param_drift(
                     self._raw_model, self._init_state
                 )
@@ -285,8 +281,7 @@ class Trainer:
             # 5. ID eval — triggered when env-step delta crosses threshold
             if (
                 cfg.id_eval_every_timesteps > 0
-                and env_steps_total - last_id_eval_step
-                >= cfg.id_eval_every_timesteps
+                and env_steps_total - last_id_eval_step >= cfg.id_eval_every_timesteps
             ):
                 eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
@@ -297,15 +292,18 @@ class Trainer:
                     self.device,
                 )
                 self.log.log_eval(results, step=iteration, prefix="eval_id")
-                mean_id_wr = float(np.mean(
-                    [s["win_rate"] for s in results.values()]
-                )) if results else 0.0
+                mean_id_wr = (
+                    float(np.mean([s["win_rate"] for s in results.values()]))
+                    if results
+                    else 0.0
+                )
                 self.log.log(
                     {
                         "eval_id/mean_win_rate": mean_id_wr,
                         **{
-                            f"curriculum/{env_id}/win_rate":
-                                self.collector.curriculum.win_rate(env_id)
+                            f"curriculum/{env_id}/win_rate": self.collector.curriculum.win_rate(
+                                env_id
+                            )
                             for env_id in self.cfg.id_envs
                         },
                     },
@@ -316,8 +314,7 @@ class Trainer:
             # 6. OOD eval — env-step-triggered
             if (
                 cfg.ood_eval_every_timesteps > 0
-                and env_steps_total - last_ood_eval_step
-                >= cfg.ood_eval_every_timesteps
+                and env_steps_total - last_ood_eval_step >= cfg.ood_eval_every_timesteps
             ):
                 eval_model = self.ema_model.make_eval_model(self._raw_model)
                 results = self.evaluator.evaluate(
@@ -328,19 +325,21 @@ class Trainer:
                     self.device,
                 )
                 self.log.log_eval(results, step=iteration, prefix="eval_ood")
-                mean_ood_wr = float(np.mean(
-                    [s["win_rate"] for s in results.values()]
-                )) if results else 0.0
+                mean_ood_wr = (
+                    float(np.mean([s["win_rate"] for s in results.values()]))
+                    if results
+                    else 0.0
+                )
                 self.log.log(
-                    {"eval_ood/mean_win_rate": mean_ood_wr}, step=iteration,
+                    {"eval_ood/mean_win_rate": mean_ood_wr},
+                    step=iteration,
                 )
                 last_ood_eval_step = env_steps_total
 
             # 7. Checkpoint — env-step-triggered
             if (
                 cfg.checkpoint_every_timesteps > 0
-                and env_steps_total - last_ckpt_step
-                >= cfg.checkpoint_every_timesteps
+                and env_steps_total - last_ckpt_step >= cfg.checkpoint_every_timesteps
             ):
                 self.save_checkpoint(iteration, env_steps_total)
                 last_ckpt_step = env_steps_total
@@ -350,7 +349,6 @@ class Trainer:
         # Final checkpoint
         if cfg.save_policy:
             self.save_checkpoint(iteration, env_steps_total)
-
 
     def _train_step(self) -> dict[str, float]:
         """One gradient step on a buffer sample.
@@ -365,8 +363,7 @@ class Trainer:
         cfg = self.cfg
         batch = self.buffer.sample(cfg.dagger_batch_size)
         if batch is None:
-            return {"loss": 0.0, "loss_diff": 0.0,
-                    "loss_aux": 0.0, "grad_norm": 0.0}
+            return {"loss": 0.0, "loss_diff": 0.0, "loss_aux": 0.0, "grad_norm": 0.0}
         local_np, global_np, actions_np = batch
         local_t = torch.from_numpy(local_np).long().to(self.device)
         global_t = torch.from_numpy(global_np).long().to(self.device)
@@ -376,11 +373,19 @@ class Trainer:
         t = torch.rand(B, device=self.device).clamp(1e-5, 1.0 - 1e-5)
 
         zt = q_sample(
-            actions_t, t, cfg.mask_token, cfg.pad_token,
+            actions_t,
+            t,
+            cfg.mask_token,
+            cfg.pad_token,
             self._schedule_fn,
         )
-        t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
-            0, cfg.num_diffusion_steps - 1,
+        t_discrete = (
+            (t * cfg.num_diffusion_steps)
+            .long()
+            .clamp(
+                0,
+                cfg.num_diffusion_steps - 1,
+            )
         )
 
         self.optimizer.zero_grad()
@@ -388,8 +393,13 @@ class Trainer:
             out = self.model(local_t, global_t, zt, t_discrete)
 
             loss_diff = mdlm_loss(
-                out["actions"], actions_t, zt, t,
-                cfg.mask_token, cfg.pad_token, self._schedule_fn,
+                out["actions"],
+                actions_t,
+                zt,
+                t,
+                cfg.mask_token,
+                cfg.pad_token,
+                self._schedule_fn,
                 weight_clip=cfg.loss_weight_clip,
                 label_smoothing=cfg.label_smoothing,
             )
@@ -403,7 +413,8 @@ class Trainer:
         self._scaler.scale(loss).backward()
         self._scaler.unscale_(self.optimizer)
         grad_norm = nn.utils.clip_grad_norm_(
-            self.model.parameters(), cfg.dagger_grad_clip,
+            self.model.parameters(),
+            cfg.dagger_grad_clip,
         )
         self._scaler.step(self.optimizer)
         self._scaler.update()
@@ -417,9 +428,10 @@ class Trainer:
             "grad_norm": grad_norm.item(),
         }
 
-
     def save_checkpoint(
-        self, iteration: int, env_steps: int,
+        self,
+        iteration: int,
+        env_steps: int,
     ) -> None:
         """Save a training checkpoint.
 
@@ -441,9 +453,7 @@ class Trainer:
             "ema_state_dict": self.ema_model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": (
-                self.scheduler.state_dict()
-                if self.scheduler is not None
-                else None
+                self.scheduler.state_dict() if self.scheduler is not None else None
             ),
             "curriculum_state": self.collector.curriculum.state_dict(),
             "iteration": iteration,
@@ -461,15 +471,15 @@ class Trainer:
             logger.info(f"Checkpoint saved: {path}")
         except Exception:
             logger.error(
-                f"Failed to save checkpoint to {path}", exc_info=True,
+                f"Failed to save checkpoint to {path}",
+                exc_info=True,
             )
 
         # Save config snapshot alongside checkpoint
         config_path = ckpt_dir / f"config_iter{iteration}.yaml"
         try:
             cfg_dict = {
-                k: v for k, v in vars(self.cfg).items()
-                if not k.startswith("_")
+                k: v for k, v in vars(self.cfg).items() if not k.startswith("_")
             }
             with open(config_path, "w") as f:
                 yaml.dump(cfg_dict, f, default_flow_style=False)
@@ -481,22 +491,30 @@ class Trainer:
         try:
             eval_model = self.ema_model.make_eval_model(self._raw_model)
             id_results = self.evaluator.evaluate(
-                self.cfg.id_envs, eval_model,
+                self.cfg.id_envs,
+                eval_model,
                 self.cfg.checkpoint_eval_episodes,
-                self.cfg, self.device,
+                self.cfg,
+                self.device,
             )
             ood_results = self.evaluator.evaluate(
-                self.cfg.ood_envs, eval_model,
+                self.cfg.ood_envs,
+                eval_model,
                 self.cfg.checkpoint_eval_episodes,
-                self.cfg, self.device,
+                self.cfg,
+                self.device,
             )
 
-            id_winrate = float(np.mean(
-                [s["win_rate"] for s in id_results.values()]
-            )) if id_results else 0.0
-            ood_winrate = float(np.mean(
-                [s["win_rate"] for s in ood_results.values()]
-            )) if ood_results else 0.0
+            id_winrate = (
+                float(np.mean([s["win_rate"] for s in id_results.values()]))
+                if id_results
+                else 0.0
+            )
+            ood_winrate = (
+                float(np.mean([s["win_rate"] for s in ood_results.values()]))
+                if ood_results
+                else 0.0
+            )
             current_lr = (
                 self.scheduler.get_last_lr()[0]
                 if self.scheduler is not None
@@ -549,10 +567,14 @@ class Trainer:
 
             # W&B checkpoint log — per-env step metrics + aggregates
             self.log.log_eval(
-                id_results, step=iteration, prefix="ckpt_eval_id",
+                id_results,
+                step=iteration,
+                prefix="ckpt_eval_id",
             )
             self.log.log_eval(
-                ood_results, step=iteration, prefix="ckpt_eval_ood",
+                ood_results,
+                step=iteration,
+                prefix="ckpt_eval_ood",
             )
             self.log.log(
                 {
@@ -561,16 +583,19 @@ class Trainer:
                 },
                 step=iteration,
             )
-            self.log.log_summary({
-                f"ckpt_{iteration}/id_winrate": id_winrate,
-                f"ckpt_{iteration}/ood_winrate": ood_winrate,
-            })
+            self.log.log_summary(
+                {
+                    f"ckpt_{iteration}/id_winrate": id_winrate,
+                    f"ckpt_{iteration}/ood_winrate": ood_winrate,
+                }
+            )
         except Exception:
             logger.error("Checkpoint eval failed", exc_info=True)
 
         # HuggingFace Hub upload (no-op if HF_TOKEN or hub_run_id not set)
         try:
             from scripts.hf_upload import maybe_upload_checkpoint
+
             maybe_upload_checkpoint(
                 str(ckpt_dir),
                 getattr(self.cfg, "hub_run_id", None),
@@ -601,16 +626,15 @@ class Trainer:
             cumulative env-step count to resume from.
         """
         ckpt = torch.load(
-            path, map_location=self.device, weights_only=False,
+            path,
+            map_location=self.device,
+            weights_only=False,
         )
         self._raw_model.load_state_dict(ckpt["model_state_dict"])
         self.ema_model.load_state_dict(ckpt["ema_state_dict"])
         self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
 
-        if (
-            self.scheduler is not None
-            and ckpt.get("scheduler_state_dict") is not None
-        ):
+        if self.scheduler is not None and ckpt.get("scheduler_state_dict") is not None:
             self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
 
         if "curriculum_state" in ckpt:
@@ -663,13 +687,16 @@ def run_dagger(
     model = try_compile(raw_model, cfg)
 
     optimizer = torch.optim.AdamW(
-        raw_model.parameters(), lr=cfg.dagger_lr,
+        raw_model.parameters(),
+        lr=cfg.dagger_lr,
         weight_decay=cfg.weight_decay,
     )
 
     buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)
     curriculum = DynamicCurriculum(
-        cfg.id_envs, cfg.curriculum_queue_size, cfg.curriculum_preseed,
+        cfg.id_envs,
+        cfg.curriculum_queue_size,
+        cfg.curriculum_preseed,
     )
 
     # Seed buffer with some oracle data
@@ -686,14 +713,14 @@ def run_dagger(
         resume_id = getattr(cfg, "wandb_resume_id", None)
         if not resume_id:
             ckpt_peek = torch.load(
-                checkpoint_path, map_location="cpu", weights_only=False,
+                checkpoint_path,
+                map_location="cpu",
+                weights_only=False,
             )
             saved_id = ckpt_peek.get("wandb_run_id")
             if saved_id:
                 cfg.wandb_resume_id = saved_id
-                logger.info(
-                    f"W&B run ID from checkpoint: {saved_id}"
-                )
+                logger.info(f"W&B run ID from checkpoint: {saved_id}")
             del ckpt_peek
 
     # DataCollector uses raw_model for eval copies (not compiled)
@@ -702,8 +729,17 @@ def run_dagger(
     log = Logger(cfg)
 
     trainer = Trainer(
-        model, ema, optimizer, None, buffer, collector,
-        evaluator, log, cfg, device, raw_model=raw_model,
+        model,
+        ema,
+        optimizer,
+        None,
+        buffer,
+        collector,
+        evaluator,
+        log,
+        cfg,
+        device,
+        raw_model=raw_model,
     )
 
     start_iter = 0
@@ -714,6 +750,7 @@ def run_dagger(
         )
 
     trainer.train(
-        start_iter=start_iter, start_env_steps=start_env_steps,
+        start_iter=start_iter,
+        start_env_steps=start_env_steps,
     )
     log.finish()

@@ -27,8 +27,6 @@ logger = logging.getLogger(__name__)
 logging.getLogger("nle.env.base").setLevel(logging.WARNING)
 
 
-
-
 _nhdat_patch_checked = False
 
 
@@ -48,9 +46,7 @@ def _patch_nhdat_py(self, des_file: str) -> None:
 
     des_path = os.path.abspath(des_file)
     if not os.path.exists(des_path):
-        des_path = os.path.abspath(
-            os.path.join(mh_base.PATH_DAT_DIR, des_file)
-        )
+        des_path = os.path.abspath(os.path.join(mh_base.PATH_DAT_DIR, des_file))
     if not os.path.exists(des_path):
         raise FileNotFoundError(f"des file not found: {des_path}")
 
@@ -61,15 +57,14 @@ def _patch_nhdat_py(self, des_file: str) -> None:
 
     shutil.copy(des_path, libdir / "mylevel.des")
     _run_nethack_tool(
-        [os.path.join(mh_base.HACKDIR, "lev_comp"), "mylevel.des"], libdir,
+        [os.path.join(mh_base.HACKDIR, "lev_comp"), "mylevel.des"],
+        libdir,
     )
     (libdir / "mylevel.des").unlink()
 
     # Bash `*` skips dotfiles and sorts; match that so the archive contents
     # are identical to the shell implementation's.
-    contents = sorted(
-        p.name for p in libdir.iterdir() if not p.name.startswith(".")
-    )
+    contents = sorted(p.name for p in libdir.iterdir() if not p.name.startswith("."))
     _run_nethack_tool(
         [os.path.join(mh_base.HACKDIR, "dlb"), "cf", "nhdat", *contents],
         libdir,
@@ -80,7 +75,11 @@ def _patch_nhdat_py(self, des_file: str) -> None:
 def _run_nethack_tool(cmd: list[str], cwd: Path) -> None:
     """Run a NetHack build tool, surfacing its output when it fails."""
     result = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True, check=False,
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -118,8 +117,6 @@ def _ensure_nhdat_patch_works() -> None:
     )
 
 
-
-
 def find_staircase_from_glyphs(global_obs: np.ndarray) -> np.ndarray:
     """Locate the staircase '>' in the global glyph map.
 
@@ -147,8 +144,6 @@ def find_staircase_from_glyphs(global_obs: np.ndarray) -> np.ndarray:
             coords[b, 0] = positions[0, 0] / max(1, H - 1)
             coords[b, 1] = positions[0, 1] / max(1, W - 1)
     return coords
-
-
 
 
 class AdvancedObservationEnv(gym.Env):
@@ -191,11 +186,13 @@ class AdvancedObservationEnv(gym.Env):
             )
         else:
             self._inner = gym.make(
-                env_id, observation_keys=obs_keys,
+                env_id,
+                observation_keys=obs_keys,
             )
 
         self.observation_space = gym.spaces.Box(
-            low=0, high=6000,
+            low=0,
+            high=6000,
             shape=(cfg.crop_size, cfg.crop_size),
             dtype=np.int16,
         )
@@ -205,9 +202,10 @@ class AdvancedObservationEnv(gym.Env):
         self._prev_bfs_dist: int | None = None
         self.last_raw_obs: dict | None = None
 
-
     def reset(
-        self, seed: int | None = None, options: dict | None = None,
+        self,
+        seed: int | None = None,
+        options: dict | None = None,
     ) -> tuple[tuple[np.ndarray, np.ndarray], dict]:
         """Reset environment and tracking state.
 
@@ -236,7 +234,8 @@ class AdvancedObservationEnv(gym.Env):
         return self._get_obs(obs), info
 
     def step(
-        self, action: int,
+        self,
+        action: int,
     ) -> tuple[tuple[np.ndarray, np.ndarray], float, bool, bool, dict]:
         """Execute one environment step with shaped reward.
 
@@ -293,9 +292,9 @@ class AdvancedObservationEnv(gym.Env):
         """Close the inner environment."""
         self._inner.close()
 
-
     def _get_obs(
-        self, obs: dict,
+        self,
+        obs: dict,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract dual-stream observation.
 
@@ -325,10 +324,12 @@ class AdvancedObservationEnv(gym.Env):
         y, x = agent_pos[0]
         h = self._crop_half
         padded = np.pad(
-            glyphs, h, mode="constant",
+            glyphs,
+            h,
+            mode="constant",
             constant_values=self._cfg.pad_token,
         )
-        return padded[y:y + cs, x:x + cs].astype(np.int16)
+        return padded[y : y + cs, x : x + cs].astype(np.int16)
 
     def _get_agent_pos(self, obs: dict) -> tuple[int, int] | None:
         """Find agent '@' position in the chars grid.
@@ -378,7 +379,6 @@ class AdvancedObservationEnv(gym.Env):
                     visited.add((nr, nc))
                     queue.append(((nr, nc), dist + 1))
         return None
-
 
     def get_oracle_action(self, obs: dict) -> int:
         """5-tier BFS oracle action.
@@ -475,8 +475,6 @@ class AdvancedObservationEnv(gym.Env):
         return np.random.randint(0, 4)
 
 
-
-
 def make_env(
     env_id: str,
     des_file: str | None,
@@ -524,9 +522,7 @@ def collect_oracle_trajectory(
         for _ in range(max_steps):
             action = env.get_oracle_action(env.last_raw_obs)
             actions_list.append(action)
-            (local, glb), _reward, terminated, truncated, _info = env.step(
-                action
-            )
+            (local, glb), _reward, terminated, truncated, _info = env.step(action)
             locals_list.append(local)
             globals_list.append(glb)
             if terminated or truncated:

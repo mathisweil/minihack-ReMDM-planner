@@ -68,7 +68,8 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
 
         self.action_emb = nn.Embedding(action_dim + 2, n_embd)
         self.timestep_emb = nn.Embedding(
-            cfg.num_diffusion_steps, n_embd,
+            cfg.num_diffusion_steps,
+            n_embd,
         )
         self.pos_emb = nn.Embedding(seq_len, n_embd)
 
@@ -82,7 +83,9 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
             batch_first=True,
         )
         self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=n_layer, enable_nested_tensor=False,
+            encoder_layer,
+            num_layers=n_layer,
+            enable_nested_tensor=False,
         )
         self.head = nn.Linear(n_embd, action_dim)
 
@@ -95,9 +98,7 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
         )
         self.global_pool = nn.AdaptiveAvgPool2d((2, 4))
         self.global_proj = nn.Linear(64, n_embd)
-        self.global_gate = nn.Parameter(
-            torch.tensor(cfg.global_gate_init)
-        )
+        self.global_gate = nn.Parameter(torch.tensor(cfg.global_gate_init))
 
         self.goal_head = nn.Sequential(
             nn.Linear(n_embd, 128),
@@ -139,28 +140,32 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
         gf = self.global_cnn(x_global)  # [B, 64, H', W']
         gf = self.global_pool(gf)  # [B, 64, 2, 4]
         global_tokens = gf.permute(0, 2, 3, 1)  # [B, 2, 4, 64]
-        global_tokens = global_tokens.reshape(
-            B, self.n_global_tokens, -1
-        )  # [B, 8, 64]
+        global_tokens = global_tokens.reshape(B, self.n_global_tokens, -1)  # [B, 8, 64]
         global_tokens = self.global_proj(global_tokens)  # [B, 8, n_embd]
 
         # Aux goal head (before gate for direct gradient to CNN)
-        goal_pred = self.goal_head(
-            global_tokens.mean(dim=1)
-        )  # [B, 2]
+        goal_pred = self.goal_head(global_tokens.mean(dim=1))  # [B, 2]
 
         # Apply gate
         gate = torch.sigmoid(self.global_gate)
         global_tokens = global_tokens * gate  # [B, 8, n_embd]
 
         # Action stream -> [B, seq_len, n_embd]
-        positions = torch.arange(
-            Seq, device=device,
-        ).unsqueeze(0).expand(B, -1)  # [B, seq_len]
+        positions = (
+            torch.arange(
+                Seq,
+                device=device,
+            )
+            .unsqueeze(0)
+            .expand(B, -1)
+        )  # [B, seq_len]
 
         if isinstance(t_discrete, int):
             t_tensor = torch.full(
-                (B,), t_discrete, dtype=torch.long, device=device,
+                (B,),
+                t_discrete,
+                dtype=torch.long,
+                device=device,
             )
         else:
             t_tensor = t_discrete.long().to(device)
@@ -173,7 +178,8 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
 
         # Concatenate: [local(1), global(8), actions(seq_len)]
         x = torch.cat(
-            [local_token, global_tokens, seq_emb], dim=1,
+            [local_token, global_tokens, seq_emb],
+            dim=1,
         )  # [B, 1+8+seq_len, n_embd]
 
         # Transformer
@@ -181,9 +187,7 @@ class LocalDiffusionPlannerWithGlobal(nn.Module):
 
         # Take last seq_len tokens for action predictions
         n_prefix = 1 + self.n_global_tokens
-        action_logits = self.head(
-            out[:, n_prefix:, :]
-        )  # [B, seq_len, action_dim]
+        action_logits = self.head(out[:, n_prefix:, :])  # [B, seq_len, action_dim]
 
         return {"actions": action_logits, "goal_pred": goal_pred}
 
@@ -223,7 +227,8 @@ class LocalDiffusionPlanner(nn.Module):
             batch_first=True,
         )
         self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=cfg.n_layer,
+            encoder_layer,
+            num_layers=cfg.n_layer,
         )
         self.head = nn.Linear(n_embd, action_dim)
 
@@ -251,13 +256,21 @@ class LocalDiffusionPlanner(nn.Module):
         x_state = self.embedding(local_obs).permute(0, 3, 1, 2)
         state_emb = self.cnn(x_state).unsqueeze(1)  # [B, 1, n_embd]
 
-        positions = torch.arange(
-            Seq, device=device,
-        ).unsqueeze(0).expand(B, -1)
+        positions = (
+            torch.arange(
+                Seq,
+                device=device,
+            )
+            .unsqueeze(0)
+            .expand(B, -1)
+        )
 
         if isinstance(t_discrete, int):
             t_tensor = torch.full(
-                (B,), t_discrete, dtype=torch.long, device=device,
+                (B,),
+                t_discrete,
+                dtype=torch.long,
+                device=device,
             )
         else:
             t_tensor = t_discrete.long().to(device)
@@ -270,8 +283,6 @@ class LocalDiffusionPlanner(nn.Module):
         x = torch.cat([state_emb, seq_emb], dim=1)
         out = self.transformer(x)
         return {"actions": self.head(out[:, 1:, :])}
-
-
 
 
 def make_model(cfg: SimpleNamespace) -> nn.Module:
@@ -296,6 +307,7 @@ def _has_c_compiler() -> bool:
     then falls back to ``cc`` and ``gcc`` on ``PATH``.
     """
     import os
+
     cc_env = os.environ.get("CC")
     if cc_env and shutil.which(cc_env):
         return True
@@ -330,8 +342,6 @@ def try_compile(model: nn.Module, cfg: SimpleNamespace) -> nn.Module:
     return torch.compile(model, mode="default")  # type: ignore[return-value]
 
 
-
-
 class ModelEMA:
     """Exponential moving average of model parameters.
 
@@ -358,7 +368,8 @@ class ModelEMA:
         """
         for name, param in model.named_parameters():
             self._shadow[name].mul_(self._decay).add_(
-                param.data, alpha=1.0 - self._decay,
+                param.data,
+                alpha=1.0 - self._decay,
             )
 
     def apply_to(self, model: nn.Module) -> None:

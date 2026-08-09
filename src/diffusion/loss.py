@@ -90,7 +90,8 @@ def mdlm_loss(
         schedule_deriv_fn = get_schedule_deriv_for(schedule_fn)
     alpha_t = schedule_fn(t)  # [B]
     w_t = (-schedule_deriv_fn(t)) / torch.clamp(
-        1.0 - alpha_t, min=1e-5,
+        1.0 - alpha_t,
+        min=1e-5,
     )  # [B]
     w_t = torch.clamp(w_t, max=weight_clip)  # [B]
 
@@ -119,7 +120,7 @@ def auxiliary_goal_loss(
     targets = targets.to(goal_pred.device, dtype=goal_pred.dtype)
 
     # Only supervise where staircase is visible
-    valid = (targets[:, 0] != pad_value)  # [B]
+    valid = targets[:, 0] != pad_value  # [B]
     if not valid.any():
         return goal_pred.new_tensor(0.0)
 
@@ -153,9 +154,7 @@ def find_staircase_from_glyphs(global_obs: Tensor) -> Tensor:
         | (global_obs == 2383)
     )
 
-    coords = torch.full(
-        (B, 2), -1.0, dtype=torch.float32, device=global_obs.device
-    )
+    coords = torch.full((B, 2), -1.0, dtype=torch.float32, device=global_obs.device)
     for b in range(B):
         positions = is_stair[b].nonzero(as_tuple=False)  # [N, 2]
         if positions.shape[0] > 0:
