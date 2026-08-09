@@ -511,13 +511,10 @@ def _save_offline_checkpoint(
 
     # Save config snapshot alongside checkpoint (mirrors DAgger).
     config_path: Path | None = ckpt_dir / f"config_offline_step{step}.yaml"
-    try:
-        cfg_dict = {k: v for k, v in vars(cfg).items() if not k.startswith("_")}
-        with open(config_path, "w") as f:
-            yaml.dump(cfg_dict, f, default_flow_style=False)
-    except Exception:
-        logger.error("Failed to save config snapshot", exc_info=True)
-        config_path = None
+    # FIX-B3: snapshot failures raise (see online.py counterpart).
+    cfg_dict = {k: v for k, v in vars(cfg).items() if not k.startswith("_")}
+    with open(config_path, "w") as f:
+        yaml.dump(cfg_dict, f, default_flow_style=False)
 
     # Checkpoint-time eval — mirrors Trainer.save_checkpoint in online.py.
     # Skipped when the caller did not thread an evaluator through.
@@ -615,10 +612,9 @@ def _save_offline_checkpoint(
                     }
                 )
         except Exception:
-            logger.error(
-                "Offline checkpoint eval failed",
-                exc_info=True,
-            )
+            # FIX-B3: selection integrity (see online.py counterpart).
+            logger.error("Offline checkpoint eval failed", exc_info=True)
+            raise
 
     # W&B artifact upload (no-op when wandb is not initialised).
     if log is not None:

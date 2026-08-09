@@ -29,6 +29,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# FIX-B2: a missing oracle trajectory masquerades as oracle_steps=999, so a
+# persistently failing oracle silently removes all DAgger supervision while
+# training keeps running. Halt after this many consecutive failures.
+_MAX_CONSECUTIVE_ORACLE_FAILURES = 10
+
 
 @torch.no_grad()
 def run_model_episode(
@@ -237,7 +242,8 @@ class DataCollector:
         self.curriculum = curriculum
         self.cfg = cfg
         self.device = device
-        self._num_workers = getattr(cfg, "num_collection_workers", 0)  # fallback 0 != defaults.yaml (8); partial-config callers rely on it
+        self._num_workers = getattr(cfg, "num_collection_workers", 0)
+        self._oracle_failure_streak = 0  # fallback 0 != defaults.yaml (8); partial-config callers rely on it
         self._last_profile: dict[str, float] = {}
         self._thread_pool: ThreadPoolExecutor | None = None
         self._thread_models: list[torch.nn.Module] = []
@@ -254,6 +260,24 @@ class DataCollector:
         """Copy latest EMA shadow weights into the eval model."""
         self._ema.apply_to(self.ema_model)
         self.ema_model.eval()
+
+    def _note_oracle_result(self, oracle_result, env_id: str) -> None:
+        """FIX-B2: raise once the oracle fails persistently."""
+        if oracle_result is not None:
+            self._oracle_failure_streak = 0
+            return
+        self._oracle_failure_streak += 1
+        logger.warning(
+            "Oracle trajectory missing for %s (%d consecutive failures)",
+            env_id,
+            self._oracle_failure_streak,
+        )
+        if self._oracle_failure_streak >= _MAX_CONSECUTIVE_ORACLE_FAILURES:
+            raise RuntimeError(
+                f"BFS oracle failed {self._oracle_failure_streak} consecutive "
+                f"times (last env {env_id}); DAgger would continue without "
+                "supervision - halting."
+            )
 
     def collect_one_iteration(self) -> dict:
         """Run one DAgger collection iteration (single episode).
@@ -282,6 +306,7 @@ class DataCollector:
             seed,
             self.cfg,
         )
+        self._note_oracle_result(oracle_result, env_id)
         oracle_steps = len(oracle_result["actions"]) if oracle_result else 999
 
         # Efficiency filter
@@ -362,6 +387,7 @@ class DataCollector:
             if res is None:
                 continue
 
+            self._note_oracle_result(res["oracle_result"], res["env_id"])
             add = efficiency_filter(
                 res["model_won"],
                 res["model_steps"],
@@ -437,6 +463,7 @@ class DataCollector:
             model_results,
             oracle_results, strict=False,
         ):
+            self._note_oracle_result(o_res, env_id)
             oracle_steps = len(o_res["actions"]) if o_res else 999
             add = efficiency_filter(
                 m_res["won"],

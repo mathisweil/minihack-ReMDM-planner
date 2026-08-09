@@ -459,26 +459,20 @@ class Trainer:
             },
         }
 
-        try:
-            torch.save(state, path)
-            logger.info(f"Checkpoint saved: {path}")
-        except Exception:
-            logger.error(
-                f"Failed to save checkpoint to {path}",
-                exc_info=True,
-            )
+        # FIX-B3: a failed save must halt the run, not let hours of
+        # training finish with no usable checkpoint.
+        torch.save(state, path)
+        logger.info(f"Checkpoint saved: {path}")
 
         # Save config snapshot alongside checkpoint
         config_path = ckpt_dir / f"config_iter{iteration}.yaml"
-        try:
-            cfg_dict = {
-                k: v for k, v in vars(self.cfg).items() if not k.startswith("_")
-            }
-            with open(config_path, "w") as f:
-                yaml.dump(cfg_dict, f, default_flow_style=False)
-        except Exception:
-            logger.error("Failed to save config snapshot", exc_info=True)
-            config_path = None
+        # FIX-B3: the snapshot backs the evaluate-with-snapshot workflow;
+        # a checkpoint without one is a defect, so failures raise.
+        cfg_dict = {
+            k: v for k, v in vars(self.cfg).items() if not k.startswith("_")
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(cfg_dict, f, default_flow_style=False)
 
         # Run eval at checkpoint and save JSON
         try:
@@ -583,7 +577,11 @@ class Trainer:
                 }
             )
         except Exception:
+            # FIX-B3: best-checkpoint selection reads these evals; a
+            # silently skipped eval biases selection toward the
+            # checkpoints whose eval happened to succeed.
             logger.error("Checkpoint eval failed", exc_info=True)
+            raise
 
         # HuggingFace Hub upload (no-op if HF_TOKEN or hub_run_id not set)
         try:
@@ -635,19 +633,28 @@ class Trainer:
                 ckpt["curriculum_state"],
             )
 
-        # Restore RNG states (best-effort)
+        # FIX-B4: a resume that cannot restore the saved RNG state would
+        # silently continue with fresh randomness while claiming to be a
+        # resume, corrupting the seed provenance the interval estimates
+        # depend on. Present-but-unusable state raises; absent state
+        # (pre-rng_states checkpoints) warns.
         rng = ckpt.get("rng_states", {})
-        try:
-            if "torch" in rng:
-                torch.set_rng_state(rng["torch"])
-            if "numpy" in rng:
-                np.random.set_state(rng["numpy"])
-            if "python" in rng:
-                random.setstate(rng["python"])
-        except Exception:
+        if not rng:
             logger.warning(
-                "RNG state restore failed; continuing with fresh state",
+                "Checkpoint has no rng_states (pre-provenance format); "
+                "resuming with fresh RNG state",
             )
+        else:
+            try:
+                torch.set_rng_state(rng["torch"])
+                np.random.set_state(rng["numpy"])
+                random.setstate(rng["python"])
+            except Exception as err:
+                raise RuntimeError(
+                    f"Checkpoint {path} carries rng_states that could not "
+                    "be restored; refusing to resume with fresh RNG. "
+                    "Retrain or resume from an intact checkpoint."
+                ) from err
 
         iteration = ckpt.get("iteration", 0)
         env_steps = ckpt.get("env_steps", 0)
