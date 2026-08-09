@@ -160,22 +160,14 @@ class Evaluator:
         )
         failed = np.zeros(n, dtype=bool)
 
+        # FIX-B1: env-creation failures raise instead of silently counting
+        # the episode as a loss, which deflated eval metrics.
         for i in range(n):
-            try:
-                env = make_env(env_id, des_content, cfg)
-                (local, glb), _ = env.reset(seed=seeds[i])
-                envs.append(env)
-                cur_local[i] = local
-                cur_global[i] = glb
-            except Exception:
-                logger.warning(
-                    "Failed to create env %s (ep %d)",
-                    env_id,
-                    i,
-                    exc_info=True,
-                )
-                envs.append(None)
-                failed[i] = True
+            env = make_env(env_id, des_content, cfg)
+            (local, glb), _ = env.reset(seed=seeds[i])
+            envs.append(env)
+            cur_local[i] = local
+            cur_global[i] = glb
 
         # Per-episode state vectors
         plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
@@ -244,24 +236,17 @@ class Evaluator:
                     if step_in_plan[i] >= cfg.replan_every:
                         need_replan[i] = True
 
-                    try:
-                        obs, reward, term, trunc, info = envs[i].step(action)
-                        local, glb = obs
-                        total_reward[i] += reward
-                        cur_local[i] = local
-                        cur_global[i] = glb
+                    # FIX-B1: step failures raise instead of ending the
+                    # episode as a silent loss.
+                    obs, reward, term, trunc, info = envs[i].step(action)
+                    local, glb = obs
+                    total_reward[i] += reward
+                    cur_local[i] = local
+                    cur_global[i] = glb
 
-                        if info.get("won", False):
-                            won[i] = True
-                        if term or trunc:
-                            done[i] = True
-                    except Exception:
-                        logger.warning(
-                            "Episode %d step failed for %s",
-                            i,
-                            env_id,
-                            exc_info=True,
-                        )
+                    if info.get("won", False):
+                        won[i] = True
+                    if term or trunc:
                         done[i] = True
 
                 if not any_active:
