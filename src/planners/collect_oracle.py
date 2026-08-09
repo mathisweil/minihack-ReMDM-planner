@@ -105,8 +105,8 @@ def run_collect(cfg: SimpleNamespace) -> None:
             tasks.append((env_id, seed, cfg))
 
     trajectories: list[dict] = []
-    per_env_count: dict[str, int] = {eid: 0 for eid in id_envs}
-    per_env_steps: dict[str, int] = {eid: 0 for eid in id_envs}
+    per_env_count: dict[str, int] = dict.fromkeys(id_envs, 0)
+    per_env_steps: dict[str, int] = dict.fromkeys(id_envs, 0)
     failures = 0
     completed = 0
     t_start = time.perf_counter()
