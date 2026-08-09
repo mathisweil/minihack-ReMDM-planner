@@ -15,12 +15,11 @@ Key differences:
 
 from __future__ import annotations
 
-import torch
-
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Callable
 
+import torch
 import torch.nn as nn
 
 from experiments.rl_finetuning.ablations.losses import (
@@ -99,45 +98,44 @@ class AblationSpec:
     reward_model_weighting: bool = False
 
 
-# ---------------------------------------------------------------------------
-# Optimizer factory helpers (PyTorch parameter names)
-# ---------------------------------------------------------------------------
-
-
-def _std_opt(cfg: SimpleNamespace, model: nn.Module) -> "torch.optim.Optimizer":
+def _std_opt(cfg: SimpleNamespace, model: nn.Module) -> torch.optim.Optimizer:
     """Standard AdamW for all parameters."""
     return make_optimizer_standard(cfg, model)
 
 
-def _llrd_opt(cfg: SimpleNamespace, model: nn.Module) -> "torch.optim.Optimizer":
+def _llrd_opt(cfg: SimpleNamespace, model: nn.Module) -> torch.optim.Optimizer:
     """AdamW with layer-wise learning rate decay."""
     return make_optimizer_llrd(cfg, model)
 
 
 def _frozen_backbone_opt(
-    cfg: SimpleNamespace, model: nn.Module,
-) -> "torch.optim.Optimizer":
+    cfg: SimpleNamespace,
+    model: nn.Module,
+) -> torch.optim.Optimizer:
     """Freeze backbone, train only the action head."""
     return make_optimizer_frozen(cfg, model, FROZEN_BACKBONE)
 
 
 def _head_only_opt(
-    cfg: SimpleNamespace, model: nn.Module,
-) -> "torch.optim.Optimizer":
+    cfg: SimpleNamespace,
+    model: nn.Module,
+) -> torch.optim.Optimizer:
     """Freeze everything except the action head."""
     return make_optimizer_frozen(cfg, model, FROZEN_BACKBONE)
 
 
 def _attention_only_opt(
-    cfg: SimpleNamespace, model: nn.Module,
-) -> "torch.optim.Optimizer":
+    cfg: SimpleNamespace,
+    model: nn.Module,
+) -> torch.optim.Optimizer:
     """Freeze everything except attention sublayers."""
     return make_optimizer_frozen(cfg, model, FROZEN_EXCEPT_ATTENTION)
 
 
 def _ffn_only_opt(
-    cfg: SimpleNamespace, model: nn.Module,
-) -> "torch.optim.Optimizer":
+    cfg: SimpleNamespace,
+    model: nn.Module,
+) -> torch.optim.Optimizer:
     """Freeze everything except FFN sublayers."""
     return make_optimizer_frozen(cfg, model, FROZEN_EXCEPT_FFN)
 
@@ -146,14 +144,22 @@ def _layer_ablation_top_n_opt(n: int) -> OptimizerFactory:
     """Factory: freeze all transformer layers except the top *n*."""
 
     def _opt(
-        cfg: SimpleNamespace, model: nn.Module,
-    ) -> "torch.optim.Optimizer":
+        cfg: SimpleNamespace,
+        model: nn.Module,
+    ) -> torch.optim.Optimizer:
         n_layers = getattr(cfg, "n_layer", 4)
         frozen: list[str] = [
-            "embedding.", "cnn.",
-            "global_embedding.", "global_cnn.", "global_pool.",
-            "global_proj.", "global_gate", "goal_head.",
-            "action_emb.", "timestep_emb.", "pos_emb.",
+            "embedding.",
+            "cnn.",
+            "global_embedding.",
+            "global_cnn.",
+            "global_pool.",
+            "global_proj.",
+            "global_gate",
+            "goal_head.",
+            "action_emb.",
+            "timestep_emb.",
+            "pos_emb.",
         ]
         for i in range(n_layers - n):
             frozen.append(f"transformer.layers.{i}.")
@@ -162,19 +168,13 @@ def _layer_ablation_top_n_opt(n: int) -> OptimizerFactory:
     return _opt
 
 
-# ---------------------------------------------------------------------------
-# Registry: 25 ablations
-# ---------------------------------------------------------------------------
-
 REGISTRY: dict[str, AblationSpec] = {
     # -- Baseline ----------------------------------------------------------
     "baseline_rl": AblationSpec(
         name="baseline_rl",
         group="Baseline",
         description="Return-weighted ELBO -- no modifications",
-        hypothesis=(
-            "Diagnoses whether the RL signal alone causes collapse"
-        ),
+        hypothesis=("Diagnoses whether the RL signal alone causes collapse"),
         loss_factory=make_loss_baseline,
         optimizer_factory=_std_opt,
     ),
@@ -194,12 +194,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="ewc",
         group="A",
         description=(
-            "ELBO + Elastic Weight Consolidation "
-            "(Fisher diagonal regularisation)"
+            "ELBO + Elastic Weight Consolidation (Fisher diagonal regularisation)"
         ),
         hypothesis=(
-            "If EWC helps: forgetting pretrained representations is "
-            "the proximate cause"
+            "If EWC helps: forgetting pretrained representations is the proximate cause"
         ),
         loss_factory=make_loss_ewc,
         optimizer_factory=_std_opt,
@@ -219,12 +217,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="lora",
         group="A",
         description=(
-            "Baseline ELBO with LoRA adaptation "
-            "(rank-r attention projections only)"
+            "Baseline ELBO with LoRA adaptation (rank-r attention projections only)"
         ),
         hypothesis=(
-            "If LoRA works: too many unconstrained degrees of freedom "
-            "cause collapse"
+            "If LoRA works: too many unconstrained degrees of freedom cause collapse"
         ),
         loss_factory=make_loss_baseline,
         optimizer_factory=_std_opt,
@@ -233,12 +229,9 @@ REGISTRY: dict[str, AblationSpec] = {
     "mixed_replay": AblationSpec(
         name="mixed_replay",
         group="A",
-        description=(
-            "Baseline ELBO with offline data mixed into online batches"
-        ),
+        description=("Baseline ELBO with offline data mixed into online batches"),
         hypothesis=(
-            "If mixed replay helps: online data distribution alone "
-            "is too corrupted"
+            "If mixed replay helps: online data distribution alone is too corrupted"
         ),
         loss_factory=make_loss_mixed_replay,
         optimizer_factory=_std_opt,
@@ -247,9 +240,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "trust_region_kl": AblationSpec(
         name="trust_region_kl",
         group="A",
-        description=(
-            "Baseline ELBO + hard KL trust region via quadratic barrier"
-        ),
+        description=("Baseline ELBO + hard KL trust region via quadratic barrier"),
         hypothesis=(
             "If hard constraint helps: soft KL is insufficient -- "
             "a hard boundary is needed"
@@ -261,12 +252,8 @@ REGISTRY: dict[str, AblationSpec] = {
     "t_curriculum": AblationSpec(
         name="t_curriculum",
         group="B",
-        description=(
-            "ELBO with t range annealed from high-t to low-t over training"
-        ),
-        hypothesis=(
-            "If curriculum helps: ordering of learning signals matters"
-        ),
+        description=("ELBO with t range annealed from high-t to low-t over training"),
+        hypothesis=("If curriculum helps: ordering of learning signals matters"),
         loss_factory=make_loss_t_curriculum,
         optimizer_factory=_std_opt,
         t_curriculum=True,
@@ -274,13 +261,9 @@ REGISTRY: dict[str, AblationSpec] = {
     "entropy_bonus": AblationSpec(
         name="entropy_bonus",
         group="B",
-        description=(
-            "Baseline ELBO minus entropy bonus "
-            "(encourages action diversity)"
-        ),
+        description=("Baseline ELBO minus entropy bonus (encourages action diversity)"),
         hypothesis=(
-            "If entropy bonus helps: collapse is mode-collapse; "
-            "not a gradient problem"
+            "If entropy bonus helps: collapse is mode-collapse; not a gradient problem"
         ),
         loss_factory=make_loss_entropy_bonus,
         optimizer_factory=_std_opt,
@@ -289,12 +272,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="gradient_surgery",
         group="B",
         description=(
-            "PCGrad: RL gradient projected to remove conflict "
-            "with BC gradient"
+            "PCGrad: RL gradient projected to remove conflict with BC gradient"
         ),
         hypothesis=(
-            "If PCGrad helps: gradients are conflicting and "
-            "resolvable by projection"
+            "If PCGrad helps: gradients are conflicting and resolvable by projection"
         ),
         loss_factory=make_loss_gradient_surgery,
         optimizer_factory=_std_opt,
@@ -304,12 +285,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="advantage_clip",
         group="B",
         description=(
-            "Baseline ELBO with PPO-style advantage clipping "
-            "to [1-eps, 1+eps]"
+            "Baseline ELBO with PPO-style advantage clipping to [1-eps, 1+eps]"
         ),
         hypothesis=(
-            "If clipping helps: large advantage magnitudes "
-            "destabilise training"
+            "If clipping helps: large advantage magnitudes destabilise training"
         ),
         loss_factory=make_loss_advantage_clip,
         optimizer_factory=_std_opt,
@@ -318,12 +297,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="normalized_adv",
         group="B",
         description=(
-            "Baseline ELBO with (A - mean) / (std + eps) "
-            "advantage normalisation"
+            "Baseline ELBO with (A - mean) / (std + eps) advantage normalisation"
         ),
         hypothesis=(
-            "If std normalisation helps: simple mean normalisation "
-            "is too loose"
+            "If std normalisation helps: simple mean normalisation is too loose"
         ),
         loss_factory=make_loss_normalized_adv,
         optimizer_factory=_std_opt,
@@ -331,13 +308,8 @@ REGISTRY: dict[str, AblationSpec] = {
     "bc_wins": AblationSpec(
         name="bc_wins",
         group="B",
-        description=(
-            "Uniform ELBO on win windows only (no advantage weighting)"
-        ),
-        hypothesis=(
-            "If BC on wins helps: the return weighting is "
-            "the specific cause"
-        ),
+        description=("Uniform ELBO on win windows only (no advantage weighting)"),
+        hypothesis=("If BC on wins helps: the return weighting is the specific cause"),
         loss_factory=make_loss_bc_wins,
         optimizer_factory=_std_opt,
         wins_only=True,
@@ -345,14 +317,8 @@ REGISTRY: dict[str, AblationSpec] = {
     "low_t": AblationSpec(
         name="low_t",
         group="B",
-        description=(
-            "Return-weighted ELBO restricted to low-t "
-            "(fine-detail) regime"
-        ),
-        hypothesis=(
-            "If low-t helps: high-t (coarse-structure) "
-            "gradients are biased"
-        ),
+        description=("Return-weighted ELBO restricted to low-t (fine-detail) regime"),
+        hypothesis=("If low-t helps: high-t (coarse-structure) gradients are biased"),
         loss_factory=make_loss_low_t,
         optimizer_factory=_std_opt,
     ),
@@ -361,12 +327,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="frozen_backbone",
         group="C",
         description=(
-            "Baseline ELBO with all params frozen except "
-            "the final output head"
+            "Baseline ELBO with all params frozen except the final output head"
         ),
         hypothesis=(
-            "If frozen backbone helps: deep gradient flow into "
-            "backbone causes collapse"
+            "If frozen backbone helps: deep gradient flow into backbone causes collapse"
         ),
         loss_factory=make_loss_frozen_backbone,
         optimizer_factory=_frozen_backbone_opt,
@@ -374,9 +338,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "head_only": AblationSpec(
         name="head_only",
         group="C",
-        description=(
-            "Baseline ELBO updating only the final linear projection"
-        ),
+        description=("Baseline ELBO updating only the final linear projection"),
         hypothesis=(
             "If head-only works: backbone representations are fine; "
             "only decision boundary needs updating"
@@ -388,12 +350,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="attention_only",
         group="C",
         description=(
-            "Baseline ELBO updating only attention weights "
-            "(Q/K/V/O); FFN frozen"
+            "Baseline ELBO updating only attention weights (Q/K/V/O); FFN frozen"
         ),
         hypothesis=(
-            "If attention-only works: model needs routing updates, "
-            "not feature updates"
+            "If attention-only works: model needs routing updates, not feature updates"
         ),
         loss_factory=make_loss_param_isolation,
         optimizer_factory=_attention_only_opt,
@@ -401,9 +361,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "ffn_only": AblationSpec(
         name="ffn_only",
         group="C",
-        description=(
-            "Baseline ELBO updating only FFN layers; attention frozen"
-        ),
+        description=("Baseline ELBO updating only FFN layers; attention frozen"),
         hypothesis=(
             "If FFN-only works: stored knowledge (FFN as memory) "
             "needs updating; not attention"
@@ -414,9 +372,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "layer_ablation_top1": AblationSpec(
         name="layer_ablation_top1",
         group="C",
-        description=(
-            "Baseline ELBO updating only the top-1 transformer block"
-        ),
+        description=("Baseline ELBO updating only the top-1 transformer block"),
         hypothesis=(
             "Minimal unfrozen depth needed; collapse depth correlates "
             "with gradient flow depth"
@@ -427,9 +383,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "layer_ablation_top2": AblationSpec(
         name="layer_ablation_top2",
         group="C",
-        description=(
-            "Baseline ELBO updating only the top-2 transformer blocks"
-        ),
+        description=("Baseline ELBO updating only the top-2 transformer blocks"),
         hypothesis=(
             "Minimal unfrozen depth needed; collapse depth correlates "
             "with gradient flow depth"
@@ -440,9 +394,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "layer_ablation_top3": AblationSpec(
         name="layer_ablation_top3",
         group="C",
-        description=(
-            "Baseline ELBO updating only the top-3 transformer blocks"
-        ),
+        description=("Baseline ELBO updating only the top-3 transformer blocks"),
         hypothesis=(
             "Minimal unfrozen depth needed; collapse depth correlates "
             "with gradient flow depth"
@@ -455,12 +407,9 @@ REGISTRY: dict[str, AblationSpec] = {
         name="reward_filtering",
         group="D",
         description=(
-            "Baseline ELBO trained only on top-75th-percentile "
-            "return windows"
+            "Baseline ELBO trained only on top-75th-percentile return windows"
         ),
-        hypothesis=(
-            "If filtering helps: noisy/low-return data poisons gradients"
-        ),
+        hypothesis=("If filtering helps: noisy/low-return data poisons gradients"),
         loss_factory=make_loss_reward_quality,
         optimizer_factory=_std_opt,
         reward_filtering=True,
@@ -469,12 +418,10 @@ REGISTRY: dict[str, AblationSpec] = {
         name="running_stats",
         group="D",
         description=(
-            "Baseline ELBO with EMA running mean/std for "
-            "advantage normalisation"
+            "Baseline ELBO with EMA running mean/std for advantage normalisation"
         ),
         hypothesis=(
-            "If running stats help: batch normalisation is too noisy "
-            "for small batches"
+            "If running stats help: batch normalisation is too noisy for small batches"
         ),
         loss_factory=make_loss_reward_quality,
         optimizer_factory=_std_opt,
@@ -483,14 +430,8 @@ REGISTRY: dict[str, AblationSpec] = {
     "action_diversity": AblationSpec(
         name="action_diversity",
         group="D",
-        description=(
-            "Baseline ELBO with degenerate (all-same-action) "
-            "plans discarded"
-        ),
-        hypothesis=(
-            "If diversity filtering helps: degenerate plans "
-            "corrupt training"
-        ),
+        description=("Baseline ELBO with degenerate (all-same-action) plans discarded"),
+        hypothesis=("If diversity filtering helps: degenerate plans corrupt training"),
         loss_factory=make_loss_reward_quality,
         optimizer_factory=_std_opt,
         action_diversity_filter=True,
@@ -499,8 +440,7 @@ REGISTRY: dict[str, AblationSpec] = {
         name="reward_model",
         group="D",
         description=(
-            "Baseline ELBO with advantages re-weighted by a "
-            "learned MLP reward model"
+            "Baseline ELBO with advantages re-weighted by a learned MLP reward model"
         ),
         hypothesis=(
             "If reward model helps: raw returns are too sparse; "

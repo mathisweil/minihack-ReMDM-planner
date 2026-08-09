@@ -34,8 +34,8 @@ from experiments.rl_finetuning.ablations.losses import (
     estimate_fisher_diagonal,
 )
 from experiments.rl_finetuning.ablations.optimizers import (
-    apply_lora_to_model,
     apply_gradients,
+    apply_lora_to_model,
     gradient_surgery,
     make_optimizer_lora,
     remove_lora_from_model,
@@ -80,15 +80,11 @@ def _wandb_log(metrics: dict[str, float], step: int) -> None:
     """
     try:
         import wandb
+
         if wandb.run is not None:
             wandb.log({**metrics, "iteration": step})
     except Exception:
         pass
-
-
-# ---------------------------------------------------------------------------
-# AblationHistory
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -149,7 +145,7 @@ class AblationHistory:
         return {k: list(v) for k, v in self.__dict__.items()}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AblationHistory":
+    def from_dict(cls, d: dict) -> AblationHistory:
         """Reconstruct from a dict.
 
         Args:
@@ -162,11 +158,6 @@ class AblationHistory:
         return cls(**{k: v for k, v in d.items() if k in valid})
 
 
-# ---------------------------------------------------------------------------
-# Replay buffer for mixed replay (simple ring buffer)
-# ---------------------------------------------------------------------------
-
-
 class MixedReplayBuffer:
     """Fixed-size ring buffer storing (local_obs, global_obs, x0, returns).
 
@@ -177,7 +168,10 @@ class MixedReplayBuffer:
     """
 
     def __init__(
-        self, capacity: int, seq_len: int, device: torch.device,
+        self,
+        capacity: int,
+        seq_len: int,
+        device: torch.device,
     ) -> None:
         self.capacity = capacity
         self.seq_len = seq_len
@@ -209,10 +203,10 @@ class MixedReplayBuffer:
             return
         start = self._write_idx % self.capacity
         if start + n <= self.capacity:
-            self._local[start:start + n] = local_obs
-            self._global[start:start + n] = global_obs
-            self._x0[start:start + n] = x0
-            self._returns[start:start + n] = returns
+            self._local[start : start + n] = local_obs
+            self._global[start : start + n] = global_obs
+            self._x0[start : start + n] = x0
+            self._returns[start : start + n] = returns
         else:
             first = self.capacity - start
             self._local[start:] = local_obs[:first]
@@ -228,7 +222,8 @@ class MixedReplayBuffer:
         self._count = min(self._count + n, self.capacity)
 
     def sample(
-        self, n: int,
+        self,
+        n: int,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Sample *n* windows uniformly with replacement.
 
@@ -246,11 +241,6 @@ class MixedReplayBuffer:
     def size(self) -> int:
         """Current number of stored windows."""
         return self._count
-
-
-# ---------------------------------------------------------------------------
-# Reward model
-# ---------------------------------------------------------------------------
 
 
 class RewardModel(nn.Module):
@@ -283,11 +273,6 @@ class RewardModel(nn.Module):
             ``[B]`` predicted returns.
         """
         return self.net(x).squeeze(-1)
-
-
-# ---------------------------------------------------------------------------
-# Advantage computation
-# ---------------------------------------------------------------------------
 
 
 def compute_advantages(
@@ -345,13 +330,8 @@ def _effective_batch_size(advantages: Tensor) -> float:
         Effective batch size as float.
     """
     sum_w = advantages.sum()
-    sum_w2 = (advantages ** 2).sum()
-    return (sum_w ** 2 / sum_w2.clamp(min=1e-10)).item()
-
-
-# ---------------------------------------------------------------------------
-# Episode collection -> training windows
-# ---------------------------------------------------------------------------
+    sum_w2 = (advantages**2).sum()
+    return (sum_w**2 / sum_w2.clamp(min=1e-10)).item()
 
 
 def _extract_windows(
@@ -371,9 +351,9 @@ def _extract_windows(
         Tuple of (local_obs ``[W,9,9]``, global_obs ``[W,21,79]``,
         x0 ``[W,H]``, episode_return).
     """
-    local_arr = torch.from_numpy(episode["local"]).long()   # [T, 9, 9]
+    local_arr = torch.from_numpy(episode["local"]).long()  # [T, 9, 9]
     global_arr = torch.from_numpy(episode["global"]).long()  # [T, 21, 79]
-    actions = torch.from_numpy(episode["actions"]).long()    # [T]
+    actions = torch.from_numpy(episode["actions"]).long()  # [T]
     T = actions.shape[0]
     ret = episode["total_reward"]
 
@@ -386,25 +366,31 @@ def _extract_windows(
         )
 
     # Pad if shorter than seq_len
-    if T < seq_len:
+    if seq_len > T:
         pad_len = seq_len - T
-        actions = torch.cat([
-            actions,
-            torch.full((pad_len,), pad_token, dtype=torch.long),
-        ])
-        local_arr = torch.cat([
-            local_arr,
-            local_arr[-1:].expand(pad_len, -1, -1),
-        ])
-        global_arr = torch.cat([
-            global_arr,
-            global_arr[-1:].expand(pad_len, -1, -1),
-        ])
+        actions = torch.cat(
+            [
+                actions,
+                torch.full((pad_len,), pad_token, dtype=torch.long),
+            ]
+        )
+        local_arr = torch.cat(
+            [
+                local_arr,
+                local_arr[-1:].expand(pad_len, -1, -1),
+            ]
+        )
+        global_arr = torch.cat(
+            [
+                global_arr,
+                global_arr[-1:].expand(pad_len, -1, -1),
+            ]
+        )
         T = seq_len
 
     n_windows = T - seq_len + 1
-    local_out = local_arr[:n_windows]       # [W, 9, 9]
-    global_out = global_arr[:n_windows]     # [W, 21, 79]
+    local_out = local_arr[:n_windows]  # [W, 9, 9]
+    global_out = global_arr[:n_windows]  # [W, 21, 79]
     x0_out = actions.unfold(0, seq_len, 1)  # [W, H]
 
     return local_out, global_out, x0_out, ret
@@ -463,10 +449,16 @@ def _collect_training_data_seq(
     for _ in range(n_episodes):
         env_id = random.choice(env_ids)
         ep = run_model_episode(
-            model, env_id, cfg, device, stochastic=True,
+            model,
+            env_id,
+            cfg,
+            device,
+            stochastic=True,
         )
         lo, go, x0, ret = _extract_windows(
-            ep, cfg.seq_len, cfg.pad_token,
+            ep,
+            cfg.seq_len,
+            cfg.pad_token,
         )
         if lo.shape[0] == 0:
             continue
@@ -517,10 +509,7 @@ def _collect_training_data_gpu(
     cs = cfg.crop_size
     physics_aware = getattr(cfg, "physics_aware_sampling", False)
 
-    tasks = [
-        (random.choice(env_ids), random.randint(0, 2**31 - 1))
-        for _ in range(n)
-    ]
+    tasks = [(random.choice(env_ids), random.randint(0, 2**31 - 1)) for _ in range(n)]
 
     # Create and reset all envs
     envs: list = []
@@ -535,10 +524,12 @@ def _collect_training_data_gpu(
 
     # Pre-allocate history buffers
     obs_local = np.zeros(
-        (n, max_steps + 1, cs, cs), dtype=np.int16,
+        (n, max_steps + 1, cs, cs),
+        dtype=np.int16,
     )
     obs_global = np.zeros(
-        (n, max_steps + 1, cfg.map_h, cfg.map_w), dtype=np.int16,
+        (n, max_steps + 1, cfg.map_h, cfg.map_w),
+        dtype=np.int16,
     )
     act_buf = np.zeros((n, max_steps), dtype=np.int64)
     obs_local[:, 0] = cur_local
@@ -558,17 +549,33 @@ def _collect_training_data_gpu(
             # Batch replan on GPU (stochastic ReMDM)
             replan_idx = np.where(need_replan & ~done)[0]
             if len(replan_idx) > 0:
-                local_t = torch.from_numpy(
-                    cur_local[replan_idx],
-                ).long().to(device)
-                glb_t = torch.from_numpy(
-                    cur_global[replan_idx],
-                ).long().to(device)
-                batch_plans = remdm_sample(
-                    model, local_t, glb_t, cfg, device,
-                    physics_aware=physics_aware,
-                    num_steps=K,
-                ).cpu().numpy()
+                local_t = (
+                    torch.from_numpy(
+                        cur_local[replan_idx],
+                    )
+                    .long()
+                    .to(device)
+                )
+                glb_t = (
+                    torch.from_numpy(
+                        cur_global[replan_idx],
+                    )
+                    .long()
+                    .to(device)
+                )
+                batch_plans = (
+                    remdm_sample(
+                        model,
+                        local_t,
+                        glb_t,
+                        cfg,
+                        device,
+                        physics_aware=physics_aware,
+                        num_steps=K,
+                    )
+                    .cpu()
+                    .numpy()
+                )
                 plans[replan_idx] = batch_plans
                 step_in_plan[replan_idx] = 0
                 need_replan[replan_idx] = False
@@ -623,7 +630,9 @@ def _collect_training_data_gpu(
             "total_reward": float(total_reward[i]),
         }
         lo, go, x0, ret = _extract_windows(
-            ep, cfg.seq_len, cfg.pad_token,
+            ep,
+            cfg.seq_len,
+            cfg.pad_token,
         )
         if lo.shape[0] == 0:
             continue
@@ -642,11 +651,6 @@ def _collect_training_data_gpu(
         torch.cat(all_x0).to(device),
         torch.cat(all_returns).to(device),
     )
-
-
-# ---------------------------------------------------------------------------
-# Reward model training step
-# ---------------------------------------------------------------------------
 
 
 def _train_reward_model(
@@ -677,11 +681,6 @@ def _train_reward_model(
         loss = F.mse_loss(preds, returns)
         loss.backward()
         rm_optim.step()
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 
 def run_ablation(
@@ -717,13 +716,17 @@ def run_ablation(
     # Log ablation metadata to wandb config
     try:
         import wandb
+
         if wandb.run is not None:
-            wandb.config.update({
-                "ablation_name": spec.name,
-                "ablation_group": spec.group,
-                "ablation_description": spec.description,
-                "seed": seed,
-            }, allow_val_change=True)
+            wandb.config.update(
+                {
+                    "ablation_name": spec.name,
+                    "ablation_group": spec.group,
+                    "ablation_description": spec.description,
+                    "seed": seed,
+                },
+                allow_val_change=True,
+            )
     except Exception:
         pass
 
@@ -758,13 +761,20 @@ def run_ablation(
         eval_model = ema.make_eval_model(raw_model)
         for _ in range(n_batches):
             lo, go, x0, _ = collect_training_data(
-                eval_model, cfg, device, n_episodes=1,
+                eval_model,
+                cfg,
+                device,
+                n_episodes=1,
             )
             if lo.shape[0] > 0:
                 bs = min(lo.shape[0], cfg.batch_size)
                 fisher_batches.append((lo[:bs], go[:bs], x0[:bs]))
         fisher = estimate_fisher_diagonal(
-            raw_model, schedule_fn, cfg, fisher_batches, device,
+            raw_model,
+            schedule_fn,
+            cfg,
+            fisher_batches,
+            device,
         )
         logger.info("  Fisher diagonal estimated.")
 
@@ -792,15 +802,14 @@ def run_ablation(
 
     # BC loss (for gradient surgery + alignment diagnostics)
     from experiments.rl_finetuning.ablations.losses import make_loss_baseline
+
     bc_loss_fn = make_loss_baseline(ctx)
 
     # Evaluator
     evaluator = Evaluator()
 
     # AMP (mixed precision)
-    _use_amp = (
-        getattr(cfg, "use_amp", False) and device.type == "cuda"
-    )
+    _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
     if _use_amp:
         logger.info("  AMP enabled for ablation training.")
@@ -854,28 +863,26 @@ def run_ablation(
 
     # Snapshot initial state for param drift tracking
     _init_state = {
-        k: v.clone() for k, v in raw_model.state_dict().items()
-        if v.is_floating_point()
+        k: v.clone() for k, v in raw_model.state_dict().items() if v.is_floating_point()
     }
 
     # Log model param counts to wandb
     total_params = sum(p.numel() for p in raw_model.parameters())
-    trainable_params = sum(
-        p.numel() for p in raw_model.parameters() if p.requires_grad
-    )
+    trainable_params = sum(p.numel() for p in raw_model.parameters() if p.requires_grad)
     try:
         import wandb
+
         if wandb.run is not None:
-            wandb.config.update({
-                "model_total_params": total_params,
-                "model_trainable_params": trainable_params,
-            }, allow_val_change=True)
+            wandb.config.update(
+                {
+                    "model_total_params": total_params,
+                    "model_trainable_params": trainable_params,
+                },
+                allow_val_change=True,
+            )
     except Exception:
         pass
 
-    # -------------------------------------------------------------------
-    # Training loop
-    # -------------------------------------------------------------------
     _gpu_collect = str(device).startswith("cuda") and episodes_per_iter > 1
     logger.info(
         "  Collection: %s (K=%d, episodes_per_iter=%d)",
@@ -891,7 +898,10 @@ def run_ablation(
         collect_start = time.perf_counter()
         eval_model = ema.make_eval_model(raw_model)
         local_obs, global_obs, x0, returns = collect_training_data(
-            eval_model, cfg, device, episodes_per_iter,
+            eval_model,
+            cfg,
+            device,
+            episodes_per_iter,
         )
         collect_time = time.perf_counter() - collect_start
 
@@ -927,7 +937,12 @@ def run_ablation(
         # -- Reward model training --
         if rm is not None and rm_optim is not None:
             _train_reward_model(
-                rm, rm_optim, local_obs, global_obs, returns, rm_steps,
+                rm,
+                rm_optim,
+                local_obs,
+                global_obs,
+                returns,
+                rm_steps,
             )
             with torch.no_grad():
                 feats = global_obs.reshape(global_obs.shape[0], -1).float()
@@ -935,7 +950,9 @@ def run_ablation(
 
         # -- Compute advantages --
         advantages, running_mean, running_std = compute_advantages(
-            returns, floor, cap,
+            returns,
+            floor,
+            cap,
             wins_only=spec.wins_only,
             win_thresh=win_thresh,
             use_running_stats=spec.running_stats,
@@ -959,10 +976,15 @@ def run_ablation(
             n_online = min(batch_size - n_offline, n)
             buf_lo, buf_go, buf_x0, buf_ret = replay_buf.sample(n_offline)
             buf_adv, _, _ = compute_advantages(
-                buf_ret, floor, cap,
-                wins_only=False, win_thresh=win_thresh,
-                use_running_stats=False, ema_decay=0.0,
-                running_mean=0.0, running_std=1.0,
+                buf_ret,
+                floor,
+                cap,
+                wins_only=False,
+                win_thresh=win_thresh,
+                use_running_stats=False,
+                ema_decay=0.0,
+                running_mean=0.0,
+                running_std=1.0,
             )
             local_b = torch.cat([local_obs[:n_online], buf_lo])
             global_b = torch.cat([global_obs[:n_online], buf_go])
@@ -992,7 +1014,13 @@ def run_ablation(
                 optimizer.zero_grad()
                 with torch.amp.autocast("cuda", enabled=_use_amp):
                     rl_loss = loss_fn(
-                        model, local_b, global_b, x0_b, adv_b, cfg, device,
+                        model,
+                        local_b,
+                        global_b,
+                        x0_b,
+                        adv_b,
+                        cfg,
+                        device,
                     )
                 scaler.scale(rl_loss).backward()
                 g_rl = {
@@ -1004,7 +1032,13 @@ def run_ablation(
                 optimizer.zero_grad()
                 with torch.amp.autocast("cuda", enabled=_use_amp):
                     bc_loss = bc_loss_fn(
-                        model, local_b, global_b, x0_b, None, cfg, device,
+                        model,
+                        local_b,
+                        global_b,
+                        x0_b,
+                        None,
+                        cfg,
+                        device,
                     )
                 scaler.scale(bc_loss).backward()
                 g_bc = {
@@ -1029,7 +1063,13 @@ def run_ablation(
                 optimizer.zero_grad()
                 with torch.amp.autocast("cuda", enabled=_use_amp):
                     loss_val_t = loss_fn(
-                        model, local_b, global_b, x0_b, adv_b, cfg, device,
+                        model,
+                        local_b,
+                        global_b,
+                        x0_b,
+                        adv_b,
+                        cfg,
+                        device,
                     )
                 scaler.scale(loss_val_t).backward()
                 scaler.unscale_(optimizer)
@@ -1075,8 +1115,8 @@ def run_ablation(
 
         # GPU memory
         if torch.cuda.is_available():
-            wb_metrics["speed/gpu_memory_mb"] = (
-                torch.cuda.max_memory_allocated() / (1024 * 1024)
+            wb_metrics["speed/gpu_memory_mb"] = torch.cuda.max_memory_allocated() / (
+                1024 * 1024
             )
 
         # Global gate value
@@ -1086,22 +1126,31 @@ def run_ablation(
 
         # Model health (every 10 iters)
         if iteration % 10 == 0:
-            p_norm = sum(
-                p.data.norm(2).item() ** 2 for p in raw_model.parameters()
-            ) ** 0.5
+            p_norm = (
+                sum(p.data.norm(2).item() ** 2 for p in raw_model.parameters()) ** 0.5
+            )
             wb_metrics["model/param_norm"] = p_norm
-            drift = sum(
-                (p.data - _init_state[n]).norm(2).item() ** 2
-                for n, p in raw_model.named_parameters()
-                if n in _init_state
-            ) ** 0.5
+            drift = (
+                sum(
+                    (p.data - _init_state[n]).norm(2).item() ** 2
+                    for n, p in raw_model.named_parameters()
+                    if n in _init_state
+                )
+                ** 0.5
+            )
             wb_metrics["model/param_drift_from_init"] = drift
 
         # -- Gradient alignment --
         if iteration % grad_align_every == 0:
             cos, rl_n, bc_n = compute_grad_alignment(
-                model, ref_model, local_b, global_b, x0_b,
-                adv_b, cfg, device,
+                model,
+                ref_model,
+                local_b,
+                global_b,
+                x0_b,
+                adv_b,
+                cfg,
+                device,
             )
             history.grad_align_iters.append(iteration)
             history.grad_align.append(cos)
@@ -1124,7 +1173,13 @@ def run_ablation(
             model.zero_grad()
             with torch.amp.autocast("cuda", enabled=_use_amp):
                 diag_loss = loss_fn(
-                    model, local_b, global_b, x0_b, adv_b, cfg, device,
+                    model,
+                    local_b,
+                    global_b,
+                    x0_b,
+                    adv_b,
+                    cfg,
+                    device,
                 )
             diag_loss.backward()
             norms = compute_per_layer_grad_norms(model)
@@ -1135,7 +1190,13 @@ def run_ablation(
         # -- Representation drift --
         if iteration % repr_drift_every == 0:
             kl_m, kl_l, kl_mid, kl_h = compute_repr_drift(
-                model, ref_model, local_b, global_b, x0_b, cfg, device,
+                model,
+                ref_model,
+                local_b,
+                global_b,
+                x0_b,
+                cfg,
+                device,
             )
             history.repr_drift_iters.append(iteration)
             history.repr_drift_kl.append(kl_m)
@@ -1147,7 +1208,13 @@ def run_ablation(
         # -- CKA --
         if iteration % cka_every == 0:
             cka_val = compute_cka(
-                model, ref_model, local_b, global_b, x0_b, cfg, device,
+                model,
+                ref_model,
+                local_b,
+                global_b,
+                x0_b,
+                cfg,
+                device,
             )
             history.cka_iters.append(iteration)
             history.cka_similarity.append(cka_val)
@@ -1156,13 +1223,19 @@ def run_ablation(
         # -- t-analysis --
         if iteration % t_analysis_every == 0:
             bins, lh_cos, n_low, n_high = compute_t_analysis(
-                model, local_b, global_b, x0_b, adv_b, cfg, device,
+                model,
+                local_b,
+                global_b,
+                x0_b,
+                adv_b,
+                cfg,
+                device,
                 n_bins=n_t_bins,
             )
             history.t_analysis_iters.append(iteration)
             bin_edges = [i / n_t_bins for i in range(n_t_bins + 1)]
             bin_dict = {
-                f"t_{bin_edges[j]:.1f}-{bin_edges[j+1]:.1f}": bins[j]
+                f"t_{bin_edges[j]:.1f}-{bin_edges[j + 1]:.1f}": bins[j]
                 for j in range(n_t_bins)
             }
             history.t_bin_norms.append(bin_dict)
@@ -1177,27 +1250,36 @@ def run_ablation(
         if iteration % eval_every == 0:
             eval_model = ema.make_eval_model(raw_model)
             results = evaluator.evaluate(
-                cfg.id_envs, eval_model, eval_episodes, cfg, device,
+                cfg.id_envs,
+                eval_model,
+                eval_episodes,
+                cfg,
+                device,
             )
-            id_wr = np.mean([
-                v["win_rate"] for v in results.values()
-            ])
+            id_wr = np.mean([v["win_rate"] for v in results.values()])
             history.eval_iters.append(iteration)
             history.eval_score.append(float(id_wr))
-            history.per_env_win_rates.append({
-                k: v["win_rate"] for k, v in results.items()
-            })
+            history.per_env_win_rates.append(
+                {k: v["win_rate"] for k, v in results.items()}
+            )
             wb_metrics["eval/id_win_rate"] = float(id_wr)
             for env_name, env_stats in results.items():
                 short = env_name.replace("MiniHack-", "").replace("-v0", "")
                 wb_metrics[f"eval/per_env/{short}/win_rate"] = env_stats["win_rate"]
                 if "avg_steps" in env_stats:
-                    wb_metrics[f"eval/per_env/{short}/avg_steps"] = env_stats["avg_steps"]
+                    wb_metrics[f"eval/per_env/{short}/avg_steps"] = env_stats[
+                        "avg_steps"
+                    ]
                 if "avg_reward" in env_stats:
-                    wb_metrics[f"eval/per_env/{short}/avg_reward"] = env_stats["avg_reward"]
+                    wb_metrics[f"eval/per_env/{short}/avg_reward"] = env_stats[
+                        "avg_reward"
+                    ]
             logger.info(
                 "  [%s] iter=%d  loss=%.4f  id_win_rate=%.3f",
-                spec.name, iteration, loss_val, id_wr,
+                spec.name,
+                iteration,
+                loss_val,
+                id_wr,
             )
 
         # -- Emit all metrics to wandb --
@@ -1209,11 +1291,13 @@ def run_ablation(
     # -- Final evaluation --
     final_model = ema.make_eval_model(raw_model)
     final_results = evaluator.evaluate(
-        cfg.id_envs, final_model, eval_episodes, cfg, device,
+        cfg.id_envs,
+        final_model,
+        eval_episodes,
+        cfg,
+        device,
     )
-    final_score = float(np.mean([
-        v["win_rate"] for v in final_results.values()
-    ]))
+    final_score = float(np.mean([v["win_rate"] for v in final_results.values()]))
 
     logger.info("  [%s] FINAL id_win_rate: %.4f", spec.name, final_score)
 

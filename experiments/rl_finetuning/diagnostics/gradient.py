@@ -17,11 +17,6 @@ from torch import Tensor, nn
 from experiments.rl_finetuning.ablations.losses import _core_loss
 
 
-# ---------------------------------------------------------------------------
-# Gradient alignment: cosine similarity between RL and BC gradients
-# ---------------------------------------------------------------------------
-
-
 @torch.no_grad()
 def _collect_flat_grad(model: nn.Module) -> Tensor:
     """Flatten all parameter gradients into a single vector.
@@ -76,7 +71,13 @@ def compute_grad_alignment(
     model.zero_grad()
     with torch.amp.autocast("cuda", enabled=_use_amp):
         rl_loss = _core_loss(
-            model, local_obs, global_obs, x0, advantages, cfg, device,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            advantages,
+            cfg,
+            device,
         )
     rl_loss.backward()
     g_rl = _collect_flat_grad(model)
@@ -85,7 +86,13 @@ def compute_grad_alignment(
     model.zero_grad()
     with torch.amp.autocast("cuda", enabled=_use_amp):
         bc_loss = _core_loss(
-            model, local_obs, global_obs, x0, None, cfg, device,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            None,
+            cfg,
+            device,
         )
     bc_loss.backward()
     g_bc = _collect_flat_grad(model)
@@ -94,16 +101,9 @@ def compute_grad_alignment(
 
     rl_norm = g_rl.norm().item()
     bc_norm = g_bc.norm().item()
-    cos_sim = (
-        torch.dot(g_rl, g_bc) / (rl_norm * bc_norm + 1e-10)
-    ).item()
+    cos_sim = (torch.dot(g_rl, g_bc) / (rl_norm * bc_norm + 1e-10)).item()
 
     return cos_sim, rl_norm, bc_norm
-
-
-# ---------------------------------------------------------------------------
-# Per-layer gradient norms
-# ---------------------------------------------------------------------------
 
 
 def compute_per_layer_grad_norms(
@@ -124,11 +124,6 @@ def compute_per_layer_grad_norms(
         if param.grad is not None:
             norms[name] = param.grad.detach().norm().item()
     return norms
-
-
-# ---------------------------------------------------------------------------
-# PCGrad surgery metrics
-# ---------------------------------------------------------------------------
 
 
 def compute_surgery_metrics(

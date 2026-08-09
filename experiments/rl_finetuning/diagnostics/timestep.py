@@ -19,11 +19,6 @@ _EPS: float = 1e-5
 N_BINS: int = 10
 
 
-# ---------------------------------------------------------------------------
-# Internal: flat gradient at a t-range
-# ---------------------------------------------------------------------------
-
-
 def _flat_grad_at_range(
     model: nn.Module,
     local_obs: Tensor,
@@ -55,8 +50,15 @@ def _flat_grad_at_range(
     model.zero_grad()
     with torch.amp.autocast("cuda", enabled=_use_amp):
         loss = _core_loss(
-            model, local_obs, global_obs, x0, advantages, cfg, device,
-            t_min=t_min, t_max=t_max,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            advantages,
+            cfg,
+            device,
+            t_min=t_min,
+            t_max=t_max,
         )
     loss.backward()
 
@@ -67,11 +69,6 @@ def _flat_grad_at_range(
         else:
             parts.append(torch.zeros(param.numel(), device=device))
     return torch.cat(parts)
-
-
-# ---------------------------------------------------------------------------
-# t-bin gradient norm analysis
-# ---------------------------------------------------------------------------
 
 
 def compute_t_analysis(
@@ -124,17 +121,10 @@ def compute_t_analysis(
 
     norm_low = flat_low.norm().item()
     norm_high = flat_high.norm().item()
-    cos = (
-        torch.dot(flat_low, flat_high) / (norm_low * norm_high + 1e-10)
-    ).item()
+    cos = (torch.dot(flat_low, flat_high) / (norm_low * norm_high + 1e-10)).item()
 
     model.zero_grad()
     return bin_norms, cos, norm_low, norm_high
-
-
-# ---------------------------------------------------------------------------
-# Per-t-bin loss decomposition
-# ---------------------------------------------------------------------------
 
 
 @torch.no_grad()
@@ -170,8 +160,14 @@ def compute_t_bin_losses(
         t_hi = max(bin_edges[i + 1].item(), t_lo + _EPS)
 
         per_sample, aux_loss, _, _, _ = _forward_and_loss(
-            model, local_obs, global_obs, x0, cfg, device,
-            t_min=t_lo, t_max=t_hi,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            cfg,
+            device,
+            t_min=t_lo,
+            t_max=t_hi,
         )
         total = per_sample.mean() + cfg.aux_loss_weight * aux_loss
         losses.append(total.item())

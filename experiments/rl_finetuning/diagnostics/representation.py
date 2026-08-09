@@ -20,11 +20,6 @@ from src.diffusion.forward import q_sample
 _EPS: float = 1e-5
 
 
-# ---------------------------------------------------------------------------
-# KL drift
-# ---------------------------------------------------------------------------
-
-
 def _kl_at_range(
     model: nn.Module,
     ref_model: nn.Module,
@@ -60,8 +55,13 @@ def _kl_at_range(
 
     t = torch.rand(B, device=device) * (t_max - t_min) + t_min  # [B]
     zt = q_sample(x0, t, cfg.mask_token, cfg.pad_token, schedule_fn)
-    t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
-        0, cfg.num_diffusion_steps - 1,
+    t_discrete = (
+        (t * cfg.num_diffusion_steps)
+        .long()
+        .clamp(
+            0,
+            cfg.num_diffusion_steps - 1,
+        )
     )
 
     cur_logits = model(local_obs, global_obs, zt, t_discrete)["actions"]
@@ -109,11 +109,6 @@ def compute_repr_drift(
     kl_high = _kl_at_range(*args, t_min=0.8, t_max=1.0)
 
     return kl_mean, kl_low, kl_mid, kl_high
-
-
-# ---------------------------------------------------------------------------
-# CKA (Centred Kernel Alignment)
-# ---------------------------------------------------------------------------
 
 
 def _linear_cka(x: Tensor, y: Tensor) -> float:
@@ -178,7 +173,8 @@ def compute_cka(
 
     schedule_fn = cfg._schedule_fn
     cka_bs = min(
-        getattr(cfg, "cka_batch_size", 64), x0.shape[0],
+        getattr(cfg, "cka_batch_size", 64),
+        x0.shape[0],
     )
 
     lo = local_obs[:cka_bs]
@@ -187,8 +183,13 @@ def compute_cka(
 
     t = torch.rand(cka_bs, device=device) * 0.4 + 0.3  # [0.3, 0.7]
     zt = q_sample(acts, t, cfg.mask_token, cfg.pad_token, schedule_fn)
-    t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
-        0, cfg.num_diffusion_steps - 1,
+    t_discrete = (
+        (t * cfg.num_diffusion_steps)
+        .long()
+        .clamp(
+            0,
+            cfg.num_diffusion_steps - 1,
+        )
     )
 
     cur_logits = model(lo, go, zt, t_discrete)["actions"]  # [B, H, A]
@@ -198,11 +199,6 @@ def compute_cka(
     ref_repr = ref_logits.mean(dim=1)
 
     return _linear_cka(cur_repr, ref_repr)
-
-
-# ---------------------------------------------------------------------------
-# Activation norm statistics
-# ---------------------------------------------------------------------------
 
 
 @torch.no_grad()
@@ -233,8 +229,13 @@ def compute_activation_norms(
 
     t = torch.rand(B, device=device) * 0.4 + 0.3  # [0.3, 0.7]
     zt = q_sample(x0, t, cfg.mask_token, cfg.pad_token, schedule_fn)
-    t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
-        0, cfg.num_diffusion_steps - 1,
+    t_discrete = (
+        (t * cfg.num_diffusion_steps)
+        .long()
+        .clamp(
+            0,
+            cfg.num_diffusion_steps - 1,
+        )
     )
 
     logits = model(local_obs, global_obs, zt, t_discrete)["actions"]

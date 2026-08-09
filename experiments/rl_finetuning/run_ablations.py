@@ -70,11 +70,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Config utilities
-# ---------------------------------------------------------------------------
-
-
 def _load_yaml(path: str | None) -> dict:
     """Load a YAML file, returning empty dict if path is None.
 
@@ -105,12 +100,6 @@ def _merge_to_namespace(*dicts: dict) -> SimpleNamespace:
     return SimpleNamespace(**merged)
 
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
 def _build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser.
 
@@ -123,19 +112,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
-        "--config", type=str, default=None,
+        "--config",
+        type=str,
+        default=None,
         help="Main config (configs/defaults.yaml).",
     )
     p.add_argument(
-        "--ablations-config", type=str,
+        "--ablations-config",
+        type=str,
         default=str(
-            _PROJECT_ROOT
-            / "experiments/rl_finetuning/configs/ablations_default.yaml"
+            _PROJECT_ROOT / "experiments/rl_finetuning/configs/ablations_default.yaml"
         ),
         help="Ablations-specific config.",
     )
     p.add_argument(
-        "--checkpoint", type=str, default=None,
+        "--checkpoint",
+        type=str,
+        default=None,
         help=(
             "Pretrained DAgger checkpoint. Accepts a local .pth path "
             "or a W&B artifact reference: "
@@ -145,11 +138,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--all", action="store_true", help="Run all ablations.")
     p.add_argument(
-        "--ablations", nargs="+", default=None, metavar="NAME",
+        "--ablations",
+        nargs="+",
+        default=None,
+        metavar="NAME",
         help="Ablation names. Use --list to see options.",
     )
     p.add_argument(
-        "--list", action="store_true",
+        "--list",
+        action="store_true",
         help="List registered ablations and exit.",
     )
 
@@ -157,7 +154,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--analyze-only", action="store_true")
     p.add_argument("--results-path", type=str, default=None)
     p.add_argument(
-        "--merge", nargs="+", metavar="JSON",
+        "--merge",
+        nargs="+",
+        metavar="JSON",
         help=(
             "Merge multiple results.json files from independent runs "
             "and regenerate analysis. E.g.:\n"
@@ -174,7 +173,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--use-wandb", action="store_true", default=False)
     p.add_argument("--wandb-project", type=str, default=None)
     p.add_argument(
-        "--wandb-resume-id", type=str, default=None,
+        "--wandb-resume-id",
+        type=str,
+        default=None,
         help=(
             "W&B run ID to resume (curve continuity). "
             "Find it in the W&B dashboard URL: wandb.ai/.../runs/<id>"
@@ -189,12 +190,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-# ---------------------------------------------------------------------------
-# Result serialisation (orjson)
-# ---------------------------------------------------------------------------
-
-
-def _history_finals(history: "AblationHistory") -> dict:
+def _history_finals(history: AblationHistory) -> dict:
     """C-002 (F-024/F-035): final logged value per history field for one seed.
 
     Captures numeric finals, dict finals (e.g. per_env_win_rates) and
@@ -231,7 +227,8 @@ def _results_to_json(
     serialisable = {
         "pretrained_score": pretrained_score,
         "config": {
-            k: v for k, v in config.items()
+            k: v
+            for k, v in config.items()
             if isinstance(v, (str, int, float, bool, type(None)))
         },
         "ablations": {
@@ -241,7 +238,11 @@ def _results_to_json(
                 "all_scores": res.get("all_scores", [res["score"]]),
                 "history": res["history"].to_dict(),
                 # C-001 (D7) / C-002: seeds, wall clock and per-seed finals when present
-                **{k: res[k] for k in ("base_seed", "seeds", "wall_clock_s", "per_seed_finals") if k in res},
+                **{
+                    k: res[k]
+                    for k in ("base_seed", "seeds", "wall_clock_s", "per_seed_finals")
+                    if k in res
+                },
             }
             for name, res in results.items()
         },
@@ -274,7 +275,12 @@ def _results_from_json(
             "all_scores": res_data.get("all_scores", [score]),
             "history": AblationHistory.from_dict(res_data["history"]),
         }
-        for _k in ("base_seed", "seeds", "wall_clock_s", "per_seed_finals"):  # C-001/C-002
+        for _k in (
+            "base_seed",
+            "seeds",
+            "wall_clock_s",
+            "per_seed_finals",
+        ):  # C-001/C-002
             if _k in res_data:
                 results[name][_k] = res_data[_k]
     return results, pretrained_score, config
@@ -313,7 +319,11 @@ def _merge_result_files(
                     "all_scores": list(res.get("all_scores", [res["score"]])),
                     "history": res["history"],
                     # C-001 (D7) / C-002: carry seed, wall-clock and per-seed final records
-                    **{k: list(res[k]) for k in ("seeds", "wall_clock_s", "per_seed_finals") if k in res},
+                    **{
+                        k: list(res[k])
+                        for k in ("seeds", "wall_clock_s", "per_seed_finals")
+                        if k in res
+                    },
                     **({"base_seed": res["base_seed"]} if "base_seed" in res else {}),
                 }
             else:
@@ -330,11 +340,6 @@ def _merge_result_files(
 
     pretrained_score = float(np.mean(pretrained_scores))
     return merged, pretrained_score, config
-
-
-# ---------------------------------------------------------------------------
-# Pretrained evaluation
-# ---------------------------------------------------------------------------
 
 
 def _evaluate_pretrained(
@@ -357,7 +362,9 @@ def _evaluate_pretrained(
 
     model = make_model(cfg).to(device)
     ckpt = torch.load(
-        checkpoint_path, map_location=device, weights_only=False,
+        checkpoint_path,
+        map_location=device,
+        weights_only=False,
     )
     model.load_state_dict(ckpt["ema_state_dict"])
     model.eval()
@@ -366,11 +373,6 @@ def _evaluate_pretrained(
     n_eps = getattr(cfg, "eval_episodes", 20)
     results = evaluator.evaluate(cfg.id_envs, model, n_eps, cfg, device)
     return float(np.mean([v["win_rate"] for v in results.values()]))
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -389,11 +391,11 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     # Output directory
-    run_id = args.run_id or (
-        f"run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    )
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else (
-        _PROJECT_ROOT / "experiments" / "rl_finetuning" / "outputs" / run_id
+    run_id = args.run_id or (f"run_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    output_dir = (
+        Path(args.output_dir).resolve()
+        if args.output_dir
+        else (_PROJECT_ROOT / "experiments" / "rl_finetuning" / "outputs" / run_id)
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Output directory: %s", output_dir)
@@ -403,8 +405,7 @@ def main(argv: list[str] | None = None) -> None:
         # Resolve results path: explicit --results-path, or results.json
         # inside --output-dir
         results_path = (
-            str(Path(args.results_path).resolve())
-            if args.results_path else None
+            str(Path(args.results_path).resolve()) if args.results_path else None
         )
         if not results_path:
             candidate = output_dir / "results.json"
@@ -425,15 +426,14 @@ def main(argv: list[str] | None = None) -> None:
             missing = [n for n in args.ablations if n not in results]
             for n in missing:
                 logger.warning(
-                    "Ablation '%s' not found in results — skipping.", n,
+                    "Ablation '%s' not found in results — skipping.",
+                    n,
                 )
-            results = {
-                k: v for k, v in results.items()
-                if k in args.ablations
-            }
+            results = {k: v for k, v in results.items() if k in args.ablations}
             logger.info(
                 "Filtered to %d ablation(s): %s",
-                len(results), list(results.keys()),
+                len(results),
+                list(results.keys()),
             )
 
         generate_summary_tables(results, pretrained_score, output_dir)
@@ -449,18 +449,24 @@ def main(argv: list[str] | None = None) -> None:
             if not Path(p).exists():
                 parser.error(f"Results file not found: {p}")
         logger.info(
-            "Merging %d results files: %s", len(merge_paths), merge_paths,
+            "Merging %d results files: %s",
+            len(merge_paths),
+            merge_paths,
         )
         results, pretrained_score, config = _merge_result_files(merge_paths)
         logger.info(
             "Merged %d ablation(s): %s",
-            len(results), list(results.keys()),
+            len(results),
+            list(results.keys()),
         )
         for name, res in results.items():
             n = len(res["all_scores"])
             logger.info(
                 "  %s: %.4f +/- %.4f  (%d seed%s)",
-                name, res["score"], res["score_std"], n,
+                name,
+                res["score"],
+                res["score_std"],
+                n,
                 "s" if n != 1 else "",
             )
 
@@ -480,8 +486,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Training mode: load configs
     main_cfg = _load_yaml(
-        args.config
-        or str(_PROJECT_ROOT / "configs" / "defaults.yaml")
+        args.config or str(_PROJECT_ROOT / "configs" / "defaults.yaml")
     )
     abl_cfg = _load_yaml(args.ablations_config)
 
@@ -489,8 +494,7 @@ def main(argv: list[str] | None = None) -> None:
     fast_cfg: dict = {}
     if args.fast:
         fast_path = (
-            _PROJECT_ROOT
-            / "experiments/rl_finetuning/configs/ablations_fast.yaml"
+            _PROJECT_ROOT / "experiments/rl_finetuning/configs/ablations_fast.yaml"
         )
         fast_cfg = _load_yaml(str(fast_path))
 
@@ -519,12 +523,11 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--checkpoint is required for training mode.")
     if args.checkpoint.startswith("wandb:"):
         from src.planners.logging import download_artifact
-        artifact_ref = args.checkpoint[len("wandb:"):]
+
+        artifact_ref = args.checkpoint[len("wandb:") :]
         resolved = download_artifact(artifact_ref)
         if resolved is None:
-            parser.error(
-                f"Failed to download W&B artifact: {artifact_ref}"
-            )
+            parser.error(f"Failed to download W&B artifact: {artifact_ref}")
         checkpoint_path = resolved
     else:
         checkpoint_path = str(Path(args.checkpoint).resolve())
@@ -545,7 +548,10 @@ def main(argv: list[str] | None = None) -> None:
     # Evaluate pretrained baseline
     # C-001 (D7/D14): seed the pretrained evaluation with the base seed
     import random as _random
-    _eval_seed = args.seed if args.seed is not None else (getattr(cfg, "seed", None) or 0)
+
+    _eval_seed = (
+        args.seed if args.seed is not None else (getattr(cfg, "seed", None) or 0)
+    )
     torch.manual_seed(_eval_seed)
     np.random.seed(_eval_seed)
     _random.seed(_eval_seed)
@@ -578,14 +584,20 @@ def main(argv: list[str] | None = None) -> None:
             # Define metric x-axes
             wandb.define_metric("iteration")
             for ns in (
-                "train/*", "speed/*", "online/*", "eval/*",
-                "model/*", "diag/*",
+                "train/*",
+                "speed/*",
+                "online/*",
+                "eval/*",
+                "model/*",
+                "diag/*",
             ):
                 wandb.define_metric(ns, step_metric="iteration")
 
     # Run ablations
     num_seeds = args.num_seeds or getattr(cfg, "num_seeds", 1)
-    base_seed = args.seed if args.seed is not None else (getattr(cfg, "seed", None) or 0)
+    base_seed = (
+        args.seed if args.seed is not None else (getattr(cfg, "seed", None) or 0)
+    )
     results: dict[str, dict] = {}
     max_iter = getattr(cfg, "max_iter", 1000)
     wandb_global_step = 0  # monotonically increasing across ablations/seeds
@@ -600,11 +612,15 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             for seed_idx in range(num_seeds):
-                abl_seed = base_seed + seed_idx  # C-001 (D7): literal seed set base+idx (default 0, 1, 2)
+                abl_seed = (
+                    base_seed + seed_idx
+                )  # C-001 (D7): literal seed set base+idx (default 0, 1, 2)
                 seeds_used.append(abl_seed)
                 logger.info(
                     "Running %s (seed %d/%d)...",
-                    abl_name, seed_idx + 1, num_seeds,
+                    abl_name,
+                    seed_idx + 1,
+                    num_seeds,
                 )
 
                 _t0 = time.monotonic()
@@ -617,12 +633,15 @@ def main(argv: list[str] | None = None) -> None:
                     wandb_step_offset=wandb_global_step,
                 )
                 wandb_global_step += max_iter
-                seed_times.append(round(time.monotonic() - _t0, 1))  # C-001: per-seed wall clock
+                seed_times.append(
+                    round(time.monotonic() - _t0, 1)
+                )  # C-001: per-seed wall clock
                 seed_scores.append(final_score)
                 seed_histories.append(history)
         except Exception:
             logger.exception(
-                "Ablation '%s' FAILED — skipping to next.", abl_name,
+                "Ablation '%s' FAILED — skipping to next.",
+                abl_name,
             )
             continue
 
@@ -630,7 +649,10 @@ def main(argv: list[str] | None = None) -> None:
         std_score = float(np.std(seed_scores))
         logger.info(
             "%s: score = %.4f +/- %.4f (seeds=%d)",
-            abl_name, mean_score, std_score, num_seeds,
+            abl_name,
+            mean_score,
+            std_score,
+            num_seeds,
         )
 
         results[abl_name] = {
@@ -638,9 +660,9 @@ def main(argv: list[str] | None = None) -> None:
             "score": mean_score,
             "score_std": std_score,
             "all_scores": seed_scores,
-            "base_seed": base_seed,         # C-001 (D7)
-            "seeds": seeds_used,            # C-001 (D7)
-            "wall_clock_s": seed_times,     # C-001: per-seed wall clock
+            "base_seed": base_seed,  # C-001 (D7)
+            "seeds": seeds_used,  # C-001 (D7)
+            "wall_clock_s": seed_times,  # C-001: per-seed wall clock
             "per_seed_finals": [_history_finals(h) for h in seed_histories],  # C-002
         }
 
@@ -659,7 +681,9 @@ def main(argv: list[str] | None = None) -> None:
         )
         logger.info(
             "Saved partial results (%d/%d) to %s",
-            len(results), len(selected), results_path,
+            len(results),
+            len(selected),
+            results_path,
         )
 
         # Per-ablation model checkpoint (last seed)

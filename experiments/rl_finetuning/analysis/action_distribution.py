@@ -30,6 +30,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib
+
 matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
 import matplotlib.pyplot as plt  # noqa: E402
@@ -39,6 +40,7 @@ import torch  # noqa: E402
 from scipy import stats as scipy_stats  # noqa: E402
 
 from src.planners.collect import run_model_episode  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 MINIHACK_ACTIONS: dict[int, str] = {
@@ -197,9 +199,7 @@ def compute_gini(probs: np.ndarray) -> float:
     if total == 0:
         return 0.0
     indices = np.arange(1, n + 1)
-    return float(
-        (2.0 * np.sum(indices * s) - (n + 1) * total) / (n * total)
-    )
+    return float((2.0 * np.sum(indices * s) - (n + 1) * total) / (n * total))
 
 
 def action_transitions(actions: np.ndarray, n: int) -> np.ndarray:
@@ -274,9 +274,7 @@ def compute_all_metrics(
         "Pre-RL Win Rate": float(pre_stats["episode_won"].mean()),
         "Post-RL Win Rate": float(post_stats["episode_won"].mean()),
         "Pre-RL Mean Return": float(pre_stats["episode_returns"].mean()),
-        "Post-RL Mean Return": float(
-            post_stats["episode_returns"].mean()
-        ),
+        "Post-RL Mean Return": float(post_stats["episode_returns"].mean()),
     }
 
 
@@ -301,14 +299,20 @@ def run_statistical_tests(
         ``"mannwhitney_u"``, ``"mannwhitney_p"``,
         ``"mannwhitney_significant"`` keys.
     """
-    pre_counts = np.array(
-        [pre_stats["action_counts"].get(i, 0) for i in range(action_dim)],
-        dtype=np.float64,
-    ) + 1.0
-    post_counts = np.array(
-        [post_stats["action_counts"].get(i, 0) for i in range(action_dim)],
-        dtype=np.float64,
-    ) + 1.0
+    pre_counts = (
+        np.array(
+            [pre_stats["action_counts"].get(i, 0) for i in range(action_dim)],
+            dtype=np.float64,
+        )
+        + 1.0
+    )
+    post_counts = (
+        np.array(
+            [post_stats["action_counts"].get(i, 0) for i in range(action_dim)],
+            dtype=np.float64,
+        )
+        + 1.0
+    )
     post_scaled = post_counts * (pre_counts.sum() / post_counts.sum())
 
     chi2, p_chi2 = scipy_stats.chisquare(pre_counts, post_scaled)
@@ -374,7 +378,9 @@ def generate_action_distribution_plots(
     axes[0].set_ylim(0, y_max)
     axes[1].bar(x, post_probs, color="coral", alpha=0.85)
     axes[1].set_title(
-        "Post-RL (After Fine-tuning)", fontsize=14, fontweight="bold",
+        "Post-RL (After Fine-tuning)",
+        fontsize=14,
+        fontweight="bold",
     )
     axes[1].set_xlabel("Action")
     axes[1].set_ylabel("Probability")
@@ -384,7 +390,8 @@ def generate_action_distribution_plots(
     fig.tight_layout()
     fig.savefig(
         out_dir / "action_dist_comparison.png",
-        dpi=_DPI, bbox_inches="tight",
+        dpi=_DPI,
+        bbox_inches="tight",
     )
     plt.close(fig)
 
@@ -392,7 +399,9 @@ def generate_action_distribution_plots(
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     delta = post_probs - pre_probs
     safe_ratio = np.where(
-        pre_probs > 1e-6, post_probs / pre_probs, 1e-10,
+        pre_probs > 1e-6,
+        post_probs / pre_probs,
+        1e-10,
     )
     log_ratio = np.clip(np.log2(safe_ratio), -5.0, 5.0)
 
@@ -400,7 +409,8 @@ def generate_action_distribution_plots(
     axes[0].bar(x, delta, color=colors_d, alpha=0.75)
     axes[0].axhline(0, color="black", linewidth=0.8)
     axes[0].set_title(
-        "Change in Action Probability (Post - Pre)", fontweight="bold",
+        "Change in Action Probability (Post - Pre)",
+        fontweight="bold",
     )
     axes[0].set_xlabel("Action")
     axes[0].set_ylabel("Delta Probability")
@@ -421,7 +431,8 @@ def generate_action_distribution_plots(
     fig.tight_layout()
     fig.savefig(
         out_dir / "probability_change.png",
-        dpi=_DPI, bbox_inches="tight",
+        dpi=_DPI,
+        bbox_inches="tight",
     )
     plt.close(fig)
 
@@ -439,7 +450,7 @@ def generate_action_distribution_plots(
     bars = ax.bar(cats, vals, color=["steelblue", "coral", "gray"], alpha=0.85)
     ax.set_ylabel("Entropy (bits)")
     ax.set_title("Distribution Entropy", fontweight="bold")
-    for bar, val in zip(bars, vals):
+    for bar, val in zip(bars, vals, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.02,
@@ -455,17 +466,22 @@ def generate_action_distribution_plots(
         metrics["Post-RL Effective Actions"],
     ]
     bars2 = ax.bar(
-        ["Pre-RL", "Post-RL"], vals2,
-        color=["steelblue", "coral"], alpha=0.85,
+        ["Pre-RL", "Post-RL"],
+        vals2,
+        color=["steelblue", "coral"],
+        alpha=0.85,
     )
     ax.axhline(
-        action_dim, color="gray", linestyle="--", alpha=0.5,
+        action_dim,
+        color="gray",
+        linestyle="--",
+        alpha=0.5,
         label="Total actions",
     )
     ax.set_ylabel("# Actions")
     ax.set_title("Effective Actions (>1%)", fontweight="bold")
     ax.legend(fontsize=8)
-    for bar, val in zip(bars2, vals2):
+    for bar, val in zip(bars2, vals2, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.1,
@@ -488,7 +504,7 @@ def generate_action_distribution_plots(
     ax.set_ylabel("Value")
     ax.set_title("Divergence Metrics", fontweight="bold")
     ax.set_xticklabels(div_names, rotation=15)
-    for bar, val in zip(bars3, div_vals):
+    for bar, val in zip(bars3, div_vals, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.003,
@@ -502,8 +518,10 @@ def generate_action_distribution_plots(
     ax = axes[1, 1]
     vals4 = [metrics["Pre-RL Gini"], metrics["Post-RL Gini"]]
     bars4 = ax.bar(
-        ["Pre-RL", "Post-RL"], vals4,
-        color=["steelblue", "coral"], alpha=0.85,
+        ["Pre-RL", "Post-RL"],
+        vals4,
+        color=["steelblue", "coral"],
+        alpha=0.85,
     )
     ax.set_ylim(0, 1)
     ax.set_ylabel("Gini Coefficient")
@@ -514,7 +532,7 @@ def generate_action_distribution_plots(
     ax.axhline(0, color="green", linestyle="--", alpha=0.4, label="Uniform")
     ax.axhline(1, color="red", linestyle="--", alpha=0.4, label="Collapsed")
     ax.legend(fontsize=8)
-    for bar, val in zip(bars4, vals4):
+    for bar, val in zip(bars4, vals4, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.02,
@@ -527,7 +545,8 @@ def generate_action_distribution_plots(
     fig.tight_layout()
     fig.savefig(
         out_dir / "distribution_metrics.png",
-        dpi=_DPI, bbox_inches="tight",
+        dpi=_DPI,
+        bbox_inches="tight",
     )
     plt.close(fig)
 
@@ -536,20 +555,30 @@ def generate_action_distribution_plots(
 
     ax = axes[0]
     ax.hist(
-        pre_stats["episode_returns"], bins=20,
-        alpha=0.6, label="Pre-RL", color="steelblue",
+        pre_stats["episode_returns"],
+        bins=20,
+        alpha=0.6,
+        label="Pre-RL",
+        color="steelblue",
     )
     ax.hist(
-        post_stats["episode_returns"], bins=20,
-        alpha=0.6, label="Post-RL", color="coral",
+        post_stats["episode_returns"],
+        bins=20,
+        alpha=0.6,
+        label="Post-RL",
+        color="coral",
     )
     ax.axvline(
         pre_stats["episode_returns"].mean(),
-        color="steelblue", linestyle="--", lw=2,
+        color="steelblue",
+        linestyle="--",
+        lw=2,
     )
     ax.axvline(
         post_stats["episode_returns"].mean(),
-        color="coral", linestyle="--", lw=2,
+        color="coral",
+        linestyle="--",
+        lw=2,
     )
     ax.set_xlabel("Episode Return")
     ax.set_ylabel("Count")
@@ -558,20 +587,30 @@ def generate_action_distribution_plots(
 
     ax = axes[1]
     ax.hist(
-        pre_stats["episode_lengths"], bins=20,
-        alpha=0.6, label="Pre-RL", color="steelblue",
+        pre_stats["episode_lengths"],
+        bins=20,
+        alpha=0.6,
+        label="Pre-RL",
+        color="steelblue",
     )
     ax.hist(
-        post_stats["episode_lengths"], bins=20,
-        alpha=0.6, label="Post-RL", color="coral",
+        post_stats["episode_lengths"],
+        bins=20,
+        alpha=0.6,
+        label="Post-RL",
+        color="coral",
     )
     ax.axvline(
         pre_stats["episode_lengths"].mean(),
-        color="steelblue", linestyle="--", lw=2,
+        color="steelblue",
+        linestyle="--",
+        lw=2,
     )
     ax.axvline(
         post_stats["episode_lengths"].mean(),
-        color="coral", linestyle="--", lw=2,
+        color="coral",
+        linestyle="--",
+        lw=2,
     )
     ax.set_xlabel("Episode Length")
     ax.set_ylabel("Count")
@@ -580,7 +619,9 @@ def generate_action_distribution_plots(
 
     fig.tight_layout()
     fig.savefig(
-        out_dir / "episode_analysis.png", dpi=_DPI, bbox_inches="tight",
+        out_dir / "episode_analysis.png",
+        dpi=_DPI,
+        bbox_inches="tight",
     )
     plt.close(fig)
 
@@ -592,18 +633,31 @@ def generate_action_distribution_plots(
     post_cum = np.cumsum(post_sorted)
     xs = np.arange(1, action_dim + 1)
     ax.plot(
-        xs, pre_cum, "o-", label="Pre-RL (BC)",
-        color="steelblue", lw=2, markersize=6,
+        xs,
+        pre_cum,
+        "o-",
+        label="Pre-RL (BC)",
+        color="steelblue",
+        lw=2,
+        markersize=6,
     )
     ax.plot(
-        xs, post_cum, "s-", label="Post-RL",
-        color="coral", lw=2, markersize=6,
+        xs,
+        post_cum,
+        "s-",
+        label="Post-RL",
+        color="coral",
+        lw=2,
+        markersize=6,
     )
     for thresh, label in [(0.8, "80%"), (0.95, "95%")]:
         ax.axhline(thresh, color="gray", linestyle="--", alpha=0.5)
         ax.text(
-            action_dim - 0.5, thresh + 0.01, label,
-            fontsize=10, color="gray",
+            action_dim - 0.5,
+            thresh + 0.01,
+            label,
+            fontsize=10,
+            color="gray",
         )
     ax.set_xlabel("Number of Top Actions", fontsize=12)
     ax.set_ylabel("Cumulative Probability", fontsize=12)
@@ -617,7 +671,8 @@ def generate_action_distribution_plots(
     fig.tight_layout()
     fig.savefig(
         out_dir / "cumulative_distribution.png",
-        dpi=_DPI, bbox_inches="tight",
+        dpi=_DPI,
+        bbox_inches="tight",
     )
     plt.close(fig)
 
@@ -631,19 +686,26 @@ def generate_action_distribution_plots(
     im1 = axes[0].imshow(pre_t, cmap="Blues", aspect="auto")
     im2 = axes[1].imshow(post_t, cmap="Oranges", aspect="auto")
     im3 = axes[2].imshow(
-        diff, cmap="RdBu_r", aspect="auto", vmin=-v_max, vmax=v_max,
+        diff,
+        cmap="RdBu_r",
+        aspect="auto",
+        vmin=-v_max,
+        vmax=v_max,
     )
     titles = [
         "Pre-RL Transitions",
         "Post-RL Transitions",
         "Difference (Post-Pre)",
     ]
-    for ax_i, title, im in zip(axes, titles, [im1, im2, im3]):
+    for ax_i, title, im in zip(axes, titles, [im1, im2, im3], strict=False):
         ax_i.set_title(title, fontweight="bold")
         ax_i.set_xticks(range(action_dim))
         ax_i.set_yticks(range(action_dim))
         ax_i.set_xticklabels(
-            short_labels, rotation=45, ha="right", fontsize=8,
+            short_labels,
+            rotation=45,
+            ha="right",
+            fontsize=8,
         )
         ax_i.set_yticklabels(short_labels, fontsize=8)
         ax_i.set_xlabel("Next Action")
@@ -651,7 +713,9 @@ def generate_action_distribution_plots(
         plt.colorbar(im, ax=ax_i, fraction=0.046)
     fig.tight_layout()
     fig.savefig(
-        out_dir / "action_transitions.png", dpi=_DPI, bbox_inches="tight",
+        out_dir / "action_transitions.png",
+        dpi=_DPI,
+        bbox_inches="tight",
     )
     plt.close(fig)
 
@@ -725,7 +789,11 @@ def run_action_distribution_analysis(
 
     logger.info("Collecting pre-RL action statistics ...")
     pre_stats = collect_action_statistics(
-        pre_model, env_ids, num_episodes, cfg, device,
+        pre_model,
+        env_ids,
+        num_episodes,
+        cfg,
+        device,
     )
     logger.info(
         "Pre-RL: %d actions, win=%.2f%%, return=%.3f",
@@ -736,7 +804,11 @@ def run_action_distribution_analysis(
 
     logger.info("Collecting post-RL action statistics ...")
     post_stats = collect_action_statistics(
-        post_model, env_ids, num_episodes, cfg, device,
+        post_model,
+        env_ids,
+        num_episodes,
+        cfg,
+        device,
     )
     logger.info(
         "Post-RL: %d actions, win=%.2f%%, return=%.3f",
@@ -761,7 +833,11 @@ def run_action_distribution_analysis(
 
     # Metrics
     metrics = compute_all_metrics(
-        pre_probs, post_probs, pre_stats, post_stats, action_dim,
+        pre_probs,
+        post_probs,
+        pre_stats,
+        post_stats,
+        action_dim,
     )
 
     # Statistical tests
@@ -769,8 +845,13 @@ def run_action_distribution_analysis(
 
     # Plots
     generate_action_distribution_plots(
-        pre_probs, post_probs, pre_stats, post_stats,
-        metrics, action_dim, out_dir,
+        pre_probs,
+        post_probs,
+        pre_stats,
+        post_stats,
+        metrics,
+        action_dim,
+        out_dir,
     )
 
     # Interpretation
