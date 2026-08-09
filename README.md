@@ -436,7 +436,6 @@ python main.py --mode online --checkpoint old.pth --override wandb_resume_id=abc
 | `diffusion/` | `loss`, `loss_diff`, `loss_aux` |
 | `train/` | `buffer_size`, `buffer_online_frac`, `model_won`, `added_to_buffer`, `episodes_collected`, `model_steps`, `oracle_steps`, `efficiency_ratio`, `lr`, `grad_norm`, `global_gate`, `env_steps`, `progress` |
 | `speed/` | `iter_time_sec`, `collect_time_sec`, `train_step_time_sec`, `samples_per_sec`, `env_steps_per_sec`, `gpu_memory_mb` |
-| `perf/` | `iter_time_s`, `collect_time_s`, `train_time_s`, `grad_steps_per_sec` (legacy compat) |
 | `model/` | `param_norm`, `param_drift_from_init`, `ema_gate_value` (every 10 iters) |
 | `eval_id/{env}/`, `eval_ood/{env}/` | Per-env win rate, avg steps, avg reward |
 | `eval_id/`, `eval_ood/` | `mean_win_rate` |

@@ -13,8 +13,8 @@ import os
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -67,8 +67,6 @@ def run_model_episode(
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
 
-    _use_stochastic = stochastic
-
     env = make_env(env_id, des_file, cfg)
     try:
         (local, glb), _info = env.reset(seed=seed)
@@ -82,29 +80,39 @@ def run_model_episode(
         step_in_plan = 0
 
         model.eval()
-        for step_idx in range(max_steps):
-            # Replan when needed
+        for _step_idx in range(max_steps):
             if plan is None or step_in_plan >= cfg.replan_every:
-                local_t = torch.from_numpy(
-                    local[np.newaxis]
-                ).long().to(device)  # [1, 9, 9]
-                glb_t = torch.from_numpy(
-                    glb[np.newaxis]
-                ).long().to(device)  # [1, 21, 79]
-                if _use_stochastic:
+                local_t = (
+                    torch.from_numpy(local[np.newaxis]).long().to(device)
+                )  # [1, 9, 9]
+                glb_t = (
+                    torch.from_numpy(glb[np.newaxis]).long().to(device)
+                )  # [1, 21, 79]
+                if stochastic:
                     plan = remdm_sample(
-                        model, local_t, glb_t, cfg, device,
+                        model,
+                        local_t,
+                        glb_t,
+                        cfg,
+                        device,
                         physics_aware=getattr(
-                            cfg, "physics_aware_sampling", False,
+                            cfg,
+                            "physics_aware_sampling",
+                            False,
                         ),
                         blind_global=blind_global,
                     )
                 else:
                     plan = greedy_sample(
-                        model, local_t, glb_t, cfg, device,
+                        model,
+                        local_t,
+                        glb_t,
+                        cfg,
+                        device,
                         blind_global=blind_global,
                         num_steps=getattr(
-                            cfg, "diffusion_steps_collect",
+                            cfg,
+                            "diffusion_steps_collect",
                             cfg.diffusion_steps_eval,
                         ),
                     )  # [1, seq_len]
@@ -168,12 +176,14 @@ def _collect_episode_thread(
     """
     try:
         model_result = run_model_episode(
-            model, env_id, cfg, "cpu", seed,
+            model,
+            env_id,
+            cfg,
+            "cpu",
+            seed,
         )
         oracle_result = collect_oracle_trajectory(env_id, seed, cfg)
-        oracle_steps = (
-            len(oracle_result["actions"]) if oracle_result else 999
-        )
+        oracle_steps = len(oracle_result["actions"]) if oracle_result else 999
         return {
             "env_id": env_id,
             "seed": seed,
@@ -184,7 +194,8 @@ def _collect_episode_thread(
         }
     except Exception:
         logger.error(
-            f"Thread worker failed for {env_id} seed={seed}", exc_info=True,
+            f"Thread worker failed for {env_id} seed={seed}",
+            exc_info=True,
         )
         return None
 
@@ -212,7 +223,7 @@ class DataCollector:
 
     def __init__(
         self,
-        ema: "ModelEMA",
+        ema: ModelEMA,
         model: torch.nn.Module,
         buffer: ReplayBuffer,
         curriculum: DynamicCurriculum,
@@ -226,7 +237,7 @@ class DataCollector:
         self.curriculum = curriculum
         self.cfg = cfg
         self.device = device
-        self._num_workers = getattr(cfg, "num_collection_workers", 0)
+        self._num_workers = getattr(cfg, "num_collection_workers", 0)  # fallback 0 != defaults.yaml (8); partial-config callers rely on it
         self._last_profile: dict[str, float] = {}
         self._thread_pool: ThreadPoolExecutor | None = None
         self._thread_models: list[torch.nn.Module] = []
@@ -258,16 +269,20 @@ class DataCollector:
 
         # Model rollout
         model_result = run_model_episode(
-            self.ema_model, env_id, self.cfg, self.device, seed,
+            self.ema_model,
+            env_id,
+            self.cfg,
+            self.device,
+            seed,
         )
 
         # Oracle rollout (same seed)
         oracle_result = collect_oracle_trajectory(
-            env_id, seed, self.cfg,
+            env_id,
+            seed,
+            self.cfg,
         )
-        oracle_steps = (
-            len(oracle_result["actions"]) if oracle_result else 999
-        )
+        oracle_steps = len(oracle_result["actions"]) if oracle_result else 999
 
         # Efficiency filter
         add = efficiency_filter(
@@ -291,7 +306,8 @@ class DataCollector:
         }
 
     def collect_batch_parallel(
-        self, n_episodes: int,
+        self,
+        n_episodes: int,
     ) -> list[dict]:
         """Collect multiple episodes in parallel using threads.
 
@@ -330,7 +346,11 @@ class DataCollector:
         for i, (env_id, seed) in enumerate(tasks):
             model = self._thread_models[i % n_models]
             f = self._thread_pool.submit(
-                _collect_episode_thread, model, env_id, seed, self.cfg,
+                _collect_episode_thread,
+                model,
+                env_id,
+                seed,
+                self.cfg,
             )
             futures.append(f)
 
@@ -355,17 +375,17 @@ class DataCollector:
 
             self.curriculum.update(res["env_id"], res["model_won"])
 
-            stats_list.append({
-                "env_id": res["env_id"],
-                "model_won": res["model_won"],
-                "model_steps": res["model_steps"],
-                "oracle_steps": res["oracle_steps"],
-                "added_to_buffer": add and oracle_result is not None,
-            })
+            stats_list.append(
+                {
+                    "env_id": res["env_id"],
+                    "model_won": res["model_won"],
+                    "model_steps": res["model_steps"],
+                    "oracle_steps": res["oracle_steps"],
+                    "added_to_buffer": add and oracle_result is not None,
+                }
+            )
 
         return stats_list
-
-    # ── GPU-batched collection ──────────────────────────────────
 
     def collect_batch_gpu(self, n_episodes: int) -> list[dict]:
         """Collect episodes with GPU-batched model inference.
@@ -400,7 +420,10 @@ class DataCollector:
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             oracle_futures = [
                 pool.submit(
-                    collect_oracle_trajectory, env_id, seed, cfg,
+                    collect_oracle_trajectory,
+                    env_id,
+                    seed,
+                    cfg,
                 )
                 for env_id, seed in tasks
             ]
@@ -410,11 +433,11 @@ class DataCollector:
         # Phase 3: Efficiency filter + buffer add
         stats_list: list[dict] = []
         for (env_id, _seed), m_res, o_res in zip(
-            tasks, model_results, oracle_results,
+            tasks,
+            model_results,
+            oracle_results, strict=False,
         ):
-            oracle_steps = (
-                len(o_res["actions"]) if o_res else 999
-            )
+            oracle_steps = len(o_res["actions"]) if o_res else 999
             add = efficiency_filter(
                 m_res["won"],
                 m_res["steps"],
@@ -424,13 +447,15 @@ class DataCollector:
             if add and o_res is not None:
                 self.buffer.add(o_res)
             self.curriculum.update(env_id, m_res["won"])
-            stats_list.append({
-                "env_id": env_id,
-                "model_won": m_res["won"],
-                "model_steps": m_res["steps"],
-                "oracle_steps": oracle_steps,
-                "added_to_buffer": add and o_res is not None,
-            })
+            stats_list.append(
+                {
+                    "env_id": env_id,
+                    "model_won": m_res["won"],
+                    "model_steps": m_res["steps"],
+                    "oracle_steps": oracle_steps,
+                    "added_to_buffer": add and o_res is not None,
+                }
+            )
 
         self._last_profile["model_rollout_sec"] = model_time
         self._last_profile["oracle_rollout_sec"] = oracle_time
@@ -461,7 +486,9 @@ class DataCollector:
         n = len(tasks)
         max_steps = 500
         K = getattr(
-            cfg, "diffusion_steps_collect", cfg.diffusion_steps_eval,
+            cfg,
+            "diffusion_steps_collect",
+            cfg.diffusion_steps_eval,
         )
         cs = cfg.crop_size
 
@@ -469,7 +496,8 @@ class DataCollector:
         envs: list = []
         cur_local = np.zeros((n, cs, cs), dtype=np.int16)
         cur_global = np.zeros(
-            (n, cfg.map_h, cfg.map_w), dtype=np.int16,
+            (n, cfg.map_h, cfg.map_w),
+            dtype=np.int16,
         )
 
         t_reset = time.perf_counter()
@@ -483,7 +511,8 @@ class DataCollector:
 
         # Pre-allocate history buffers
         obs_local = np.zeros(
-            (n, max_steps + 1, cs, cs), dtype=np.int16,
+            (n, max_steps + 1, cs, cs),
+            dtype=np.int16,
         )
         obs_global = np.zeros(
             (n, max_steps + 1, cfg.map_h, cfg.map_w),
@@ -513,16 +542,32 @@ class DataCollector:
                 )[0]
                 if len(replan_idx) > 0:
                     t0 = time.perf_counter()
-                    local_t = torch.from_numpy(
-                        cur_local[replan_idx],
-                    ).long().to(device)
-                    glb_t = torch.from_numpy(
-                        cur_global[replan_idx],
-                    ).long().to(device)
-                    batch_plans = greedy_sample(
-                        model, local_t, glb_t, cfg, device,
-                        num_steps=K,
-                    ).cpu().numpy()
+                    local_t = (
+                        torch.from_numpy(
+                            cur_local[replan_idx],
+                        )
+                        .long()
+                        .to(device)
+                    )
+                    glb_t = (
+                        torch.from_numpy(
+                            cur_global[replan_idx],
+                        )
+                        .long()
+                        .to(device)
+                    )
+                    batch_plans = (
+                        greedy_sample(
+                            model,
+                            local_t,
+                            glb_t,
+                            cfg,
+                            device,
+                            num_steps=K,
+                        )
+                        .cpu()
+                        .numpy()
+                    )
                     plans[replan_idx] = batch_plans
                     step_in_plan[replan_idx] = 0
                     need_replan[replan_idx] = False
@@ -538,7 +583,8 @@ class DataCollector:
 
                     action = int(plans[i, step_in_plan[i]])
                     action = max(
-                        0, min(action, cfg.action_dim - 1),
+                        0,
+                        min(action, cfg.action_dim - 1),
                     )
                     act_buf[i, n_steps[i]] = action
                     step_in_plan[i] += 1
@@ -547,9 +593,7 @@ class DataCollector:
                     if step_in_plan[i] >= cfg.replan_every:
                         need_replan[i] = True
 
-                    obs, reward, term, trunc, info = (
-                        envs[i].step(action)
-                    )
+                    obs, reward, term, trunc, info = envs[i].step(action)
                     local, glb = obs
                     total_reward[i] += reward
                     cur_local[i] = local
@@ -573,19 +617,23 @@ class DataCollector:
         results: list[dict] = []
         for i in range(n):
             T = int(n_steps[i])
-            results.append({
-                "local": obs_local[i, :T].copy(),
-                "global": obs_global[i, :T].copy(),
-                "actions": act_buf[i, :T].copy(),
-                "won": bool(won[i]),
-                "steps": T,
-                "total_reward": float(total_reward[i]),
-                "seed": tasks[i][1],
-            })
+            results.append(
+                {
+                    "local": obs_local[i, :T].copy(),
+                    "global": obs_global[i, :T].copy(),
+                    "actions": act_buf[i, :T].copy(),
+                    "won": bool(won[i]),
+                    "steps": T,
+                    "total_reward": float(total_reward[i]),
+                    "seed": tasks[i][1],
+                }
+            )
 
-        self._last_profile.update({
-            "env_reset_sec": reset_time,
-            "gpu_inference_sec": inference_time,
-            "env_step_sec": env_step_time,
-        })
+        self._last_profile.update(
+            {
+                "env_reset_sec": reset_time,
+                "gpu_inference_sec": inference_time,
+                "env_step_sec": env_step_time,
+            }
+        )
         return results

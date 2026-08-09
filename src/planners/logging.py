@@ -7,9 +7,11 @@ Mirrors the Craftax logging conventions with metric namespaces:
 from __future__ import annotations
 
 import logging
-import torch
-from typing import TYPE_CHECKING
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
+
+import torch
+import contextlib
 
 if TYPE_CHECKING:
     from wandb.sdk.wandb_run import Run as _WandbRun
@@ -18,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 def download_artifact(
-    artifact_ref: str, dst_dir: str = "artifacts",
+    artifact_ref: str,
+    dst_dir: str = "artifacts",
 ) -> str | None:
     """Download a W&B artifact via the public API (no active run needed).
 
@@ -32,17 +35,16 @@ def download_artifact(
         directory, or ``None`` on failure.
     """
     try:
-        import wandb
         from pathlib import Path
+
+        import wandb
 
         api = wandb.Api()
         artifact = api.artifact(artifact_ref)
         artifact_dir = artifact.download(root=dst_dir)
         pth_files = list(Path(artifact_dir).glob("*.pth"))
         if not pth_files:
-            logger.error(
-                f"No .pth file found in artifact {artifact_ref}"
-            )
+            logger.error(f"No .pth file found in artifact {artifact_ref}")
             return None
         path = str(pth_files[0])
         logger.info(f"Downloaded artifact {artifact_ref} -> {path}")
@@ -96,6 +98,7 @@ class Logger:
         if self._use_wandb:
             try:
                 import wandb
+
                 run_name = getattr(cfg, "wandb_run_name", None)
                 if not run_name:
                     run_name = _auto_run_name(cfg)
@@ -111,11 +114,16 @@ class Logger:
                 # Define custom metric x-axes
                 wandb.define_metric("iteration")
                 for ns in (
-                    "diffusion/*", "train/*", "perf/*", "speed/*",
+                    "diffusion/*",
+                    "train/*",
+                    "speed/*",
                     "model/*",
-                    "eval_id/*", "eval_ood/*",
+                    "eval_id/*",
+                    "eval_ood/*",
                     "curriculum/*",
-                    "ckpt_eval_id/*", "ckpt_eval_ood/*", "ckpt_eval/*",
+                    "ckpt_eval_id/*",
+                    "ckpt_eval_ood/*",
+                    "ckpt_eval/*",
                     "inference/*",
                 ):
                     wandb.define_metric(ns, step_metric="iteration")
@@ -130,10 +138,8 @@ class Logger:
             metrics: Flat ``{key: value}`` dict.
         """
         if self._use_wandb and self._run is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._run.summary.update(metrics)
-            except Exception:
-                pass
 
     def log(self, metrics: dict, step: int) -> None:
         """Log a dict of metrics.
@@ -145,6 +151,7 @@ class Logger:
         if self._use_wandb and self._run is not None:
             try:
                 import wandb
+
                 # Include "iteration" so define_metric(step_metric="iteration") works
                 wandb.log({**metrics, "iteration": step}, step=step)
             except Exception:
@@ -164,7 +171,10 @@ class Logger:
             logger.info("  ".join(parts))
 
     def log_eval(
-        self, results: dict[str, dict], step: int, prefix: str,
+        self,
+        results: dict[str, dict],
+        step: int,
+        prefix: str,
     ) -> None:
         """Flatten evaluation results and log them.
 
@@ -227,14 +237,10 @@ class Logger:
         if self._use_wandb and self._run is not None:
             try:
                 import wandb
+
                 wandb.finish()
             except Exception:
                 pass
-
-
-# ---------------------------------------------------------------------------
-# Metric helper functions (used by both src/ and experiments/)
-# ---------------------------------------------------------------------------
 
 
 def gpu_memory_mb() -> float:
@@ -266,7 +272,7 @@ def compute_param_norm(model: torch.nn.Module) -> float:
     total = 0.0
     for p in model.parameters():
         total += p.data.norm(2).item() ** 2
-    return total ** 0.5
+    return total**0.5
 
 
 def compute_param_drift(
@@ -286,4 +292,4 @@ def compute_param_drift(
     for name, p in model.named_parameters():
         if name in ref_state:
             total += (p.data - ref_state[name]).norm(2).item() ** 2
-    return total ** 0.5
+    return total**0.5

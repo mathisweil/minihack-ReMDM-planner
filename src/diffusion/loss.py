@@ -3,14 +3,13 @@
 Shared pseudocode lines 2-6 (METHOD_PARITY 2.1); the craftax twin is
 src/diffusion/loss.py:compute_loss.
 
-Ported from the Craftax JAX implementation (src/diffusion/loss.py).
 Computes continuous-time loss on masked positions only, with analytic
 SUBS weighting clipped for numerical stability.
 """
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F
@@ -18,8 +17,8 @@ from torch import Tensor
 
 from src.diffusion.schedules import get_schedule_deriv_for
 
-
-_MAX_WEIGHT: float = 1000.0
+_MAX_WEIGHT: float = 1000.0  # matches loss_weight_clip default; craftax twin identical
+_WEIGHT_DENOM_EPS: float = 1e-5  # floor for 1 - alpha_t; craftax _EPS identical
 
 
 def mdlm_loss(
@@ -63,6 +62,11 @@ def mdlm_loss(
     Returns:
         Scalar loss. Returns ``0.0`` when no masked positions exist.
     """
+    if logits.ndim != 3 or x0.shape != zt.shape or x0.shape != logits.shape[:2]:
+        raise ValueError(
+            "mdlm_loss expects logits [B, L, V] with x0/zt [B, L]; got "
+            f"{tuple(logits.shape)}, {tuple(x0.shape)}, {tuple(zt.shape)}"
+        )
     B, L, V = logits.shape
 
     # Mask: compute loss only on masked, non-PAD positions
@@ -91,7 +95,8 @@ def mdlm_loss(
         schedule_deriv_fn = get_schedule_deriv_for(schedule_fn)
     alpha_t = schedule_fn(t)  # [B]
     w_t = (-schedule_deriv_fn(t)) / torch.clamp(
-        1.0 - alpha_t, min=1e-5,
+        1.0 - alpha_t,
+        min=_WEIGHT_DENOM_EPS,
     )  # [B]
     w_t = torch.clamp(w_t, max=weight_clip)  # [B]
 
@@ -120,7 +125,7 @@ def auxiliary_goal_loss(
     targets = targets.to(goal_pred.device, dtype=goal_pred.dtype)
 
     # Only supervise where staircase is visible
-    valid = (targets[:, 0] != pad_value)  # [B]
+    valid = targets[:, 0] != pad_value  # [B]
     if not valid.any():
         return goal_pred.new_tensor(0.0)
 
@@ -154,9 +159,7 @@ def find_staircase_from_glyphs(global_obs: Tensor) -> Tensor:
         | (global_obs == 2383)
     )
 
-    coords = torch.full(
-        (B, 2), -1.0, dtype=torch.float32, device=global_obs.device
-    )
+    coords = torch.full((B, 2), -1.0, dtype=torch.float32, device=global_obs.device)
     for b in range(B):
         positions = is_stair[b].nonzero(as_tuple=False)  # [N, 2]
         if positions.shape[0] > 0:

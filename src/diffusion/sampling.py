@@ -27,9 +27,17 @@ _HAZARD_CHARS: frozenset[int] = frozenset(
 )
 # Cardinal action → (dy, dx) offsets
 _CARDINAL_OFFSETS: dict[int, tuple[int, int]] = {
-    0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1),
+    0: (-1, 0),
+    1: (0, 1),
+    2: (1, 0),
+    3: (0, -1),
 }
 _N_PHYSICS_CHECK = 8  # only inspect the first N plan positions
+
+# Stability guards; values must match the craftax twin exactly.
+_SIGMA_DENOM_EPS = 1e-8  # sigma_max and posterior denominators
+# Demotion value for hazardous actions under the conf strategy (CH-6).
+_HAZARD_DECODE_PROB = 0.001
 
 
 def _check_hazard(local_crop: np.ndarray, action: int) -> bool:
@@ -87,7 +95,6 @@ def _compute_remask_prob(
 ) -> Tensor | float:
     """Compute per-token remasking probability.
 
-    C-003 (F-047, D6/D9): unified with the craftax implementation.
     FIX-3 (ADJUDICATION B-3): the ``conf`` strategy now consumes the
     stored decoding probability ``psi`` from the step each token was last
     unmasked (ReMDM Sec 4.1), not the current step's fresh confidence.
@@ -198,9 +205,7 @@ def remdm_sample(
 
     # Start fully masked; psi stores the decoding probability at the step
     # each token was last unmasked (+inf while masked), per ReMDM Sec 4.1.
-    seq = torch.full(
-        (B, seq_len), mask_token, dtype=torch.long, device=device
-    )
+    seq = torch.full((B, seq_len), mask_token, dtype=torch.long, device=device)
     psi = torch.full((B, seq_len), float("inf"), device=device)
 
     # FIX-3 (ADJUDICATION B-3): ReMDM Algorithm 1 (Wang et al.). Masked
@@ -219,30 +224,25 @@ def remdm_sample(
         t_discrete = torch.full(
             (B,),
             min(int(t * cfg.num_diffusion_steps), cfg.num_diffusion_steps - 1),
-            dtype=torch.long, device=device,
+            dtype=torch.long,
+            device=device,
         )
 
-        # Forward pass
         out = model(local_obs, global_obs, seq, t_discrete)
         logits = out["actions"]  # [B, seq_len, vocab]
 
         # Mask invalid action tokens (indices >= action_dim)
         logits[:, :, action_dim:] = float("-inf")
 
-        # Temperature scaling
         logits = logits / cfg.temperature
 
         # Nucleus filtering (CH-1)
         logits = top_p_filter(logits, cfg.top_p)
 
-        # Sample predictions
         probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]
         preds = Categorical(probs=probs).sample()  # [B, seq_len]
 
-        # Decoding probability of the sampled token
-        decode_prob = probs.gather(
-            -1, preds.unsqueeze(-1)
-        ).squeeze(-1)  # [B, seq_len]
+        decode_prob = probs.gather(-1, preds.unsqueeze(-1)).squeeze(-1)  # [B, seq_len]
 
         # Physics softener (unsourced engineering, default off; CH-6):
         # demote hazardous cardinal actions to decode_prob=0.001 so the
@@ -255,52 +255,41 @@ def remdm_sample(
                 for pos in range(min(_N_PHYSICS_CHECK, seq_len)):
                     action = int(preds_np[b, pos])
                     if _check_hazard(crop_b, action):
-                        prob_override[b, pos] = 0.001
+                        prob_override[b, pos] = _HAZARD_DECODE_PROB
             decode_prob = prob_override
 
         committed = seq != mask_token  # [B, seq_len]
 
         # Remasking probability sigma in [0, sigma_max] (ReMDM eq 7)
-        sigma_max = min(1.0, (1.0 - alpha_s) / max(alpha_t, 1e-8))
+        sigma_max = min(1.0, (1.0 - alpha_s) / max(alpha_t, _SIGMA_DENOM_EPS))
         sigma = _compute_remask_prob(
             cfg.remask_strategy, cfg.eta, sigma_max, psi, committed
         )
         if not isinstance(sigma, Tensor):
-            sigma = torch.full(
-                (B, seq_len), float(sigma), device=device
-            )
+            sigma = torch.full((B, seq_len), float(sigma), device=device)
 
         # Algorithm 1 posterior: masked tokens unmask w.p.
         # (alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)
         p_unmask = torch.clamp(
-            (alpha_s - (1.0 - sigma) * alpha_t)
-            / max(1.0 - alpha_t, 1e-8),
-            0.0, 1.0,
+            (alpha_s - (1.0 - sigma) * alpha_t) / max(1.0 - alpha_t, _SIGMA_DENOM_EPS),
+            0.0,
+            1.0,
         )
 
-        do_unmask = ~committed & (
-            torch.rand(B, seq_len, device=device) < p_unmask
-        )
-        do_remask = committed & (
-            torch.rand(B, seq_len, device=device) < sigma
-        )
+        do_unmask = ~committed & (torch.rand(B, seq_len, device=device) < p_unmask)
+        do_remask = committed & (torch.rand(B, seq_len, device=device) < sigma)
 
         seq = torch.where(do_unmask, preds, seq)
         seq = torch.where(do_remask, mask_token, seq)
         psi = torch.where(do_unmask, decode_prob, psi)
-        psi = torch.where(
-            do_remask, torch.full_like(psi, float("inf")), psi
-        )
+        psi = torch.where(do_remask, torch.full_like(psi, float("inf")), psi)
 
         # Analytics tracking
         if return_analytics:
             path_per_step.append(seq[0].cpu().numpy().copy())
-            still_masked = (seq[0] == mask_token)
+            still_masked = seq[0] == mask_token
             unmasked_prob = psi[0][~still_masked]
-            avg_conf = (
-                unmasked_prob.mean().item()
-                if unmasked_prob.numel() > 0 else 0.0
-            )
+            avg_conf = unmasked_prob.mean().item() if unmasked_prob.numel() > 0 else 0.0
             tracking_confidence.append(avg_conf)
             tracking_masked_count.append(int(still_masked.sum().item()))
 
@@ -357,14 +346,19 @@ def greedy_sample(
         global_obs = torch.zeros_like(global_obs)
 
     seq = torch.full(
-        (B, seq_len), mask_token, dtype=torch.long, device=device,
+        (B, seq_len),
+        mask_token,
+        dtype=torch.long,
+        device=device,
     )
 
     for k in range(1, K + 1):
         ratio = k / K
         t_discrete = torch.full(
-            (B,), int(cfg.num_diffusion_steps * (1.0 - ratio)),
-            dtype=torch.long, device=device,
+            (B,),
+            int(cfg.num_diffusion_steps * (1.0 - ratio)),
+            dtype=torch.long,
+            device=device,
         )
 
         out = model(local_obs, global_obs, seq, t_discrete)

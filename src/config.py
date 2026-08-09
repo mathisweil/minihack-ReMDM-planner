@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +33,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
         The merged dictionary (same object as *base*).
     """
     for key, value in override.items():
-        if (
-            key in base
-            and isinstance(base[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
             _deep_merge(base[key], value)
         else:
             base[key] = value
@@ -116,10 +113,8 @@ def _cast_override(key: str, raw: str, current) -> object:
         and not isinstance(current, bool)
         and isinstance(value, str)
     ):
-        try:
+        with contextlib.suppress(ValueError):
             value = float(value)
-        except ValueError:
-            pass
 
     if isinstance(current, bool):
         if not isinstance(value, bool):
@@ -173,7 +168,7 @@ def load_config(
         cli_overrides = {}
 
     defaults_path = _PROJECT_ROOT / "configs" / "defaults.yaml"
-    with open(defaults_path, "r") as fh:
+    with open(defaults_path) as fh:
         cfg = yaml.safe_load(fh)
 
     allowed = set(cfg) | _RUN_KEYS
@@ -183,11 +178,9 @@ def load_config(
         if not config_path_resolved.is_absolute():
             config_path_resolved = _PROJECT_ROOT / config_path_resolved
         if config_path_resolved.resolve() != defaults_path.resolve():
-            with open(config_path_resolved, "r") as fh:
+            with open(config_path_resolved) as fh:
                 overrides = yaml.safe_load(fh) or {}
-            _validate_keys(
-                overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path)
-            )
+            _validate_keys(overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path))
             _deep_merge(cfg, overrides)
 
     _validate_keys(cli_overrides, allowed, "--override")
@@ -203,6 +196,7 @@ def load_config(
     elif "device" not in cfg:
         try:
             import torch
+
             cfg["device"] = "cuda" if torch.cuda.is_available() else "cpu"
         except ImportError:
             cfg["device"] = "cpu"
@@ -214,8 +208,7 @@ def load_config(
         f"mask_token ({ns.mask_token}) must equal action_dim ({ns.action_dim})"
     )
     assert ns.pad_token == ns.action_dim + 1, (
-        f"pad_token ({ns.pad_token}) must equal action_dim + 1 "
-        f"({ns.action_dim + 1})"
+        f"pad_token ({ns.pad_token}) must equal action_dim + 1 ({ns.action_dim + 1})"
     )
 
     return ns
@@ -236,7 +229,7 @@ def make_run_dir(cfg: SimpleNamespace, tag: str = "run") -> Path:
     Returns:
         The created directory path.
     """
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     suffix = secrets.token_hex(2)
     run_dir = Path(cfg.checkpoint_dir).resolve() / f"{tag}_{ts}_{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)

@@ -7,12 +7,12 @@ with optional auxiliary goal loss.
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from pathlib import Path
-import logging
 from types import SimpleNamespace
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -88,7 +88,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         _ema_source = raw_model if raw_model is not None else model
         model.train()
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=cfg.offline_lr,
+            model.parameters(),
+            lr=cfg.offline_lr,
             weight_decay=cfg.weight_decay,
         )
 
@@ -99,7 +100,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         # — this is what gives offline / DAgger / SB3 runs a common
         # denominator when comparing curves.
         total_grad_steps = max(
-            1, cfg.total_timesteps // cfg.offline_batch_size,
+            1,
+            cfg.total_timesteps // cfg.offline_batch_size,
         )
         # Optional override: pin offline gradient budget independently
         # of `total_timesteps`. Used for paper-fair compute matching
@@ -115,7 +117,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 f"{total_grad_steps} (overrides total_timesteps)"
             )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=total_grad_steps,
+            optimizer,
+            T_max=total_grad_steps,
             eta_min=cfg.offline_lr * 0.1,
         )
         # Checkpoint cadence — defaults to deriving from
@@ -127,14 +130,17 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         # cadence between offline and DAgger because their sample-to-step
         # ratios differ by ~50x).
         _ckpt_grad_override = getattr(
-            cfg, "offline_checkpoint_every_grad_steps", None,
+            cfg,
+            "offline_checkpoint_every_grad_steps",
+            None,
         )
         if _ckpt_grad_override is not None and _ckpt_grad_override > 0:
             ckpt_every_step = int(_ckpt_grad_override)
         else:
             ckpt_every_step = (
                 cfg.checkpoint_every_timesteps // cfg.offline_batch_size
-                if cfg.checkpoint_every_timesteps > 0 else 0
+                if cfg.checkpoint_every_timesteps > 0
+                else 0
             )
         # Eval cadence — same override pattern. Without this, an offline
         # run pinned at e.g. 60k grad steps with the default
@@ -142,12 +148,12 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         # (250000 // 2048 = 122 grad steps per eval), which is
         # impractically dense.
         _eval_grad_override = getattr(
-            cfg, "offline_eval_every_grad_steps", None,
+            cfg,
+            "offline_eval_every_grad_steps",
+            None,
         )
         if _eval_grad_override is not None and _eval_grad_override > 0:
-            id_eval_every_env_steps = (
-                int(_eval_grad_override) * cfg.offline_batch_size
-            )
+            id_eval_every_env_steps = int(_eval_grad_override) * cfg.offline_batch_size
             ood_eval_every_env_steps = id_eval_every_env_steps
         else:
             id_eval_every_env_steps = cfg.id_eval_every_timesteps
@@ -171,7 +177,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         _floor = max(1, total_grad_steps // 1000)
         _ceiling = max(1, total_grad_steps // 10)
         log_every = min(
-            _ceiling, max(_floor, cfg.offline_log_every),
+            _ceiling,
+            max(_floor, cfg.offline_log_every),
         )
 
         # Restore optimizer/scheduler state if resuming
@@ -186,16 +193,10 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     resume_state["scheduler_state_dict"],
                 )
             step = resume_state.get("step", 0)
-            logger.info(
-                f"Resumed offline training from step {step}/"
-                f"{total_grad_steps}"
-            )
+            logger.info(f"Resumed offline training from step {step}/{total_grad_steps}")
 
         # AMP: enabled when use_amp=true and on CUDA
-        _use_amp = (
-            getattr(cfg, "use_amp", False)
-            and str(device).startswith("cuda")
-        )
+        _use_amp = getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
         scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
 
         loss_history: list[float] = []
@@ -235,20 +236,30 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             t = t.clamp(1e-5, 1.0 - 1e-5)
 
             zt = q_sample(
-                actions_t, t, cfg.mask_token, cfg.pad_token,
+                actions_t,
+                t,
+                cfg.mask_token,
+                cfg.pad_token,
                 schedule_fn,
             )
             t_discrete = (
-                t * cfg.num_diffusion_steps
-            ).long().clamp(0, cfg.num_diffusion_steps - 1)  # [B]
+                (t * cfg.num_diffusion_steps)
+                .long()
+                .clamp(0, cfg.num_diffusion_steps - 1)
+            )  # [B]
 
             optimizer.zero_grad()
             with torch.amp.autocast("cuda", enabled=_use_amp):
                 out = model(local_t, global_t, zt, t_discrete)
 
                 loss_diff = mdlm_loss(
-                    out["actions"], actions_t, zt, t,
-                    cfg.mask_token, cfg.pad_token, schedule_fn,
+                    out["actions"],
+                    actions_t,
+                    zt,
+                    t,
+                    cfg.mask_token,
+                    cfg.pad_token,
+                    schedule_fn,
                     weight_clip=cfg.loss_weight_clip,
                     label_smoothing=cfg.label_smoothing,
                 )
@@ -256,7 +267,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 loss_aux = torch.tensor(0.0, device=device)
                 if "goal_pred" in out:
                     loss_aux = auxiliary_goal_loss(
-                        out["goal_pred"], global_t,
+                        out["goal_pred"],
+                        global_t,
                     )
 
                 loss = loss_diff + cfg.aux_loss_weight * loss_aux
@@ -264,7 +276,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             grad_norm = nn.utils.clip_grad_norm_(
-                model.parameters(), cfg.offline_grad_clip,
+                model.parameters(),
+                cfg.offline_grad_clip,
             )
             scaler.step(optimizer)
             scaler.update()
@@ -310,12 +323,6 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     "speed/train_step_time_sec": step_time,
                     "speed/samples_per_sec": samples_per_sec,
                     "speed/gpu_memory_mb": gpu_memory_mb(),
-                    # Legacy `perf/` mirror keys (kept for backward compat
-                    # with existing dashboards / DAgger curves).
-                    "perf/train_time_s": step_time,
-                    "perf/grad_steps_per_sec": (
-                        log_every / max(step_time, 1e-6)
-                    ),
                 }
                 if hasattr(_ema_source_ref, "global_gate"):
                     gate_val = torch.sigmoid(
@@ -330,10 +337,9 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     metrics["model/param_norm"] = compute_param_norm(
                         _ema_source_ref,
                     )
-                    metrics["model/param_drift_from_init"] = (
-                        compute_param_drift(
-                            _ema_source_ref, _init_state,
-                        )
+                    metrics["model/param_drift_from_init"] = compute_param_drift(
+                        _ema_source_ref,
+                        _init_state,
                     )
 
                 log.log(metrics, step=step)
@@ -353,20 +359,23 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 evaluator is not None
                 and id_envs
                 and id_eval_every_env_steps > 0
-                and env_steps - last_id_eval_env_steps
-                >= id_eval_every_env_steps
+                and env_steps - last_id_eval_env_steps >= id_eval_every_env_steps
             ):
                 eval_model = ema_model.make_eval_model(_ema_source)
                 results = evaluator.evaluate(
-                    id_envs, eval_model, cfg.eval_episodes_per_env,
-                    cfg, device,
+                    id_envs,
+                    eval_model,
+                    cfg.eval_episodes_per_env,
+                    cfg,
+                    device,
                 )
                 if log is not None:
                     log.log_eval(results, step=step, prefix="eval_id")
                     mean_id_wr = (
-                        sum(s["win_rate"] for s in results.values())
-                        / len(results)
-                    ) if results else 0.0
+                        (sum(s["win_rate"] for s in results.values()) / len(results))
+                        if results
+                        else 0.0
+                    )
                     log.log(
                         {"eval_id/mean_win_rate": mean_id_wr},
                         step=step,
@@ -378,20 +387,23 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 evaluator is not None
                 and ood_envs
                 and ood_eval_every_env_steps > 0
-                and env_steps - last_ood_eval_env_steps
-                >= ood_eval_every_env_steps
+                and env_steps - last_ood_eval_env_steps >= ood_eval_every_env_steps
             ):
                 eval_model = ema_model.make_eval_model(_ema_source)
                 results = evaluator.evaluate(
-                    ood_envs, eval_model, cfg.eval_episodes_per_env,
-                    cfg, device,
+                    ood_envs,
+                    eval_model,
+                    cfg.eval_episodes_per_env,
+                    cfg,
+                    device,
                 )
                 if log is not None:
                     log.log_eval(results, step=step, prefix="eval_ood")
                     mean_ood_wr = (
-                        sum(s["win_rate"] for s in results.values())
-                        / len(results)
-                    ) if results else 0.0
+                        (sum(s["win_rate"] for s in results.values()) / len(results))
+                        if results
+                        else 0.0
+                    )
                     log.log(
                         {"eval_ood/mean_win_rate": mean_ood_wr},
                         step=step,
@@ -400,13 +412,15 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
 
             # Periodic step-level checkpoint (cadence derived from
             # checkpoint_every_timesteps)
-            if (
-                ckpt_every_step > 0
-                and step - last_ckpt_step >= ckpt_every_step
-            ):
+            if ckpt_every_step > 0 and step - last_ckpt_step >= ckpt_every_step:
                 _save_offline_checkpoint(
-                    _ema_source, ema_model, optimizer, scheduler,
-                    step, cfg, log,
+                    _ema_source,
+                    ema_model,
+                    optimizer,
+                    scheduler,
+                    step,
+                    cfg,
+                    log,
                     evaluator=evaluator,
                     id_envs=id_envs,
                     ood_envs=ood_envs,
@@ -415,11 +429,13 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 last_ckpt_step = step
 
         if log is not None:
-            log.log_summary({
-                "offline/final_loss": loss_history[-1] if loss_history else 0.0,
-                "offline/total_steps": step,
-                "offline/total_timesteps": step * cfg.offline_batch_size,
-            })
+            log.log_summary(
+                {
+                    "offline/final_loss": loss_history[-1] if loss_history else 0.0,
+                    "offline/total_steps": step,
+                    "offline/total_timesteps": step * cfg.offline_batch_size,
+                }
+            )
 
         return {
             "final_loss": loss_history[-1] if loss_history else 0.0,
@@ -496,9 +512,7 @@ def _save_offline_checkpoint(
     # Save config snapshot alongside checkpoint (mirrors DAgger).
     config_path: Path | None = ckpt_dir / f"config_offline_step{step}.yaml"
     try:
-        cfg_dict = {
-            k: v for k, v in vars(cfg).items() if not k.startswith("_")
-        }
+        cfg_dict = {k: v for k, v in vars(cfg).items() if not k.startswith("_")}
         with open(config_path, "w") as f:
             yaml.dump(cfg_dict, f, default_flow_style=False)
     except Exception:
@@ -507,31 +521,34 @@ def _save_offline_checkpoint(
 
     # Checkpoint-time eval — mirrors Trainer.save_checkpoint in online.py.
     # Skipped when the caller did not thread an evaluator through.
-    if (
-        evaluator is not None
-        and id_envs
-        and ood_envs
-        and device is not None
-    ):
+    if evaluator is not None and id_envs and ood_envs and device is not None:
         try:
             eval_model = ema_model.make_eval_model(model)
             id_results = evaluator.evaluate(
-                id_envs, eval_model, cfg.checkpoint_eval_episodes,
-                cfg, device,
+                id_envs,
+                eval_model,
+                cfg.checkpoint_eval_episodes,
+                cfg,
+                device,
             )
             ood_results = evaluator.evaluate(
-                ood_envs, eval_model, cfg.checkpoint_eval_episodes,
-                cfg, device,
+                ood_envs,
+                eval_model,
+                cfg.checkpoint_eval_episodes,
+                cfg,
+                device,
             )
 
             id_winrate = (
-                sum(s["win_rate"] for s in id_results.values())
-                / len(id_results)
-            ) if id_results else 0.0
+                (sum(s["win_rate"] for s in id_results.values()) / len(id_results))
+                if id_results
+                else 0.0
+            )
             ood_winrate = (
-                sum(s["win_rate"] for s in ood_results.values())
-                / len(ood_results)
-            ) if ood_results else 0.0
+                (sum(s["win_rate"] for s in ood_results.values()) / len(ood_results))
+                if ood_results
+                else 0.0
+            )
 
             current_lr = scheduler.get_last_lr()[0]
             training_meta = {
@@ -575,10 +592,14 @@ def _save_offline_checkpoint(
 
             if log is not None:
                 log.log_eval(
-                    id_results, step=step, prefix="ckpt_eval_id",
+                    id_results,
+                    step=step,
+                    prefix="ckpt_eval_id",
                 )
                 log.log_eval(
-                    ood_results, step=step, prefix="ckpt_eval_ood",
+                    ood_results,
+                    step=step,
+                    prefix="ckpt_eval_ood",
                 )
                 log.log(
                     {
@@ -587,13 +608,16 @@ def _save_offline_checkpoint(
                     },
                     step=step,
                 )
-                log.log_summary({
-                    f"ckpt_offline_step{step}/id_winrate": id_winrate,
-                    f"ckpt_offline_step{step}/ood_winrate": ood_winrate,
-                })
+                log.log_summary(
+                    {
+                        f"ckpt_offline_step{step}/id_winrate": id_winrate,
+                        f"ckpt_offline_step{step}/ood_winrate": ood_winrate,
+                    }
+                )
         except Exception:
             logger.error(
-                "Offline checkpoint eval failed", exc_info=True,
+                "Offline checkpoint eval failed",
+                exc_info=True,
             )
 
     # W&B artifact upload (no-op when wandb is not initialised).
@@ -608,7 +632,8 @@ def _save_offline_checkpoint(
 
 
 def load_offline_dataset(
-    path: str | None, cfg: SimpleNamespace,
+    path: str | None,
+    cfg: SimpleNamespace,
 ) -> dict | None:
     """Load an offline dataset from disk.
 
@@ -623,6 +648,7 @@ def load_offline_dataset(
         return None
     try:
         import torch as _torch
+
         return _torch.load(path, map_location="cpu", weights_only=False)
     except Exception:
         logger.error(f"Failed to load dataset from {path}", exc_info=True)
@@ -682,7 +708,9 @@ def run_offline(
     resume_state: dict | None = None
     if checkpoint_path:
         resume_state = torch.load(
-            checkpoint_path, map_location=device, weights_only=False,
+            checkpoint_path,
+            map_location=device,
+            weights_only=False,
         )
         raw_model.load_state_dict(resume_state["model_state_dict"])
         ema.load_state_dict(resume_state["ema_state_dict"])
@@ -697,15 +725,19 @@ def run_offline(
     evaluator = Evaluator()
     train_fn = make_offline_trainer(cfg)
     result = train_fn(
-        model, ema, buffer, cfg, device, log=log,
-        raw_model=raw_model, resume_state=resume_state,
+        model,
+        ema,
+        buffer,
+        cfg,
+        device,
+        log=log,
+        raw_model=raw_model,
+        resume_state=resume_state,
         evaluator=evaluator,
         id_envs=cfg.id_envs,
         ood_envs=cfg.ood_envs,
     )
-    logger.info(
-        f"Offline training done. Final loss: {result['final_loss']:.4f}"
-    )
+    logger.info(f"Offline training done. Final loss: {result['final_loss']:.4f}")
 
     # Save final checkpoint for downstream compatibility (DAgger, inference)
     wandb_run_id: str | None = None

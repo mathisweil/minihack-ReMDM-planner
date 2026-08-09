@@ -58,11 +58,6 @@ IMITATION_ALGOS: tuple[str, ...] = ("bc", "dt")
 ALL_BASELINE_ALGOS: tuple[str, ...] = SB3_RL_ALGOS + IMITATION_ALGOS
 
 
-# =============================================================================
-# Observation wrapper for SB3 dict-policies
-# =============================================================================
-
-
 class _SB3MiniHackWrapper(gym.Wrapper):
     """Reshape ``AdvancedObservationEnv`` tuple obs into an SB3 dict obs.
 
@@ -80,10 +75,16 @@ class _SB3MiniHackWrapper(gym.Wrapper):
         self.observation_space = gym.spaces.Dict(
             {
                 "local": gym.spaces.Box(
-                    low=0, high=6000, shape=(1, local_h, local_w), dtype=np.int16,
+                    low=0,
+                    high=6000,
+                    shape=(1, local_h, local_w),
+                    dtype=np.int16,
                 ),
                 "global": gym.spaces.Box(
-                    low=0, high=6000, shape=(1, cfg.map_h, cfg.map_w), dtype=np.int16,
+                    low=0,
+                    high=6000,
+                    shape=(1, cfg.map_h, cfg.map_w),
+                    dtype=np.int16,
                 ),
             }
         )
@@ -93,7 +94,8 @@ class _SB3MiniHackWrapper(gym.Wrapper):
         return self._pack(local, glob), info
 
     def step(
-        self, action: int,
+        self,
+        action: int,
     ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict]:
         (local, glob), reward, terminated, truncated, info = self.env.step(action)
         if "won" in info:
@@ -102,17 +104,13 @@ class _SB3MiniHackWrapper(gym.Wrapper):
 
     @staticmethod
     def _pack(
-        local: np.ndarray, glob: np.ndarray,
+        local: np.ndarray,
+        glob: np.ndarray,
     ) -> dict[str, np.ndarray]:
         return {
             "local": np.expand_dims(local, axis=0),  # [1, crop, crop]
             "global": np.expand_dims(glob, axis=0),  # [1, H, W]
         }
-
-
-# =============================================================================
-# CNN feature extractor (shared by SB3 RL + BC)
-# =============================================================================
 
 
 class _MiniHackCNN(BaseFeaturesExtractor):
@@ -125,7 +123,9 @@ class _MiniHackCNN(BaseFeaturesExtractor):
     """
 
     def __init__(
-        self, observation_space: gym.spaces.Dict, features_dim: int = 256,
+        self,
+        observation_space: gym.spaces.Dict,
+        features_dim: int = 256,
     ) -> None:
         super().__init__(observation_space, features_dim)
         self.local_cnn = nn.Sequential(
@@ -152,16 +152,12 @@ class _MiniHackCNN(BaseFeaturesExtractor):
         self.linear = nn.Sequential(nn.Linear(n_flatten, features_dim), nn.ReLU())
 
     def forward(
-        self, observations: dict[str, torch.Tensor],
+        self,
+        observations: dict[str, torch.Tensor],
     ) -> torch.Tensor:
         loc = self.local_cnn(observations["local"].float())  # [B, F_l]
         glob = self.global_cnn(observations["global"].float())  # [B, F_g]
         return self.linear(torch.cat([loc, glob], dim=1))
-
-
-# =============================================================================
-# Decision Transformer
-# =============================================================================
 
 
 class _MiniHackStateEncoder(nn.Module):
@@ -198,7 +194,9 @@ class _MiniHackStateEncoder(nn.Module):
         self.proj = nn.Linear(local_flat + global_flat, embed_dim)
 
     def forward(
-        self, local_obs: torch.Tensor, global_obs: torch.Tensor,
+        self,
+        local_obs: torch.Tensor,
+        global_obs: torch.Tensor,
     ) -> torch.Tensor:
         # Accepts (B, T, 1, H, W) or (B, 1, H, W).
         if local_obs.dim() == 5:
@@ -242,7 +240,11 @@ class _DecisionTransformer(nn.Module):
         self.max_ep_len = max_ep_len
 
         self.state_encoder = _MiniHackStateEncoder(
-            embed_dim, crop_h, crop_w, map_h, map_w,
+            embed_dim,
+            crop_h,
+            crop_w,
+            map_h,
+            map_w,
         )
         self.action_embed = nn.Embedding(n_actions + 1, embed_dim)  # +1 for pad
         self.return_embed = nn.Linear(1, embed_dim)
@@ -279,10 +281,10 @@ class _DecisionTransformer(nn.Module):
     def forward(
         self,
         returns_to_go: torch.Tensor,  # [B, T, 1]
-        local_obs: torch.Tensor,      # [B, T, 1, H_l, W_l]
-        global_obs: torch.Tensor,     # [B, T, 1, H_g, W_g]
-        actions: torch.Tensor,        # [B, T]
-        timesteps: torch.Tensor,      # [B, T]
+        local_obs: torch.Tensor,  # [B, T, 1, H_l, W_l]
+        global_obs: torch.Tensor,  # [B, T, 1, H_g, W_g]
+        actions: torch.Tensor,  # [B, T]
+        timesteps: torch.Tensor,  # [B, T]
         attention_mask: torch.Tensor | None = None,  # [B, T]
     ) -> torch.Tensor:
         B, T = returns_to_go.shape[:2]
@@ -304,7 +306,8 @@ class _DecisionTransformer(nn.Module):
 
         seq_len = 3 * T
         causal_mask = torch.triu(
-            torch.ones(seq_len, seq_len, device=device), diagonal=1,
+            torch.ones(seq_len, seq_len, device=device),
+            diagonal=1,
         ).bool()
 
         key_padding_mask = None
@@ -313,7 +316,9 @@ class _DecisionTransformer(nn.Module):
             key_padding_mask = expanded == 0
 
         hidden = self.transformer(
-            stacked, mask=causal_mask, src_key_padding_mask=key_padding_mask,
+            stacked,
+            mask=causal_mask,
+            src_key_padding_mask=key_padding_mask,
         )
         # State token positions are 1, 4, 7, ... -> stride 3.
         state_hidden = hidden[:, 1::3, :]  # [B, T, D]
@@ -330,7 +335,11 @@ class _DecisionTransformer(nn.Module):
     ) -> torch.Tensor:
         self.eval()
         logits = self.forward(
-            returns_to_go, local_obs, global_obs, actions, timesteps,
+            returns_to_go,
+            local_obs,
+            global_obs,
+            actions,
+            timesteps,
         )
         return logits[:, -1, :].argmax(dim=-1)
 
@@ -378,10 +387,14 @@ class _DTDataset(Dataset):
         pad_len = self.context_len - actual_len
         if pad_len > 0:
             local = np.pad(
-                local, ((0, pad_len), (0, 0), (0, 0), (0, 0)), mode="constant",
+                local,
+                ((0, pad_len), (0, 0), (0, 0), (0, 0)),
+                mode="constant",
             )
             glob = np.pad(
-                glob, ((0, pad_len), (0, 0), (0, 0), (0, 0)), mode="constant",
+                glob,
+                ((0, pad_len), (0, 0), (0, 0), (0, 0)),
+                mode="constant",
             )
             actions = np.pad(actions, (0, pad_len), mode="constant")
             rtg = np.pad(rtg, (0, pad_len), mode="constant")
@@ -400,11 +413,6 @@ class _DTDataset(Dataset):
         }
 
 
-# =============================================================================
-# SB3 callbacks + env factory
-# =============================================================================
-
-
 class _PrefixedEvalCallback(EvalCallback):
     """``EvalCallback`` that records mean_reward / avg_steps / win_rate
     under a unique per-environment prefix.
@@ -415,7 +423,10 @@ class _PrefixedEvalCallback(EvalCallback):
     """
 
     def __init__(
-        self, eval_env: SubprocVecEnv, prefix: str, **kwargs: Any,
+        self,
+        eval_env: SubprocVecEnv,
+        prefix: str,
+        **kwargs: Any,
     ) -> None:
         super().__init__(eval_env, **kwargs)
         self.prefix = prefix
@@ -424,10 +435,12 @@ class _PrefixedEvalCallback(EvalCallback):
         cont = super()._on_step()
         if self.evaluations_results:
             self.logger.record(
-                f"{self.prefix}/mean_reward", float(np.mean(self.evaluations_results[-1])),
+                f"{self.prefix}/mean_reward",
+                float(np.mean(self.evaluations_results[-1])),
             )
             self.logger.record(
-                f"{self.prefix}/avg_steps", float(np.mean(self.evaluations_length[-1])),
+                f"{self.prefix}/avg_steps",
+                float(np.mean(self.evaluations_length[-1])),
             )
         if self.evaluations_successes:
             self.logger.record(
@@ -447,11 +460,6 @@ def _make_sb3_env_fn(env_id: str, cfg: SimpleNamespace, log_dir: str):
         return Monitor(env, log_dir)
 
     return _init
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
 
 
 def _short(env_id: str) -> str:
@@ -475,16 +483,14 @@ def _seed_everything(seed: int) -> None:
 
 
 def _resolve_output_dir(cfg: SimpleNamespace, override: str | None) -> Path:
-    if override:
-        out = Path(override)
-    else:
-        out = Path(cfg.baselines_output_dir)
+    out = Path(override) if override else Path(cfg.baselines_output_dir)
     out.mkdir(parents=True, exist_ok=True)
     return out
 
 
 def _init_baseline_logger(
-    cfg: SimpleNamespace, run_name: str,
+    cfg: SimpleNamespace,
+    run_name: str,
 ) -> Logger:
     """Init the project Logger with W&B project swapped to baselines.
 
@@ -501,11 +507,6 @@ def _init_baseline_logger(
     cfg.wandb_run_name = run_name
     cfg.wandb_resume_id = None
     return Logger(cfg)
-
-
-# =============================================================================
-# BC training
-# =============================================================================
 
 
 def _collect_bc_dataset(
@@ -535,7 +536,10 @@ def _collect_bc_dataset(
 
 class _BCDataset(Dataset):
     def __init__(
-        self, loc: np.ndarray, glob: np.ndarray, acts: np.ndarray,
+        self,
+        loc: np.ndarray,
+        glob: np.ndarray,
+        acts: np.ndarray,
     ) -> None:
         self.loc = torch.tensor(loc, dtype=torch.float32)
         self.glob = torch.tensor(glob, dtype=torch.float32)
@@ -545,7 +549,8 @@ class _BCDataset(Dataset):
         return len(self.acts)
 
     def __getitem__(
-        self, idx: int,
+        self,
+        idx: int,
     ) -> dict[str, dict[str, torch.Tensor] | torch.Tensor]:
         return {
             "obs": {"local": self.loc[idx], "global": self.glob[idx]},
@@ -622,7 +627,8 @@ def _train_bc(
         weight_decay=float(cfg.weight_decay),
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=n_epochs,
+        optimizer,
+        T_max=n_epochs,
     )
     policy.train()
     for epoch in range(n_epochs):
@@ -650,7 +656,10 @@ def _train_bc(
         )
         logger.info(
             "BC epoch %02d/%02d | loss=%.4f | lr=%.2e",
-            epoch + 1, n_epochs, avg_loss, current_lr,
+            epoch + 1,
+            n_epochs,
+            avg_loss,
+            current_lr,
         )
 
     seed_metrics: dict[str, float] = {}
@@ -669,15 +678,12 @@ def _train_bc(
             seed_metrics[f"{split}/{short}/avg_steps"] = avg_steps
             logger.info(
                 "%-30s | win_rate=%5.1f%% | avg_steps=%5.1f",
-                short, win_rate * 100, avg_steps,
+                short,
+                win_rate * 100,
+                avg_steps,
             )
     log.log(seed_metrics, step=n_epochs + 1)
     return policy, seed_metrics
-
-
-# =============================================================================
-# Decision Transformer training
-# =============================================================================
 
 
 def _collect_dt_trajectories(
@@ -757,13 +763,22 @@ def _eval_dt(
                 if len(action_hist) < ctx:
                     act_in = np.zeros(ctx, dtype=np.int64)
                     if action_hist:
-                        act_in[-len(action_hist):] = action_hist[-ctx:]
+                        act_in[-len(action_hist) :] = action_hist[-ctx:]
                 else:
                     act_in = np.array(action_hist[-ctx:], dtype=np.int64)
 
-                local_t = torch.tensor(local_in, dtype=torch.float32).unsqueeze(0).to(device)
-                global_t = torch.tensor(global_in, dtype=torch.float32).unsqueeze(0).to(device)
-                rtg_t = torch.tensor(rtg_in, dtype=torch.float32).unsqueeze(0).unsqueeze(-1).to(device)
+                local_t = (
+                    torch.tensor(local_in, dtype=torch.float32).unsqueeze(0).to(device)
+                )
+                global_t = (
+                    torch.tensor(global_in, dtype=torch.float32).unsqueeze(0).to(device)
+                )
+                rtg_t = (
+                    torch.tensor(rtg_in, dtype=torch.float32)
+                    .unsqueeze(0)
+                    .unsqueeze(-1)
+                    .to(device)
+                )
                 act_t = torch.tensor(act_in, dtype=torch.long).unsqueeze(0).to(device)
                 ts_t = torch.tensor(ts_in, dtype=torch.long).unsqueeze(0).to(device)
 
@@ -862,7 +877,8 @@ def _train_dt(
         weight_decay=float(cfg.weight_decay),
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=n_epochs,
+        optimizer,
+        T_max=n_epochs,
     )
 
     for epoch in range(n_epochs):
@@ -882,7 +898,9 @@ def _train_dt(
             targets_flat = actions.reshape(-1)
             mask_flat = attention_mask.reshape(-1)
             ce = nn.functional.cross_entropy(
-                logits_flat, targets_flat, reduction="none",
+                logits_flat,
+                targets_flat,
+                reduction="none",
             )
             loss = (ce * mask_flat).sum() / mask_flat.sum().clamp(min=1.0)
 
@@ -931,15 +949,12 @@ def _train_dt(
             seed_metrics[f"{split}/{short}/avg_steps"] = avg_steps
             logger.info(
                 "%-30s | win_rate=%5.1f%% | avg_steps=%5.1f",
-                short, win_rate * 100, avg_steps,
+                short,
+                win_rate * 100,
+                avg_steps,
             )
     log.log(seed_metrics, step=n_epochs + 1)
     return model, seed_metrics
-
-
-# =============================================================================
-# SB3 RL training
-# =============================================================================
 
 
 def _build_sb3_model(
@@ -963,23 +978,39 @@ def _build_sb3_model(
 
     if algo == "ppo":
         return PPO(
-            "MultiInputPolicy", train_env, policy_kwargs=policy_kwargs,
-            verbose=1, tensorboard_log=tb_log_dir, seed=seed,
+            "MultiInputPolicy",
+            train_env,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            tensorboard_log=tb_log_dir,
+            seed=seed,
         )
     if algo == "ppo-rnn":
         return RecurrentPPO(
-            "MultiInputLstmPolicy", train_env, policy_kwargs=policy_kwargs,
-            verbose=1, tensorboard_log=tb_log_dir, seed=seed,
+            "MultiInputLstmPolicy",
+            train_env,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            tensorboard_log=tb_log_dir,
+            seed=seed,
         )
     if algo == "a2c":
         return A2C(
-            "MultiInputPolicy", train_env, policy_kwargs=policy_kwargs,
-            verbose=1, tensorboard_log=tb_log_dir, seed=seed,
+            "MultiInputPolicy",
+            train_env,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            tensorboard_log=tb_log_dir,
+            seed=seed,
         )
     if algo == "dqn":
         return DQN(
-            "MultiInputPolicy", train_env, policy_kwargs=policy_kwargs,
-            verbose=1, tensorboard_log=tb_log_dir, seed=seed,
+            "MultiInputPolicy",
+            train_env,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            tensorboard_log=tb_log_dir,
+            seed=seed,
             buffer_size=int(cfg.baselines_dqn_buffer_size),
         )
     raise ValueError(f"Unknown SB3 algo: {algo!r}")
@@ -1002,7 +1033,8 @@ def _build_sb3_callbacks(
 
     n_eval = _eval_episodes_per_env(cfg)
     eval_freq = max(
-        1, int(cfg.baselines_eval_freq_env_steps) // train_env.num_envs,
+        1,
+        int(cfg.baselines_eval_freq_env_steps) // train_env.num_envs,
     )
     for env_id in cfg.id_envs:
         short = _short(env_id)
@@ -1039,11 +1071,6 @@ def _build_sb3_callbacks(
     return CallbackList(callbacks)
 
 
-# =============================================================================
-# Aggregation
-# =============================================================================
-
-
 def _aggregate(
     all_seed_results: list[dict[str, Any]],
 ) -> dict[str, dict[str, float | list[float]]]:
@@ -1051,7 +1078,7 @@ def _aggregate(
 
     if not all_seed_results:
         return {}
-    metric_keys = [k for k in all_seed_results[0].keys() if k != "seed"]
+    metric_keys = [k for k in all_seed_results[0] if k != "seed"]
     agg: dict[str, dict[str, float | list[float]]] = {}
     for key in metric_keys:
         values = [r[key] for r in all_seed_results if key in r]
@@ -1066,7 +1093,9 @@ def _aggregate(
 
 def _print_aggregated(seeds: list[int], agg: dict[str, dict[str, Any]]) -> None:
     if not agg:
-        logger.info("No per-environment metrics to aggregate (RL eval is callback-driven)")
+        logger.info(
+            "No per-environment metrics to aggregate (RL eval is callback-driven)"
+        )
         return
     logger.info("Aggregated results across %d seeds: %s", len(seeds), seeds)
     for split in ("ID", "OOD"):
@@ -1104,17 +1133,10 @@ def _save_aggregated(
         "seeds": seeds,
         "n_seeds": len(seeds),
         "per_seed_results": all_seed_results,
-        "aggregated": {
-            k: {"mean": v["mean"], "std": v["std"]} for k, v in agg.items()
-        },
+        "aggregated": {k: {"mean": v["mean"], "std": v["std"]} for k, v in agg.items()},
     }
     out_path.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
     logger.info("Aggregated results written to %s", out_path)
-
-
-# =============================================================================
-# Public entry point
-# =============================================================================
 
 
 def run_baselines(
@@ -1136,9 +1158,7 @@ def run_baselines(
     """
 
     if algo not in ALL_BASELINE_ALGOS:
-        raise ValueError(
-            f"Unknown algo {algo!r}. Choose one of {ALL_BASELINE_ALGOS}."
-        )
+        raise ValueError(f"Unknown algo {algo!r}. Choose one of {ALL_BASELINE_ALGOS}.")
 
     if seeds is None:
         seeds = [cfg.seed if cfg.seed is not None else 0]
@@ -1154,7 +1174,10 @@ def run_baselines(
 
     logger.info(
         "Running baseline %s on %d seed(s): %s (output -> %s)",
-        algo, len(seeds), seeds, agg_json_path,
+        algo,
+        len(seeds),
+        seeds,
+        agg_json_path,
     )
 
     all_seed_results: list[dict[str, Any]] = []
@@ -1165,7 +1188,10 @@ def run_baselines(
             "============================================================\n"
             " %s seed %d (%d/%d)\n"
             "============================================================",
-            algo.upper(), seed, seed_idx + 1, len(seeds),
+            algo.upper(),
+            seed,
+            seed_idx + 1,
+            len(seeds),
         )
         _seed_everything(seed)
 
@@ -1210,17 +1236,27 @@ def run_baselines(
                 try:
                     if algo == "bc":
                         policy, bc_metrics = _train_bc(
-                            cfg, train_env, log, log_dir, seed,
+                            cfg,
+                            train_env,
+                            log,
+                            log_dir,
+                            seed,
                         )
                         seed_results.update(bc_metrics)
                         policy.save(f"{model_dir}/bc_final_seed{seed}")
                     else:
                         sb3_model = _build_sb3_model(
-                            algo, train_env, cfg, seed,
+                            algo,
+                            train_env,
+                            cfg,
+                            seed,
                             tb_log_dir=str(out_dir / "tb" / run_id),
                         )
                         callbacks = _build_sb3_callbacks(
-                            cfg, train_env, log_dir, model_dir,
+                            cfg,
+                            train_env,
+                            log_dir,
+                            model_dir,
                         )
                         logger.info(
                             "Training %s for %d env-steps across %d ID maps "

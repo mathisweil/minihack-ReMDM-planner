@@ -1,6 +1,6 @@
 """Dynamic environment curriculum and efficiency filter.
 
-Ported from minihack_reference/src/curriculum.py. Tracks per-environment
+Tracks per-environment
 win rates in a rolling window and uses bucket-based sampling weights to
 focus training on environments where the model is struggling.
 """
@@ -100,9 +100,7 @@ class DynamicCurriculum:
         return {
             "env_ids": self._env_ids,
             "queue_size": self._queue_size,
-            "queues": {
-                eid: list(q) for eid, q in self._queues.items()
-            },
+            "queues": {eid: list(q) for eid, q in self._queues.items()},
         }
 
     def load_state_dict(self, sd: dict) -> None:

@@ -3,14 +3,13 @@
 Shared pseudocode line 4 (METHOD_PARITY 2.1); the craftax twin is
 src/diffusion/forward.py:forward_process.
 
-Ported from the Craftax JAX implementation (src/diffusion/forward.py).
 Each token is independently replaced with mask_token with probability
 sigma_t = 1 - alpha_t. PAD positions are never masked.
 """
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch import Tensor
@@ -36,6 +35,10 @@ def q_sample(
         Noisy sequence z_t. Shape ``[B, L]``, dtype int64.
         PAD positions are preserved unchanged.
     """
+    if x0.ndim != 2 or t.ndim != 1 or x0.shape[0] != t.shape[0]:
+        raise ValueError(
+            f"q_sample expects x0 [B, L] and t [B]; got {tuple(x0.shape)}, {tuple(t.shape)}"
+        )
     alpha_t = schedule_fn(t)  # [B]
     sigma_t = 1.0 - alpha_t  # mask probability per sample
     sigma_t = sigma_t.unsqueeze(-1)  # [B, 1]
@@ -50,6 +53,5 @@ def q_sample(
     # oracle trajectories); craftax windows are fixed-length (METHOD_PARITY 2.1)
     # Restore PAD positions — never mask padding
     pad_mask = x0 == pad_token  # [B, L]
-    zt = torch.where(pad_mask, pad_token, zt)
+    return torch.where(pad_mask, pad_token, zt)
 
-    return zt

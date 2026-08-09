@@ -1,6 +1,5 @@
 """Noise schedule functions for MDLM diffusion.
 
-Ported from the Craftax JAX implementation (src/diffusion/schedules.py).
 All functions operate on PyTorch tensors and are pure (no global state).
 
 Convention: alpha(t) is the fraction of tokens that remain *unmasked*.
@@ -11,7 +10,7 @@ Convention: alpha(t) is the fraction of tokens that remain *unmasked*.
 from __future__ import annotations
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch import Tensor
@@ -94,8 +93,7 @@ def get_schedule_deriv_for(
     """Analytic derivative for a registered schedule function.
 
     FIX-1 (ADJUDICATION B-1): the NELBO weight uses the analytic
-    d(alpha)/dt as stated in MDLM eq (10) / Shi eq (4); the numerical
-    stencil ``alpha_prime`` remains only for reference.
+    d(alpha)/dt as stated in MDLM eq (10) / Shi eq (4).
 
     Raises:
         KeyError: If *schedule_fn* is not a registered schedule.
@@ -122,28 +120,6 @@ def get_schedule(name: str) -> Callable[[Tensor], Tensor]:
     """
     if name not in _SCHEDULE_MAP:
         raise KeyError(
-            f"Unknown schedule '{name}'. "
-            f"Available: {list(_SCHEDULE_MAP.keys())}"
+            f"Unknown schedule '{name}'. Available: {list(_SCHEDULE_MAP.keys())}"
         )
     return _SCHEDULE_MAP[name]
-
-
-def alpha_prime(
-    t: Tensor,
-    schedule_fn: Callable[[Tensor], Tensor],
-    eps: float = 1e-5,
-) -> Tensor:
-    """Numerical derivative d(alpha)/dt via central difference.
-
-    Args:
-        t: Diffusion time in [0, 1]. Any shape.
-        schedule_fn: Noise schedule returning alpha(t).
-        eps: Half-width for finite-difference stencil.
-
-    Returns:
-        Approximate derivative, same shape as *t*.
-    """
-    t_clamped = t.clamp(eps, 1.0 - eps)
-    return (schedule_fn(t_clamped + eps) - schedule_fn(t_clamped - eps)) / (
-        2.0 * eps
-    )
