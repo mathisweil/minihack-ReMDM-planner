@@ -20,7 +20,6 @@ from experiments.rl_finetuning.ablations.training import AblationHistory
 logger = logging.getLogger(__name__)
 
 
-
 def _df_to_latex(
     df: pl.DataFrame,
     caption: str = "",
@@ -45,9 +44,8 @@ def _df_to_latex(
         f"\\label{{{label}}}",
         f"\\begin{{tabular}}{{{col_spec}}}",
         "\\toprule",
-        " & ".join(
-            f"\\textbf{{{c.replace('_', chr(92) + '_')}}}" for c in cols
-        ) + " \\\\",
+        " & ".join(f"\\textbf{{{c.replace('_', chr(92) + '_')}}}" for c in cols)
+        + " \\\\",
         "\\midrule",
     ]
     for row in df.iter_rows():
@@ -83,7 +81,6 @@ def _save_table(
     logger.info("Saved %s.csv/.tex", path_stem)
 
 
-
 def write_significance_test(results: dict[str, dict], out_dir: Path) -> None:
     """C-002 (F-035): baseline vs best condition, exact permutation test + bootstrap CI.
 
@@ -94,12 +91,14 @@ def write_significance_test(results: dict[str, dict], out_dir: Path) -> None:
     if not base or not base.get("all_scores"):
         return
     others = {
-        n: r for n, r in results.items()
+        n: r
+        for n, r in results.items()
         if n != "baseline_rl" and len(r.get("all_scores", [])) >= 2
     }
     if not others or len(base["all_scores"]) < 2:
         return
     import itertools
+
     best = max(others, key=lambda n: float(np.mean(others[n]["all_scores"])))
     a = [float(x) for x in base["all_scores"]]
     b = [float(x) for x in others[best]["all_scores"]]
@@ -160,18 +159,21 @@ def make_main_results_table(
         else:
             verdict = "NEUTRAL"
 
-        rows.append({
-            "Method": name,
-            "Group": group,
-            "Score": round(score, 4),
-            "Score_Std": round(float(res.get("score_std", 0.0)), 4),  # C-002 (F-035): popstd over seeds
-            "Delta_Pretrained": round(delta_pre, 4),
-            "Delta_Baseline": round(delta_bl, 4),
-            "Verdict": verdict,
-        })
+        rows.append(
+            {
+                "Method": name,
+                "Group": group,
+                "Score": round(score, 4),
+                "Score_Std": round(
+                    float(res.get("score_std", 0.0)), 4
+                ),  # C-002 (F-035): popstd over seeds
+                "Delta_Pretrained": round(delta_pre, 4),
+                "Delta_Baseline": round(delta_bl, 4),
+                "Verdict": verdict,
+            }
+        )
 
     return pl.DataFrame(rows).sort("Score", descending=True)
-
 
 
 def make_group_summary_table(
@@ -198,17 +200,18 @@ def make_group_summary_table(
         if g not in groups:
             continue
         scores = groups[g]
-        rows.append({
-            "Group": g,
-            "N": len(scores),
-            "Mean": round(float(np.mean(scores)), 4),
-            "Best": round(float(np.max(scores)), 4),
-            "Worst": round(float(np.min(scores)), 4),
-            "StdDev": round(float(np.std(scores)), 4),
-        })
+        rows.append(
+            {
+                "Group": g,
+                "N": len(scores),
+                "Mean": round(float(np.mean(scores)), 4),
+                "Best": round(float(np.max(scores)), 4),
+                "Worst": round(float(np.min(scores)), 4),
+                "StdDev": round(float(np.std(scores)), 4),
+            }
+        )
 
     return pl.DataFrame(rows)
-
 
 
 def make_gradient_diagnostics_table(
@@ -226,15 +229,16 @@ def make_gradient_diagnostics_table(
     for name, res in sorted(results.items()):
         h: AblationHistory = res["history"]
         if h.grad_align and h.rl_grad_norm and h.bc_grad_norm:
-            rows.append({
-                "Method": name,
-                "Cos_Sim": round(h.grad_align[-1], 4),
-                "RL_Norm": round(h.rl_grad_norm[-1], 4),
-                "BC_Norm": round(h.bc_grad_norm[-1], 4),
-            })
+            rows.append(
+                {
+                    "Method": name,
+                    "Cos_Sim": round(h.grad_align[-1], 4),
+                    "RL_Norm": round(h.rl_grad_norm[-1], 4),
+                    "BC_Norm": round(h.bc_grad_norm[-1], 4),
+                }
+            )
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
-
 
 
 def make_repr_drift_table(
@@ -252,16 +256,17 @@ def make_repr_drift_table(
     for name, res in sorted(results.items()):
         h: AblationHistory = res["history"]
         if h.repr_drift_kl:
-            rows.append({
-                "Method": name,
-                "KL_mean": round(h.repr_drift_kl[-1], 4),
-                "KL_low_t": round(h.repr_drift_kl_low_t[-1], 4),
-                "KL_mid_t": round(h.repr_drift_kl_mid_t[-1], 4),
-                "KL_high_t": round(h.repr_drift_kl_high_t[-1], 4),
-            })
+            rows.append(
+                {
+                    "Method": name,
+                    "KL_mean": round(h.repr_drift_kl[-1], 4),
+                    "KL_low_t": round(h.repr_drift_kl_low_t[-1], 4),
+                    "KL_mid_t": round(h.repr_drift_kl_mid_t[-1], 4),
+                    "KL_high_t": round(h.repr_drift_kl_high_t[-1], 4),
+                }
+            )
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
-
 
 
 def make_per_env_table(
@@ -280,7 +285,8 @@ def make_per_env_table(
         # C-002 (F-024): average per-seed final win rates when recorded;
         # fall back to the legacy single merged history otherwise.
         finals = [
-            f["per_env_win_rates"] for f in res.get("per_seed_finals", [])
+            f["per_env_win_rates"]
+            for f in res.get("per_seed_finals", [])
             if isinstance(f, dict) and isinstance(f.get("per_env_win_rates"), dict)
         ]
         if finals:
@@ -297,7 +303,6 @@ def make_per_env_table(
             rows.append(row)
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
-
 
 
 def make_forgetting_analysis_table(
@@ -339,17 +344,18 @@ def make_forgetting_analysis_table(
 
         recovered = final_score >= boundary
 
-        rows.append({
-            "Method": name,
-            "First_Collapse": first_collapse,
-            "Min_Score": round(min_score, 4),
-            "Min_Score_Iter": iters[min_idx],
-            "Final_Score": round(final_score, 4),
-            "Recovered": recovered,
-        })
+        rows.append(
+            {
+                "Method": name,
+                "First_Collapse": first_collapse,
+                "Min_Score": round(min_score, 4),
+                "Min_Score_Iter": iters[min_idx],
+                "Final_Score": round(final_score, 4),
+                "Recovered": recovered,
+            }
+        )
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
-
 
 
 def make_hypothesis_verdict_table(
@@ -369,7 +375,8 @@ def make_hypothesis_verdict_table(
         DataFrame with Method, Group, Score, Verdict, Hypothesis.
     """
     baseline_score = results.get("baseline_rl", {}).get(
-        "score", pretrained_score,
+        "score",
+        pretrained_score,
     )
 
     rows: list[dict] = []
@@ -387,17 +394,18 @@ def make_hypothesis_verdict_table(
         else:
             verdict = "NEUTRAL"
 
-        rows.append({
-            "Method": name,
-            "Group": spec.group,
-            "Score": round(score, 4),
-            "Delta_Baseline": round(delta_bl, 4),
-            "Verdict": verdict,
-            "Hypothesis": spec.hypothesis,
-        })
+        rows.append(
+            {
+                "Method": name,
+                "Group": spec.group,
+                "Score": round(score, 4),
+                "Delta_Baseline": round(delta_bl, 4),
+                "Verdict": verdict,
+                "Hypothesis": spec.hypothesis,
+            }
+        )
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
-
 
 
 def generate_summary_tables(
@@ -417,50 +425,64 @@ def generate_summary_tables(
 
     main_df = make_main_results_table(results, pretrained_score)
     _save_table(
-        main_df, out_dir / "main_results",
-        caption="Main ablation results", label="tab:main-results",
+        main_df,
+        out_dir / "main_results",
+        caption="Main ablation results",
+        label="tab:main-results",
     )
 
     group_df = make_group_summary_table(results, pretrained_score)
     _save_table(
-        group_df, out_dir / "group_summary",
-        caption="Group-level summary", label="tab:group-summary",
+        group_df,
+        out_dir / "group_summary",
+        caption="Group-level summary",
+        label="tab:group-summary",
     )
 
     grad_df = make_gradient_diagnostics_table(results)
     if grad_df.shape[0] > 0:
         _save_table(
-            grad_df, out_dir / "gradient_diagnostics",
-            caption="Gradient diagnostics", label="tab:grad-diag",
+            grad_df,
+            out_dir / "gradient_diagnostics",
+            caption="Gradient diagnostics",
+            label="tab:grad-diag",
         )
 
     repr_df = make_repr_drift_table(results)
     if repr_df.shape[0] > 0:
         _save_table(
-            repr_df, out_dir / "repr_drift",
-            caption="Representation drift (KL)", label="tab:repr-drift",
+            repr_df,
+            out_dir / "repr_drift",
+            caption="Representation drift (KL)",
+            label="tab:repr-drift",
         )
 
     env_df = make_per_env_table(results)
     if env_df.shape[0] > 0:
         _save_table(
-            env_df, out_dir / "per_env_win_rates",
-            caption="Per-environment win rates", label="tab:per-env",
+            env_df,
+            out_dir / "per_env_win_rates",
+            caption="Per-environment win rates",
+            label="tab:per-env",
         )
     write_significance_test(results, out_dir)  # C-002 (F-035)
 
     forg_df = make_forgetting_analysis_table(results, pretrained_score)
     if forg_df.shape[0] > 0:
         _save_table(
-            forg_df, out_dir / "forgetting_analysis",
-            caption="Forgetting analysis", label="tab:forgetting",
+            forg_df,
+            out_dir / "forgetting_analysis",
+            caption="Forgetting analysis",
+            label="tab:forgetting",
         )
 
     hyp_df = make_hypothesis_verdict_table(results, pretrained_score)
     if hyp_df.shape[0] > 0:
         _save_table(
-            hyp_df, out_dir / "hypothesis_verdicts",
-            caption="Hypothesis verdicts", label="tab:hyp-verdicts",
+            hyp_df,
+            out_dir / "hypothesis_verdicts",
+            caption="Hypothesis verdicts",
+            label="tab:hyp-verdicts",
         )
 
     logger.info("All tables generated.")
