@@ -10,7 +10,7 @@ Convention: alpha(t) is the fraction of tokens that remain *unmasked*.
 from __future__ import annotations
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch import Tensor

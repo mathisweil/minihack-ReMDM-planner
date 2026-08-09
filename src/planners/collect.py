@@ -223,7 +223,7 @@ class DataCollector:
 
     def __init__(
         self,
-        ema: "ModelEMA",
+        ema: ModelEMA,
         model: torch.nn.Module,
         buffer: ReplayBuffer,
         curriculum: DynamicCurriculum,

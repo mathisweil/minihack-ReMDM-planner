@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -169,7 +169,7 @@ def load_config(
         cli_overrides = {}
 
     defaults_path = _PROJECT_ROOT / "configs" / "defaults.yaml"
-    with open(defaults_path, "r") as fh:
+    with open(defaults_path) as fh:
         cfg = yaml.safe_load(fh)
 
     allowed = set(cfg) | _RUN_KEYS
@@ -179,7 +179,7 @@ def load_config(
         if not config_path_resolved.is_absolute():
             config_path_resolved = _PROJECT_ROOT / config_path_resolved
         if config_path_resolved.resolve() != defaults_path.resolve():
-            with open(config_path_resolved, "r") as fh:
+            with open(config_path_resolved) as fh:
                 overrides = yaml.safe_load(fh) or {}
             _validate_keys(overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path))
             _deep_merge(cfg, overrides)
@@ -230,7 +230,7 @@ def make_run_dir(cfg: SimpleNamespace, tag: str = "run") -> Path:
     Returns:
         The created directory path.
     """
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     suffix = secrets.token_hex(2)
     run_dir = Path(cfg.checkpoint_dir).resolve() / f"{tag}_{ts}_{suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
