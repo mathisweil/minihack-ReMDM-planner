@@ -483,10 +483,7 @@ def _seed_everything(seed: int) -> None:
 
 
 def _resolve_output_dir(cfg: SimpleNamespace, override: str | None) -> Path:
-    if override:
-        out = Path(override)
-    else:
-        out = Path(cfg.baselines_output_dir)
+    out = Path(override) if override else Path(cfg.baselines_output_dir)
     out.mkdir(parents=True, exist_ok=True)
     return out
 
@@ -1081,7 +1078,7 @@ def _aggregate(
 
     if not all_seed_results:
         return {}
-    metric_keys = [k for k in all_seed_results[0].keys() if k != "seed"]
+    metric_keys = [k for k in all_seed_results[0] if k != "seed"]
     agg: dict[str, dict[str, float | list[float]]] = {}
     for key in metric_keys:
         values = [r[key] for r in all_seed_results if key in r]
