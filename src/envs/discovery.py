@@ -34,7 +34,8 @@ def list_working_minihack_tasks() -> list[str]:
 
     all_ids = list(gym.envs.registry.keys())
     candidates = [
-        e for e in all_ids
+        e
+        for e in all_ids
         if "MiniHack" in e
         and any(k in e for k in _NAV_KEYWORDS)
         and not any(x in e for x in _EXCLUDED_KEYWORDS)
@@ -51,8 +52,7 @@ def list_working_minihack_tasks() -> list[str]:
             broken.append(env_id)
 
     logger.info(
-        f"MiniHack navigation tasks — working: {len(working)}, "
-        f"broken: {len(broken)}"
+        f"MiniHack navigation tasks — working: {len(working)}, broken: {len(broken)}"
     )
     return working
 
@@ -91,8 +91,7 @@ def check_action_consistency_with_fixed_ref(
                 env_actions = env.unwrapped.actions  # type: ignore[attr-defined]
                 limit = min(len(reference_actions), len(env_actions))
                 is_match = all(
-                    reference_actions[i] == env_actions[i]
-                    for i in range(limit)
+                    reference_actions[i] == env_actions[i] for i in range(limit)
                 )
                 diff = len(env_actions) - len(reference_actions)
                 if is_match and diff == 0:
@@ -138,10 +137,14 @@ def benchmark_inference(
 
     model.eval()
     local_dummy = torch.zeros(
-        (1, cfg.crop_size, cfg.crop_size), dtype=torch.long, device=device,
+        (1, cfg.crop_size, cfg.crop_size),
+        dtype=torch.long,
+        device=device,
     )
     global_dummy = torch.zeros(
-        (1, cfg.map_h, cfg.map_w), dtype=torch.long, device=device,
+        (1, cfg.map_h, cfg.map_w),
+        dtype=torch.long,
+        device=device,
     )
 
     if torch.cuda.is_available():

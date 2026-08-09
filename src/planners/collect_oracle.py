@@ -81,7 +81,8 @@ def run_collect(cfg: SimpleNamespace) -> None:
     """
     eps_per_env: int = cfg.collect_episodes_per_env
     max_workers: int = min(
-        cfg.collect_num_workers, os.cpu_count() or 4,
+        cfg.collect_num_workers,
+        os.cpu_count() or 4,
     )
     output_path: str = cfg.collect_output
     id_envs: list[str] = cfg.id_envs
@@ -89,9 +90,11 @@ def run_collect(cfg: SimpleNamespace) -> None:
 
     total_episodes = eps_per_env * len(id_envs)
     logger.info(
-        "Collecting %d oracle episodes "
-        "(%d per env, %d envs, %d workers)",
-        total_episodes, eps_per_env, len(id_envs), max_workers,
+        "Collecting %d oracle episodes (%d per env, %d envs, %d workers)",
+        total_episodes,
+        eps_per_env,
+        len(id_envs),
+        max_workers,
     )
 
     # Deterministic task list: (env_id, seed, cfg) per episode
@@ -111,8 +114,7 @@ def run_collect(cfg: SimpleNamespace) -> None:
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         future_to_env: dict = {
-            executor.submit(_collect_single, task): task[0]
-            for task in tasks
+            executor.submit(_collect_single, task): task[0] for task in tasks
         }
 
         for future in as_completed(future_to_env):
@@ -123,7 +125,9 @@ def run_collect(cfg: SimpleNamespace) -> None:
                 result = future.result()
             except Exception:
                 logger.error(
-                    "Worker crashed for %s", env_id, exc_info=True,
+                    "Worker crashed for %s",
+                    env_id,
+                    exc_info=True,
                 )
                 result = None
 
@@ -134,22 +138,21 @@ def run_collect(cfg: SimpleNamespace) -> None:
             else:
                 failures += 1
 
-            if (
-                completed % log_interval == 0
-                or completed == total_episodes
-            ):
+            if completed % log_interval == 0 or completed == total_episodes:
                 elapsed = time.perf_counter() - t_start
                 rate = completed / max(elapsed, 1e-6)
                 eta = (total_episodes - completed) / max(rate, 1e-6)
                 env_summary = "  ".join(
-                    f"{eid.split('-')[-2]}:{per_env_count[eid]}"
-                    for eid in id_envs
+                    f"{eid.split('-')[-2]}:{per_env_count[eid]}" for eid in id_envs
                 )
                 logger.info(
                     "  %d/%d (%.1f%%)  %.1f eps/s  ETA: %s  |  %s",
-                    completed, total_episodes,
+                    completed,
+                    total_episodes,
                     100 * completed / total_episodes,
-                    rate, _format_eta(eta), env_summary,
+                    rate,
+                    _format_eta(eta),
+                    env_summary,
                 )
 
     elapsed = time.perf_counter() - t_start
@@ -159,7 +162,8 @@ def run_collect(cfg: SimpleNamespace) -> None:
     logger.info("Collection complete in %.1fs", elapsed)
     logger.info(
         "  Trajectories: %d (%d failures)",
-        len(trajectories), failures,
+        len(trajectories),
+        failures,
     )
     logger.info("  Total steps: %d", total_steps)
     for env_id in id_envs:
@@ -168,7 +172,10 @@ def run_collect(cfg: SimpleNamespace) -> None:
         avg = s / max(n, 1)
         logger.info(
             "  %s: %d eps, %d steps, avg %.1f steps/ep",
-            env_id, n, s, avg,
+            env_id,
+            n,
+            s,
+            avg,
         )
 
     # Save in the dict format expected by ReplayBuffer.load_offline_data()
@@ -181,5 +188,7 @@ def run_collect(cfg: SimpleNamespace) -> None:
     file_mb = out.stat().st_size / (1024 * 1024)
     logger.info(
         "Saved %d trajectories to %s (%.1f MB)",
-        len(trajectories), out, file_mb,
+        len(trajectories),
+        out,
+        file_mb,
     )

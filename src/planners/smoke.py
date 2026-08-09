@@ -34,11 +34,14 @@ def run_smoke(cfg) -> None:
 
     ema = ModelEMA(raw_model, decay=cfg.ema_decay)
     optimizer = torch.optim.AdamW(
-        raw_model.parameters(), lr=cfg.dagger_lr,
+        raw_model.parameters(),
+        lr=cfg.dagger_lr,
         weight_decay=cfg.weight_decay,
     )
     curriculum = DynamicCurriculum(
-        cfg.id_envs, cfg.curriculum_queue_size, cfg.curriculum_preseed,
+        cfg.id_envs,
+        cfg.curriculum_queue_size,
+        cfg.curriculum_preseed,
     )
 
     collector = DataCollector(ema, raw_model, buffer, curriculum, cfg, device)
@@ -46,18 +49,35 @@ def run_smoke(cfg) -> None:
     log = Logger(cfg)
 
     trainer = Trainer(
-        model, ema, optimizer, None, buffer, collector,
-        evaluator, log, cfg, device, raw_model=raw_model,
+        model,
+        ema,
+        optimizer,
+        None,
+        buffer,
+        collector,
+        evaluator,
+        log,
+        cfg,
+        device,
+        raw_model=raw_model,
     )
     trainer.train(start_iter=0)
 
     # Final eval
     eval_model = ema.make_eval_model(raw_model)
     results = evaluator.evaluate(
-        cfg.id_envs, eval_model, cfg.eval_episodes_per_env, cfg, device,
+        cfg.id_envs,
+        eval_model,
+        cfg.eval_episodes_per_env,
+        cfg,
+        device,
     )
     print(format_eval_results(results, label="Smoke"))
     log.log_eval(results, step=0, prefix="smoke_eval")
-    mean_wr = float(sum(s["win_rate"] for s in results.values()) / len(results)) if results else 0.0
+    mean_wr = (
+        float(sum(s["win_rate"] for s in results.values()) / len(results))
+        if results
+        else 0.0
+    )
     log.log({"smoke_eval/mean_win_rate": mean_wr}, step=0)
     log.finish()

@@ -27,7 +27,10 @@ _HAZARD_CHARS: frozenset[int] = frozenset(
 )
 # Cardinal action → (dy, dx) offsets
 _CARDINAL_OFFSETS: dict[int, tuple[int, int]] = {
-    0: (-1, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1),
+    0: (-1, 0),
+    1: (0, 1),
+    2: (1, 0),
+    3: (0, -1),
 }
 _N_PHYSICS_CHECK = 8  # only inspect the first N plan positions
 
@@ -197,9 +200,7 @@ def remdm_sample(
 
     # Start fully masked; psi stores the decoding probability at the step
     # each token was last unmasked (+inf while masked), per ReMDM Sec 4.1.
-    seq = torch.full(
-        (B, seq_len), mask_token, dtype=torch.long, device=device
-    )
+    seq = torch.full((B, seq_len), mask_token, dtype=torch.long, device=device)
     psi = torch.full((B, seq_len), float("inf"), device=device)
 
     # FIX-3 (ADJUDICATION B-3): ReMDM Algorithm 1 (Wang et al.). Masked
@@ -218,7 +219,8 @@ def remdm_sample(
         t_discrete = torch.full(
             (B,),
             min(int(t * cfg.num_diffusion_steps), cfg.num_diffusion_steps - 1),
-            dtype=torch.long, device=device,
+            dtype=torch.long,
+            device=device,
         )
 
         out = model(local_obs, global_obs, seq, t_discrete)
@@ -235,9 +237,7 @@ def remdm_sample(
         probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]
         preds = Categorical(probs=probs).sample()  # [B, seq_len]
 
-        decode_prob = probs.gather(
-            -1, preds.unsqueeze(-1)
-        ).squeeze(-1)  # [B, seq_len]
+        decode_prob = probs.gather(-1, preds.unsqueeze(-1)).squeeze(-1)  # [B, seq_len]
 
         # Physics softener (unsourced engineering, default off; CH-6):
         # demote hazardous cardinal actions to decode_prob=0.001 so the
@@ -261,41 +261,30 @@ def remdm_sample(
             cfg.remask_strategy, cfg.eta, sigma_max, psi, committed
         )
         if not isinstance(sigma, Tensor):
-            sigma = torch.full(
-                (B, seq_len), float(sigma), device=device
-            )
+            sigma = torch.full((B, seq_len), float(sigma), device=device)
 
         # Algorithm 1 posterior: masked tokens unmask w.p.
         # (alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)
         p_unmask = torch.clamp(
-            (alpha_s - (1.0 - sigma) * alpha_t)
-            / max(1.0 - alpha_t, 1e-8),
-            0.0, 1.0,
+            (alpha_s - (1.0 - sigma) * alpha_t) / max(1.0 - alpha_t, 1e-8),
+            0.0,
+            1.0,
         )
 
-        do_unmask = ~committed & (
-            torch.rand(B, seq_len, device=device) < p_unmask
-        )
-        do_remask = committed & (
-            torch.rand(B, seq_len, device=device) < sigma
-        )
+        do_unmask = ~committed & (torch.rand(B, seq_len, device=device) < p_unmask)
+        do_remask = committed & (torch.rand(B, seq_len, device=device) < sigma)
 
         seq = torch.where(do_unmask, preds, seq)
         seq = torch.where(do_remask, mask_token, seq)
         psi = torch.where(do_unmask, decode_prob, psi)
-        psi = torch.where(
-            do_remask, torch.full_like(psi, float("inf")), psi
-        )
+        psi = torch.where(do_remask, torch.full_like(psi, float("inf")), psi)
 
         # Analytics tracking
         if return_analytics:
             path_per_step.append(seq[0].cpu().numpy().copy())
-            still_masked = (seq[0] == mask_token)
+            still_masked = seq[0] == mask_token
             unmasked_prob = psi[0][~still_masked]
-            avg_conf = (
-                unmasked_prob.mean().item()
-                if unmasked_prob.numel() > 0 else 0.0
-            )
+            avg_conf = unmasked_prob.mean().item() if unmasked_prob.numel() > 0 else 0.0
             tracking_confidence.append(avg_conf)
             tracking_masked_count.append(int(still_masked.sum().item()))
 
@@ -352,14 +341,19 @@ def greedy_sample(
         global_obs = torch.zeros_like(global_obs)
 
     seq = torch.full(
-        (B, seq_len), mask_token, dtype=torch.long, device=device,
+        (B, seq_len),
+        mask_token,
+        dtype=torch.long,
+        device=device,
     )
 
     for k in range(1, K + 1):
         ratio = k / K
         t_discrete = torch.full(
-            (B,), int(cfg.num_diffusion_steps * (1.0 - ratio)),
-            dtype=torch.long, device=device,
+            (B,),
+            int(cfg.num_diffusion_steps * (1.0 - ratio)),
+            dtype=torch.long,
+            device=device,
         )
 
         out = model(local_obs, global_obs, seq, t_discrete)
