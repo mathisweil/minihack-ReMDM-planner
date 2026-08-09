@@ -337,7 +337,7 @@ def make_forgetting_analysis_table(
         boundary = pretrained_score - collapse_threshold
 
         first_collapse = "never"
-        for it, sc in zip(iters, scores):
+        for it, sc in zip(iters, scores, strict=False):
             if sc < boundary:
                 first_collapse = str(it)
                 break

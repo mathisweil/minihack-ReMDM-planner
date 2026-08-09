@@ -450,7 +450,7 @@ def generate_action_distribution_plots(
     bars = ax.bar(cats, vals, color=["steelblue", "coral", "gray"], alpha=0.85)
     ax.set_ylabel("Entropy (bits)")
     ax.set_title("Distribution Entropy", fontweight="bold")
-    for bar, val in zip(bars, vals):
+    for bar, val in zip(bars, vals, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.02,
@@ -481,7 +481,7 @@ def generate_action_distribution_plots(
     ax.set_ylabel("# Actions")
     ax.set_title("Effective Actions (>1%)", fontweight="bold")
     ax.legend(fontsize=8)
-    for bar, val in zip(bars2, vals2):
+    for bar, val in zip(bars2, vals2, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.1,
@@ -504,7 +504,7 @@ def generate_action_distribution_plots(
     ax.set_ylabel("Value")
     ax.set_title("Divergence Metrics", fontweight="bold")
     ax.set_xticklabels(div_names, rotation=15)
-    for bar, val in zip(bars3, div_vals):
+    for bar, val in zip(bars3, div_vals, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.003,
@@ -532,7 +532,7 @@ def generate_action_distribution_plots(
     ax.axhline(0, color="green", linestyle="--", alpha=0.4, label="Uniform")
     ax.axhline(1, color="red", linestyle="--", alpha=0.4, label="Collapsed")
     ax.legend(fontsize=8)
-    for bar, val in zip(bars4, vals4):
+    for bar, val in zip(bars4, vals4, strict=False):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.02,
@@ -697,7 +697,7 @@ def generate_action_distribution_plots(
         "Post-RL Transitions",
         "Difference (Post-Pre)",
     ]
-    for ax_i, title, im in zip(axes, titles, [im1, im2, im3]):
+    for ax_i, title, im in zip(axes, titles, [im1, im2, im3], strict=False):
         ax_i.set_title(title, fontweight="bold")
         ax_i.set_xticks(range(action_dim))
         ax_i.set_yticks(range(action_dim))

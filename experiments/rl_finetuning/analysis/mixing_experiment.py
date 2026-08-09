@@ -400,7 +400,7 @@ def generate_mixing_plots(
         markersize=8,
         zorder=3,
     )
-    for frac, rate in zip(fractions, rates):
+    for frac, rate in zip(fractions, rates, strict=False):
         c = _COLORS_BY_FRAC.get(frac, "gray")
         ax.scatter(frac * 100, rate * 100, color=c, s=120, zorder=4)
         ax.annotate(
@@ -498,7 +498,7 @@ def generate_mixing_plots(
     ax3.set_ylabel("Final ID Win Rate (%)")
     ax3.set_title("Final Performance by Data Mix")
     ax3.grid(axis="y", alpha=0.3)
-    for bar, rate in zip(bars, rates):
+    for bar, rate in zip(bars, rates, strict=False):
         ax3.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.3,

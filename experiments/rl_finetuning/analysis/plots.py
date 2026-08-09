@@ -267,7 +267,7 @@ def plot_repr_drift(
             if not h.repr_drift_iters:
                 continue
             c, ls, _ = _ablation_style(name)
-            for ax, key in zip(axes, keys):
+            for ax, key in zip(axes, keys, strict=False):
                 vals = getattr(h, key)
                 ax.plot(
                     h.repr_drift_iters,
@@ -277,7 +277,7 @@ def plot_repr_drift(
                     linestyle=ls,
                     alpha=0.7,
                 )
-        for ax, title in zip(axes, titles):
+        for ax, title in zip(axes, titles, strict=False):
             ax.set_xlabel("Iteration")
             ax.set_title(title)
         axes[0].set_ylabel("KL(ref || cur)")
@@ -394,7 +394,7 @@ def plot_t_ratio(
             h: AblationHistory = res["history"]
             if h.t_analysis_iters and h.norm_low_t and h.norm_high_t:
                 ratios = [
-                    hi / (lo + 1e-10) for hi, lo in zip(h.norm_high_t, h.norm_low_t)
+                    hi / (lo + 1e-10) for hi, lo in zip(h.norm_high_t, h.norm_low_t, strict=False)
                 ]
                 c, ls, mk = _ablation_style(name)
                 ax.plot(
@@ -486,7 +486,7 @@ def plot_group_comparison(
     with plt.rc_context(_STYLE):
         fig, ax = plt.subplots(figsize=(8, 5))
         bp = ax.boxplot(data, tick_labels=labels, patch_artist=True)
-        for patch, c in zip(bp["boxes"], colors):
+        for patch, c in zip(bp["boxes"], colors, strict=False):
             patch.set_facecolor(c)
             patch.set_alpha(0.6)
         ax.axhline(pretrained_score, ls="--", color="black", label="Pretrained")
@@ -525,7 +525,7 @@ def plot_gradient_conflict_map(
 
     for i, name in enumerate(names):
         h = results[name]["history"]
-        for it, val in zip(h.grad_align_iters, h.grad_align):
+        for it, val in zip(h.grad_align_iters, h.grad_align, strict=False):
             matrix[i, iter_to_col[it]] = 1.0 if val < 0 else 0.0
 
     with plt.rc_context(_STYLE):
