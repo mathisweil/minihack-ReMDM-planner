@@ -82,6 +82,42 @@ def test_offline_snapshot_save_failure_raises(tiny_cfg, tmp_path, monkeypatch):
         )
 
 
+def test_offline_checkpoint_saves_and_requires_rng_states(
+    tiny_cfg, tmp_path, monkeypatch
+):
+    """FIX-B4 (offline arm): offline checkpoints carry rng_states, and an
+    offline resume without them raises instead of continuing with fresh
+    randomness under a resume's identity."""
+    import torch
+
+    from src.buffer import ReplayBuffer
+    from src.models.denoiser import ModelEMA, make_model
+    from src.planners import offline as offline_mod
+
+    model = make_model(tiny_cfg)
+    ema = ModelEMA(model, decay=0.5)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=1)
+    tiny_cfg.checkpoint_dir = str(tmp_path)
+    offline_mod._save_offline_checkpoint(
+        model, ema, opt, sched, step=1, cfg=tiny_cfg, log=None,
+    )
+    ckpt = torch.load(
+        tmp_path / "offline_step1.pth", map_location="cpu", weights_only=False,
+    )
+    assert set(ckpt["rng_states"]) == {"torch", "numpy", "python"}
+
+    stripped = {k: v for k, v in ckpt.items() if k != "rng_states"}
+    tiny_cfg.use_wandb = False
+    buffer = ReplayBuffer(8, tiny_cfg.seq_len, tiny_cfg.pad_token)
+    train_fn = offline_mod.make_offline_trainer(tiny_cfg)
+    with pytest.raises(RuntimeError, match="rng_states"):
+        train_fn(
+            model, ema, buffer, tiny_cfg, "cpu",
+            raw_model=model, resume_state=stripped,
+        )
+
+
 def test_buffer_rejects_legacy_list_dataset(tiny_cfg):
     """Legacy drop: the list dataset format raises instead of loading."""
     from src.buffer import ReplayBuffer

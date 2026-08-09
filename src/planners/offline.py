@@ -8,12 +8,14 @@ with optional auxiliary goal loss.
 from __future__ import annotations
 
 import logging
+import random
 import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from collections.abc import Callable
 
+import numpy as np
 import torch
 import torch.nn as nn
 import yaml
@@ -187,6 +189,25 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             optimizer.load_state_dict(resume_state["optimizer_state_dict"])
             scheduler.load_state_dict(resume_state["scheduler_state_dict"])
             step = resume_state["step"]
+            # FIX-B4 (offline arm): a resume without the saved RNG state
+            # would silently continue with fresh randomness; see the
+            # online.py counterpart.
+            rng = resume_state.get("rng_states", {})
+            if not rng:
+                raise RuntimeError(
+                    "Offline checkpoint has no rng_states; refusing to "
+                    "resume with fresh RNG. Resume from a checkpoint "
+                    "written by the current code."
+                )
+            try:
+                torch.set_rng_state(rng["torch"])
+                np.random.set_state(rng["numpy"])
+                random.setstate(rng["python"])
+            except Exception as err:
+                raise RuntimeError(
+                    "Offline checkpoint carries rng_states that could not "
+                    "be restored; refusing to resume with fresh RNG."
+                ) from err
             logger.info(f"Resumed offline training from step {step}/{total_grad_steps}")
 
         # AMP: enabled when use_amp=true and on CUDA
@@ -498,6 +519,11 @@ def _save_offline_checkpoint(
             "step": step,
             "env_steps": step * cfg.offline_batch_size,
             "wandb_run_id": wandb_run_id,
+            "rng_states": {
+                "torch": torch.get_rng_state(),
+                "numpy": np.random.get_state(),
+                "python": random.getstate(),
+            },
         },
         path,
     )
