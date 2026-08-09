@@ -1,8 +1,11 @@
 """ReMDM reverse denoising with remasking strategies.
 
-Ported from the Craftax JAX implementation (src/diffusion/sampling.py).
-Implements MaskGIT-style progressive unmasking with optional stochastic
-remasking (ReMDM) using three strategy variants.
+remdm_sample implements ReMDM Algorithm 1 (Wang et al.): Bernoulli
+posterior unmasking with the Section 4.1 remasking schedules. Shared
+pseudocode lines 8-12 (METHOD_PARITY 2.1); the craftax twin is
+src/diffusion/sampling.py:sample_plan. greedy_sample is a separate
+MaskGIT-style argmax decoder used only for DAgger collection (CH-6,
+documented engineering choice).
 """
 
 from __future__ import annotations
@@ -72,20 +75,24 @@ def _compute_remask_prob(
     strategy: str,
     eta: float,
     sigma_max: float,
-    confidence: Tensor | None,
+    psi: Tensor | None,
     committed: Tensor | None = None,
 ) -> Tensor | float:
     """Compute per-token remasking probability.
 
     C-003 (F-047, D6/D9): unified with the craftax implementation.
+    FIX-3 (ADJUDICATION B-3): the ``conf`` strategy now consumes the
+    stored decoding probability ``psi`` from the step each token was last
+    unmasked (ReMDM Sec 4.1), not the current step's fresh confidence.
 
     Args:
         strategy: One of ``"rescale"``, ``"cap"``, ``"conf"``.
         eta: Base remasking strength hyperparameter.
         sigma_max: ReMDM eq 7 value ``min(1, (1 - alpha_s) / alpha_t)``,
-            computed by the caller (previously ``1 - alpha_t(ratio)``).
-        confidence: Per-token confidence scores. Shape ``[B, L]``.
-            Required only for the ``"conf"`` strategy.
+            computed by the caller.
+        psi: Stored decoding probabilities at last unmask. Shape
+            ``[B, L]``, ``+inf`` at masked positions. Required only for
+            the ``"conf"`` strategy.
         committed: Boolean mask of committed (non-masked) positions.
             Required only for the ``"conf"`` strategy.
 
@@ -97,14 +104,14 @@ def _compute_remask_prob(
     if strategy == "cap":
         return min(eta, sigma_max)
     if strategy == "conf":
-        assert confidence is not None, "conf strategy requires confidence"
+        assert psi is not None, "conf strategy requires psi"
         assert committed is not None, "conf strategy requires the committed mask"
-        # softmax(-confidence) over committed positions, zero elsewhere,
+        # softmax(-psi) over committed positions, zero elsewhere,
         # scaled by eta * sigma_max: mirrors craftax ``sigma_conf``.
         neg = torch.where(
             committed,
-            -confidence,
-            torch.tensor(float("-inf"), device=confidence.device, dtype=confidence.dtype),
+            -psi,
+            torch.tensor(float("-inf"), device=psi.device, dtype=psi.dtype),
         )
         any_committed = committed.any(dim=-1, keepdim=True)
         safe = torch.where(any_committed, neg, torch.zeros_like(neg))
@@ -139,8 +146,9 @@ def remdm_sample(
             ``top_k``, ``eta``, ``remask_strategy``, ``noise_schedule``.
         device: Torch device.
         physics_aware: If ``True``, soft-penalise hazardous cardinal actions
-            by overriding their confidence to ``0.001`` before commitment
-            ranking. Only checks the first ``_N_PHYSICS_CHECK`` positions.
+            by overriding their stored decoding probability to ``0.001`` so
+            the ``conf`` strategy preferentially remasks them. Only checks
+            the first ``_N_PHYSICS_CHECK`` positions.
         blind_global: If ``True``, zero out the global map observation
             (local-only ablation).
         return_analytics: If ``True``, also return per-step analytics as
@@ -164,7 +172,6 @@ def remdm_sample(
     action_dim = cfg.action_dim
     K = num_steps if num_steps is not None else cfg.diffusion_steps_eval
     schedule_fn = get_schedule(cfg.noise_schedule)
-    min_keep = max(1, int(seq_len * 0.10))  # Safety Net: always unmask ≥10%
 
     local_obs = local_obs.to(device)
     global_obs = global_obs.to(device)
@@ -182,16 +189,29 @@ def remdm_sample(
     tracking_confidence: list[float] = []
     tracking_masked_count: list[int] = []
 
-    # Start fully masked
+    # Start fully masked; psi stores the decoding probability at the step
+    # each token was last unmasked (+inf while masked), per ReMDM Sec 4.1.
     seq = torch.full(
         (B, seq_len), mask_token, dtype=torch.long, device=device
     )
+    psi = torch.full((B, seq_len), float("inf"), device=device)
 
-    for k in range(1, K + 1):
-        ratio = k / K
-        # Pass as tensor (not Python int) to avoid torch.compile recompilation
+    # FIX-3 (ADJUDICATION B-3): ReMDM Algorithm 1 (Wang et al.). Masked
+    # tokens unmask via independent Bernoulli draws from the approximate
+    # posterior; committed tokens remask w.p. sigma from the Sec 4.1
+    # schedule. Replaces the previous MaskGIT count-based unmasking and
+    # its unsourced 10% min-keep floor. Shared pseudocode lines 8-12
+    # (METHOD_PARITY 2.1); the craftax twin is sample_plan.
+    for idx in range(K):
+        t = (K - idx) / K
+        s = (K - idx - 1) / K
+        alpha_t = float(schedule_fn(torch.tensor(t)))
+        alpha_s = float(schedule_fn(torch.tensor(s)))
+        # Discrete conditioning bin for the learned timestep embedding
+        # (B-9, free per MDLM Sec 3.5: time conditioning is optional).
         t_discrete = torch.full(
-            (B,), int(cfg.num_diffusion_steps * (1.0 - ratio)),
+            (B,),
+            min(int(t * cfg.num_diffusion_steps), cfg.num_diffusion_steps - 1),
             dtype=torch.long, device=device,
         )
 
@@ -212,96 +232,81 @@ def remdm_sample(
         probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]
         preds = Categorical(probs=probs).sample()  # [B, seq_len]
 
-        # Confidence: probability of the sampled token
-        conf = probs.gather(
+        # Decoding probability of the sampled token
+        decode_prob = probs.gather(
             -1, preds.unsqueeze(-1)
         ).squeeze(-1)  # [B, seq_len]
 
-        # Physics softener: demote hazardous cardinal actions to conf=0.001
+        # Physics softener (unsourced engineering, default off; CH-6):
+        # demote hazardous cardinal actions to decode_prob=0.001 so the
+        # conf strategy preferentially remasks them.
         if physics_aware and local_np is not None:
             preds_np = preds.cpu().numpy()  # [B, seq_len]
-            conf_override = conf.clone()
+            prob_override = decode_prob.clone()
             for b in range(B):
                 crop_b = np.asarray(local_np[b])  # [crop, crop]
                 for pos in range(min(_N_PHYSICS_CHECK, seq_len)):
                     action = int(preds_np[b, pos])
                     if _check_hazard(crop_b, action):
-                        conf_override[b, pos] = 0.001
-            conf = conf_override
+                        prob_override[b, pos] = 0.001
+            decode_prob = prob_override
 
-        is_masked = seq == mask_token  # [B, seq_len]
+        committed = seq != mask_token  # [B, seq_len]
 
-        if k < K:
-            # MaskGIT progressive unmasking with min-keep guarantee
-            n_unmask = max(min_keep, max(1, int(seq_len * ratio)))
-
-            # Set confidence of non-masked positions to -1 so they
-            # are not selected for unmasking
-            unmask_scores = conf.clone()
-            unmask_scores[~is_masked] = -1.0
-
-            # For each batch element, unmask top-confidence masked positions
-            _, topk_indices = unmask_scores.topk(
-                n_unmask, dim=-1
-            )  # [B, n_unmask]
-
-            # Build scatter mask for positions to unmask
-            unmask_mask = torch.zeros_like(seq, dtype=torch.bool)
-            unmask_mask.scatter_(1, topk_indices, True)
-            unmask_mask = unmask_mask & is_masked  # only unmask masked pos
-
-            seq = torch.where(unmask_mask, preds, seq)
-
-            # ReMDM stochastic remasking of committed (non-masked) positions
-            is_committed = seq != mask_token  # [B, seq_len]
-            # C-003 (F-047, D6/D9): ReMDM eq 7 sigma_max, unified with the
-            # craftax sampler: alpha_t at the current ratio, alpha_s at the
-            # next (more denoised) step. Previously ``1 - alpha_t(ratio)``.
-            alpha_t_ratio = schedule_fn(
-                torch.tensor(ratio, device=device)
-            )
-            alpha_s_ratio = schedule_fn(
-                torch.tensor(min(1.0, (k + 1) / K), device=device)
-            )
-            sigma_max = min(
-                1.0,
-                float(
-                    (1.0 - alpha_s_ratio)
-                    / torch.clamp(alpha_t_ratio, min=1e-8)
-                ),
+        # Remasking probability sigma in [0, sigma_max] (ReMDM eq 7)
+        sigma_max = min(1.0, (1.0 - alpha_s) / max(alpha_t, 1e-8))
+        sigma = _compute_remask_prob(
+            cfg.remask_strategy, cfg.eta, sigma_max, psi, committed
+        )
+        if not isinstance(sigma, Tensor):
+            sigma = torch.full(
+                (B, seq_len), float(sigma), device=device
             )
 
-            remask_prob = _compute_remask_prob(
-                cfg.remask_strategy, cfg.eta, sigma_max, conf, is_committed
-            )
-            if isinstance(remask_prob, Tensor):
-                do_remask = (
-                    torch.rand_like(conf) < remask_prob
-                ) & is_committed
-            else:
-                do_remask = (
-                    torch.rand(B, seq_len, device=device) < remask_prob
-                ) & is_committed
-            seq = torch.where(do_remask, mask_token, seq)
-        else:
-            # Final step: commit all remaining MASK tokens
-            seq = torch.where(is_masked, preds, seq)
+        # Algorithm 1 posterior: masked tokens unmask w.p.
+        # (alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)
+        p_unmask = torch.clamp(
+            (alpha_s - (1.0 - sigma) * alpha_t)
+            / max(1.0 - alpha_t, 1e-8),
+            0.0, 1.0,
+        )
+
+        do_unmask = ~committed & (
+            torch.rand(B, seq_len, device=device) < p_unmask
+        )
+        do_remask = committed & (
+            torch.rand(B, seq_len, device=device) < sigma
+        )
+
+        seq = torch.where(do_unmask, preds, seq)
+        seq = torch.where(do_remask, mask_token, seq)
+        psi = torch.where(do_unmask, decode_prob, psi)
+        psi = torch.where(
+            do_remask, torch.full_like(psi, float("inf")), psi
+        )
 
         # Analytics tracking
         if return_analytics:
             path_per_step.append(seq[0].cpu().numpy().copy())
             still_masked = (seq[0] == mask_token)
-            unmasked_conf = conf[0][~still_masked]
+            unmasked_prob = psi[0][~still_masked]
             avg_conf = (
-                unmasked_conf.mean().item()
-                if unmasked_conf.numel() > 0 else 0.0
+                unmasked_prob.mean().item()
+                if unmasked_prob.numel() > 0 else 0.0
             )
             tracking_confidence.append(avg_conf)
             tracking_masked_count.append(int(still_masked.sum().item()))
 
-    assert (seq != mask_token).all(), (
-        "remdm_sample produced MASK tokens in final output"
-    )
+    # Final greedy cleanup for any remaining masks (as in the craftax
+    # twin); replaces the previous commit-all step and assertion.
+    still_masked = seq == mask_token
+    if still_masked.any():
+        t_zero = torch.zeros(B, dtype=torch.long, device=device)
+        out = model(local_obs, global_obs, seq, t_zero)
+        logits = out["actions"]
+        logits[:, :, action_dim:] = float("-inf")
+        seq = torch.where(still_masked, logits.argmax(dim=-1), seq)
+
     if return_analytics:
         return seq, path_per_step, tracking_confidence, tracking_masked_count
     return seq
