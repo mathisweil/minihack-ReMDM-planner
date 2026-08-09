@@ -53,3 +53,30 @@ def test_collector_halts_on_persistent_oracle_failure(tiny_cfg):
         collector._note_oracle_result(None, "SomeEnv-v0")
     collector._note_oracle_result({"actions": [0]}, "SomeEnv-v0")
     assert collector._oracle_failure_streak == 0, "success must reset the streak"
+
+
+def test_offline_snapshot_save_failure_raises(tiny_cfg, tmp_path, monkeypatch):
+    """FIX-B3: a checkpoint whose config snapshot cannot be written raises
+    instead of shipping a checkpoint the snapshot-evaluation workflow
+    cannot use."""
+    import yaml as yaml_mod
+
+    from src.models.denoiser import ModelEMA, make_model
+    from src.planners import offline as offline_mod
+
+    model = make_model(tiny_cfg)
+    ema = ModelEMA(model, decay=0.5)
+    tiny_cfg.checkpoint_dir = str(tmp_path)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    import torch
+
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=1)
+    monkeypatch.setattr(yaml_mod, "dump", boom)
+    with pytest.raises(OSError):
+        offline_mod._save_offline_checkpoint(
+            model, ema, opt, sched, step=1, cfg=tiny_cfg, log=None,
+        )
