@@ -17,7 +17,6 @@ from torch import Tensor
 
 from src.diffusion.schedules import get_schedule_deriv_for
 
-
 _MAX_WEIGHT: float = 1000.0  # matches loss_weight_clip default; craftax twin identical
 _WEIGHT_DENOM_EPS: float = 1e-5  # floor for 1 - alpha_t; craftax _EPS identical
 

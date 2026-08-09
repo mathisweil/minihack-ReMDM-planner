@@ -13,8 +13,8 @@ import os
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch

@@ -7,9 +7,10 @@ Mirrors the Craftax logging conventions with metric namespaces:
 from __future__ import annotations
 
 import logging
-import torch
-from typing import TYPE_CHECKING
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
+
+import torch
 
 if TYPE_CHECKING:
     from wandb.sdk.wandb_run import Run as _WandbRun
@@ -33,8 +34,9 @@ def download_artifact(
         directory, or ``None`` on failure.
     """
     try:
-        import wandb
         from pathlib import Path
+
+        import wandb
 
         api = wandb.Api()
         artifact = api.artifact(artifact_ref)
