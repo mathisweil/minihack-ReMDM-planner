@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
+import contextlib
 
 logger = logging.getLogger(__name__)
 
@@ -112,10 +113,8 @@ def _cast_override(key: str, raw: str, current) -> object:
         and not isinstance(current, bool)
         and isinstance(value, str)
     ):
-        try:
+        with contextlib.suppress(ValueError):
             value = float(value)
-        except ValueError:
-            pass
 
     if isinstance(current, bool):
         if not isinstance(value, bool):

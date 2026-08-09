@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
+import contextlib
 
 if TYPE_CHECKING:
     from wandb.sdk.wandb_run import Run as _WandbRun
@@ -137,10 +138,8 @@ class Logger:
             metrics: Flat ``{key: value}`` dict.
         """
         if self._use_wandb and self._run is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._run.summary.update(metrics)
-            except Exception:
-                pass
 
     def log(self, metrics: dict, step: int) -> None:
         """Log a dict of metrics.
