@@ -278,7 +278,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 | `remask_strategy` | `conf` | `rescale`, `cap`, or `conf` |
 | `eta` | 0.15 | Remasking strength |
 | `temperature` | 0.5 | Sampling temperature |
-| `top_k` | 4 | Top-K filtering |
+| `top_p` | 0.9 | Nucleus threshold (ReMDM Sec 5) |
 | `replan_every` | 16 | Env steps before replanning |
 | `loss_weight_clip` | 1000.0 | SUBS weight clip bound |
 | `label_smoothing` | 0.0 | Cross-entropy label smoothing |

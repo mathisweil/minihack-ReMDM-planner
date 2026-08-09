@@ -54,21 +54,28 @@ def _check_hazard(local_crop: np.ndarray, action: int) -> bool:
     return glyph in _HAZARD_GLYPHS or glyph in _HAZARD_CHARS
 
 
-def top_k_filter(logits: Tensor, k: int) -> Tensor:
-    """Zero out all but the top-k logits per position.
+def top_p_filter(logits: Tensor, top_p: float) -> Tensor:
+    """Nucleus filtering (ReMDM Sec 5; CH-1 replaced top-k filtering).
+
+    Keeps the smallest prefix of the descending-sorted distribution whose
+    cumulative mass reaches ``top_p``; all other logits go to ``-inf``.
+    Mirrors the craftax twin ``_nucleus_sample`` cutoff semantics.
 
     Args:
         logits: Raw logits. Shape ``[..., V]``.
-        k: Number of top entries to keep.
+        top_p: Nucleus threshold in (0, 1]; ``>= 1`` disables filtering.
 
     Returns:
-        Filtered logits with non-top-k set to ``-inf``.
+        Filtered logits with out-of-nucleus entries set to ``-inf``.
     """
-    if k <= 0 or k >= logits.shape[-1]:
+    if top_p is None or top_p >= 1.0:
         return logits
-    topk_vals, _ = logits.topk(k, dim=-1)  # [..., k]
-    threshold = topk_vals[..., -1:]  # [..., 1]
-    return logits.masked_fill(logits < threshold, float("-inf"))
+    probs = F.softmax(logits, dim=-1)
+    sorted_p, sorted_idx = probs.sort(dim=-1, descending=True)
+    cutoff = sorted_p.cumsum(dim=-1) - sorted_p  # exclusive cumsum
+    remove_sorted = cutoff >= top_p
+    remove = remove_sorted.gather(-1, sorted_idx.argsort(dim=-1))
+    return logits.masked_fill(remove, float("-inf"))
 
 
 def _compute_remask_prob(
@@ -143,7 +150,7 @@ def remdm_sample(
         global_obs: Global map observations. Shape ``[B, 21, 79]``.
         cfg: Config namespace with ``seq_len``, ``mask_token``,
             ``action_dim``, ``diffusion_steps_eval``, ``temperature``,
-            ``top_k``, ``eta``, ``remask_strategy``, ``noise_schedule``.
+            ``top_p``, ``eta``, ``remask_strategy``, ``noise_schedule``.
         device: Torch device.
         physics_aware: If ``True``, soft-penalise hazardous cardinal actions
             by overriding their stored decoding probability to ``0.001`` so
@@ -225,8 +232,8 @@ def remdm_sample(
         # Temperature scaling
         logits = logits / cfg.temperature
 
-        # Top-K filtering
-        logits = top_k_filter(logits, cfg.top_k)
+        # Nucleus filtering (CH-1)
+        logits = top_p_filter(logits, cfg.top_p)
 
         # Sample predictions
         probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]

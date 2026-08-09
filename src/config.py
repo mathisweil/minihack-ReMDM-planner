@@ -56,6 +56,9 @@ _LEGACY_SNAPSHOT_KEYS = {
     "ood_eval_every",
     "max_iterations",
     "offline_epochs",
+    # CH-1 (ADJUDICATION B-3): nucleus sampling replaced top-k; snapshots
+    # from earlier runs still carry the key. It is accepted and unread.
+    "top_k",
 }
 
 
