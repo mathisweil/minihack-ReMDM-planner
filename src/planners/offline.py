@@ -251,7 +251,6 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     cfg.mask_token, cfg.pad_token, schedule_fn,
                     weight_clip=cfg.loss_weight_clip,
                     label_smoothing=cfg.label_smoothing,
-                    use_importance_weighting=cfg.use_importance_weighting,
                 )
 
                 loss_aux = torch.tensor(0.0, device=device)

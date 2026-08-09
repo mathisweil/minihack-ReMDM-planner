@@ -75,8 +75,6 @@ def _auto_run_name(cfg: SimpleNamespace) -> str:
         f"eta{cfg.eta}",
         f"{cfg.remask_strategy}",
     ]
-    if cfg.use_importance_weighting:
-        parts.append("subs")
     if getattr(cfg, "physics_aware_sampling", False):
         parts.append("phys")
     if cfg.seed is not None:
