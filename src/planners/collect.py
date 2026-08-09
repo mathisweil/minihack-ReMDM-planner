@@ -67,8 +67,6 @@ def run_model_episode(
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
 
-    _use_stochastic = stochastic
-
     env = make_env(env_id, des_file, cfg)
     try:
         (local, glb), _info = env.reset(seed=seed)
@@ -90,7 +88,7 @@ def run_model_episode(
                 glb_t = (
                     torch.from_numpy(glb[np.newaxis]).long().to(device)
                 )  # [1, 21, 79]
-                if _use_stochastic:
+                if stochastic:
                     plan = remdm_sample(
                         model,
                         local_t,
