@@ -239,7 +239,7 @@ class DataCollector:
         self.curriculum = curriculum
         self.cfg = cfg
         self.device = device
-        self._num_workers = getattr(cfg, "num_collection_workers", 0)
+        self._num_workers = getattr(cfg, "num_collection_workers", 0)  # fallback 0 != defaults.yaml (8); partial-config callers rely on it
         self._last_profile: dict[str, float] = {}
         self._thread_pool: ThreadPoolExecutor | None = None
         self._thread_models: list[torch.nn.Module] = []
