@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F
