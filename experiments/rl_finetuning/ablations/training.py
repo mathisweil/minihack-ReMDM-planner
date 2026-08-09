@@ -366,7 +366,7 @@ def _extract_windows(
         )
 
     # Pad if shorter than seq_len
-    if T < seq_len:
+    if seq_len > T:
         pad_len = seq_len - T
         actions = torch.cat(
             [
