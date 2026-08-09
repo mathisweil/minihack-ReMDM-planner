@@ -34,8 +34,8 @@ from experiments.rl_finetuning.ablations.losses import (
     estimate_fisher_diagonal,
 )
 from experiments.rl_finetuning.ablations.optimizers import (
-    apply_lora_to_model,
     apply_gradients,
+    apply_lora_to_model,
     gradient_surgery,
     make_optimizer_lora,
     remove_lora_from_model,
