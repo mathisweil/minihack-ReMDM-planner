@@ -184,15 +184,9 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         # Restore optimizer/scheduler state if resuming
         step = 0
         if resume_state is not None:
-            if "optimizer_state_dict" in resume_state:
-                optimizer.load_state_dict(
-                    resume_state["optimizer_state_dict"],
-                )
-            if "scheduler_state_dict" in resume_state:
-                scheduler.load_state_dict(
-                    resume_state["scheduler_state_dict"],
-                )
-            step = resume_state.get("step", 0)
+            optimizer.load_state_dict(resume_state["optimizer_state_dict"])
+            scheduler.load_state_dict(resume_state["scheduler_state_dict"])
+            step = resume_state["step"]
             logger.info(f"Resumed offline training from step {step}/{total_grad_steps}")
 
         # AMP: enabled when use_amp=true and on CUDA

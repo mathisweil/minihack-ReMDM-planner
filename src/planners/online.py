@@ -625,13 +625,10 @@ class Trainer:
         self.ema_model.load_state_dict(ckpt["ema_state_dict"])
         self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
 
-        if self.scheduler is not None and ckpt.get("scheduler_state_dict") is not None:
+        if self.scheduler is not None and ckpt["scheduler_state_dict"] is not None:
             self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
 
-        if "curriculum_state" in ckpt:
-            self.collector.curriculum.load_state_dict(
-                ckpt["curriculum_state"],
-            )
+        self.collector.curriculum.load_state_dict(ckpt["curriculum_state"])
 
         # FIX-B4: a resume that cannot restore the saved RNG state would
         # silently continue with fresh randomness while claiming to be a
@@ -657,8 +654,8 @@ class Trainer:
                 "Retrain or resume from an intact checkpoint."
             ) from err
 
-        iteration = ckpt.get("iteration", 0)
-        env_steps = ckpt.get("env_steps", 0)
+        iteration = ckpt["iteration"]
+        env_steps = ckpt["env_steps"]
         resume_from = iteration + 1
         logger.info(
             f"Resumed from checkpoint: {path} (iter {iteration}, "

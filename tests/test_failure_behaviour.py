@@ -82,6 +82,23 @@ def test_offline_snapshot_save_failure_raises(tiny_cfg, tmp_path, monkeypatch):
         )
 
 
+def test_inference_rejects_bare_state_dict(tiny_cfg, tmp_path):
+    """Checkpoint-read strictness: a bare state-dict file (no
+    model_state_dict wrapper) raises instead of loading silently."""
+    import torch
+
+    from src.models.denoiser import make_model
+    from src.planners.inference import run_inference
+
+    model = make_model(tiny_cfg)
+    bare = tmp_path / "bare.pth"
+    torch.save(model.state_dict(), bare)
+    with pytest.raises(ValueError, match="model_state_dict"):
+        run_inference(
+            tiny_cfg, str(bare), ["x"], 1, None, use_ema=False,
+        )
+
+
 def test_resume_refuses_corrupt_rng_state(tiny_cfg, tmp_path):
     """FIX-B4: rng_states present but unrestorable raises instead of
     continuing with fresh randomness under a resume's identity; a

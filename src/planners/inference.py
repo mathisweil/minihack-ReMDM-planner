@@ -340,14 +340,21 @@ def run_inference(
         weights_only=False,
     )
 
-    if "model_state_dict" in ckpt:
-        model.load_state_dict(ckpt["model_state_dict"])
-        if use_ema and "ema_state_dict" in ckpt:
-            ema = ModelEMA(model, decay=cfg.ema_decay)
-            ema.load_state_dict(ckpt["ema_state_dict"])
-            ema.apply_to(model)
-    else:
-        model.load_state_dict(ckpt)
+    if "model_state_dict" not in ckpt:
+        raise ValueError(
+            f"Checkpoint {checkpoint_path} has no model_state_dict; "
+            "bare state-dict files are no longer accepted."
+        )
+    model.load_state_dict(ckpt["model_state_dict"])
+    if use_ema:
+        if "ema_state_dict" not in ckpt:
+            raise ValueError(
+                f"--use-ema requested but checkpoint {checkpoint_path} "
+                "has no ema_state_dict."
+            )
+        ema = ModelEMA(model, decay=cfg.ema_decay)
+        ema.load_state_dict(ckpt["ema_state_dict"])
+        ema.apply_to(model)
 
     model.eval()
 
