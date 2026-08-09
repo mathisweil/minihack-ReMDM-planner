@@ -394,7 +394,6 @@ class Trainer:
                 cfg.mask_token, cfg.pad_token, self._schedule_fn,
                 weight_clip=cfg.loss_weight_clip,
                 label_smoothing=cfg.label_smoothing,
-                use_importance_weighting=cfg.use_importance_weighting,
             )
 
             loss_aux = torch.tensor(0.0, device=self.device)

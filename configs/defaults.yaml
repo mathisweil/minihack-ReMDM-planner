@@ -35,9 +35,6 @@ noise_schedule: linear   # linear | cosine | cosine_sq (MDLM App E.1 names; "cos
 num_diffusion_steps: 100
 loss_weight_clip: 1000.0
 label_smoothing: 0.0
-# Use SUBS importance weighting w(t) in loss. Off by default (flat average
-# matching reference). Enable for MDLM ELBO experiments.
-use_importance_weighting: false
 # ReMDM stochastic remask base fraction
 eta: 0.15
 # Remasking strategy: rescale | cap | conf

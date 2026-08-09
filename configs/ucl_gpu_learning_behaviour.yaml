@@ -34,7 +34,6 @@ loss_weight_clip: 1000.0
 label_smoothing: 0.0
 # Use SUBS importance weighting w(t) in loss. Off by default (flat average
 # matching reference). Enable for MDLM ELBO experiments.
-use_importance_weighting: false
 # ReMDM stochastic remask base fraction
 eta: 0.18
 # Remasking strategy: rescale | cap | conf

@@ -70,7 +70,6 @@ noise_schedule: linear
 num_diffusion_steps: 100
 loss_weight_clip: 1000.0
 label_smoothing: 0.0
-use_importance_weighting: false
 eta: 0.15
 remask_strategy: conf
 
