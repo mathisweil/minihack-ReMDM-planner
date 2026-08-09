@@ -633,19 +633,28 @@ class Trainer:
                 ckpt["curriculum_state"],
             )
 
-        # Restore RNG states (best-effort)
+        # FIX-B4: a resume that cannot restore the saved RNG state would
+        # silently continue with fresh randomness while claiming to be a
+        # resume, corrupting the seed provenance the interval estimates
+        # depend on. Present-but-unusable state raises; absent state
+        # (pre-rng_states checkpoints) warns.
         rng = ckpt.get("rng_states", {})
-        try:
-            if "torch" in rng:
-                torch.set_rng_state(rng["torch"])
-            if "numpy" in rng:
-                np.random.set_state(rng["numpy"])
-            if "python" in rng:
-                random.setstate(rng["python"])
-        except Exception:
+        if not rng:
             logger.warning(
-                "RNG state restore failed; continuing with fresh state",
+                "Checkpoint has no rng_states (pre-provenance format); "
+                "resuming with fresh RNG state",
             )
+        else:
+            try:
+                torch.set_rng_state(rng["torch"])
+                np.random.set_state(rng["numpy"])
+                random.setstate(rng["python"])
+            except Exception as err:
+                raise RuntimeError(
+                    f"Checkpoint {path} carries rng_states that could not "
+                    "be restored; refusing to resume with fresh RNG. "
+                    "Retrain or resume from an intact checkpoint."
+                ) from err
 
         iteration = ckpt.get("iteration", 0)
         env_steps = ckpt.get("env_steps", 0)
