@@ -1,0 +1,10 @@
+{
+  "eval_observed_delta_max": 0.0,
+  "eval_reward_atol": 1e-09,
+  "eval_steps_atol": 1e-09,
+  "eval_win_rate_atol": 1e-09,
+  "forward_atol": 1e-07,
+  "train_bit_reproducible": true,
+  "train_loss_atol": 1e-09,
+  "train_observed_delta": 0.0
+}
