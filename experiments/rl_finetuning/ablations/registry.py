@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -98,12 +98,12 @@ class AblationSpec:
     reward_model_weighting: bool = False
 
 
-def _std_opt(cfg: SimpleNamespace, model: nn.Module) -> "torch.optim.Optimizer":
+def _std_opt(cfg: SimpleNamespace, model: nn.Module) -> torch.optim.Optimizer:
     """Standard AdamW for all parameters."""
     return make_optimizer_standard(cfg, model)
 
 
-def _llrd_opt(cfg: SimpleNamespace, model: nn.Module) -> "torch.optim.Optimizer":
+def _llrd_opt(cfg: SimpleNamespace, model: nn.Module) -> torch.optim.Optimizer:
     """AdamW with layer-wise learning rate decay."""
     return make_optimizer_llrd(cfg, model)
 
@@ -111,7 +111,7 @@ def _llrd_opt(cfg: SimpleNamespace, model: nn.Module) -> "torch.optim.Optimizer"
 def _frozen_backbone_opt(
     cfg: SimpleNamespace,
     model: nn.Module,
-) -> "torch.optim.Optimizer":
+) -> torch.optim.Optimizer:
     """Freeze backbone, train only the action head."""
     return make_optimizer_frozen(cfg, model, FROZEN_BACKBONE)
 
@@ -119,7 +119,7 @@ def _frozen_backbone_opt(
 def _head_only_opt(
     cfg: SimpleNamespace,
     model: nn.Module,
-) -> "torch.optim.Optimizer":
+) -> torch.optim.Optimizer:
     """Freeze everything except the action head."""
     return make_optimizer_frozen(cfg, model, FROZEN_BACKBONE)
 
@@ -127,7 +127,7 @@ def _head_only_opt(
 def _attention_only_opt(
     cfg: SimpleNamespace,
     model: nn.Module,
-) -> "torch.optim.Optimizer":
+) -> torch.optim.Optimizer:
     """Freeze everything except attention sublayers."""
     return make_optimizer_frozen(cfg, model, FROZEN_EXCEPT_ATTENTION)
 
@@ -135,7 +135,7 @@ def _attention_only_opt(
 def _ffn_only_opt(
     cfg: SimpleNamespace,
     model: nn.Module,
-) -> "torch.optim.Optimizer":
+) -> torch.optim.Optimizer:
     """Freeze everything except FFN sublayers."""
     return make_optimizer_frozen(cfg, model, FROZEN_EXCEPT_FFN)
 
@@ -146,7 +146,7 @@ def _layer_ablation_top_n_opt(n: int) -> OptimizerFactory:
     def _opt(
         cfg: SimpleNamespace,
         model: nn.Module,
-    ) -> "torch.optim.Optimizer":
+    ) -> torch.optim.Optimizer:
         n_layers = getattr(cfg, "n_layer", 4)
         frozen: list[str] = [
             "embedding.",

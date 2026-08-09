@@ -190,7 +190,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _history_finals(history: "AblationHistory") -> dict:
+def _history_finals(history: AblationHistory) -> dict:
     """C-002 (F-024/F-035): final logged value per history field for one seed.
 
     Captures numeric finals, dict finals (e.g. per_env_win_rates) and

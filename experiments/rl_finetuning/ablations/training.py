@@ -145,7 +145,7 @@ class AblationHistory:
         return {k: list(v) for k, v in self.__dict__.items()}
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AblationHistory":
+    def from_dict(cls, d: dict) -> AblationHistory:
         """Reconstruct from a dict.
 
         Args:
