@@ -18,9 +18,9 @@ Key differences:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import SimpleNamespace
-from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F
