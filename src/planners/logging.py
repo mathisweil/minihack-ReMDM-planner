@@ -6,12 +6,12 @@ Mirrors the Craftax logging conventions with metric namespaces:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import torch
-import contextlib
 
 if TYPE_CHECKING:
     from wandb.sdk.wandb_run import Run as _WandbRun

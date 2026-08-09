@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import zlib
-from datetime import datetime, timezone, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 

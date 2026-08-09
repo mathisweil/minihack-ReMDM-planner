@@ -6,15 +6,15 @@ following the Craftax config pattern.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import secrets
-from datetime import datetime, timezone, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
-import contextlib
 
 logger = logging.getLogger(__name__)
 

@@ -11,9 +11,9 @@ import logging
 import random
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from collections.abc import Callable
 
 import numpy as np
 import torch
