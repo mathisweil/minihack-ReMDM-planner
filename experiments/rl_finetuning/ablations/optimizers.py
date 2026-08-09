@@ -28,7 +28,6 @@ from torch import Tensor
 from torch.nn.utils import parametrize
 
 
-
 def make_optimizer_standard(
     cfg: SimpleNamespace,
     model: nn.Module,
@@ -48,7 +47,6 @@ def make_optimizer_standard(
         weight_decay=getattr(cfg, "weight_decay", 1e-4),
         eps=1e-5,
     )
-
 
 
 def _get_llrd_group(name: str) -> str:
@@ -115,19 +113,22 @@ def make_optimizer_llrd(
         key = f"block_{i}"
         if key in groups:
             depth = n_layers - i  # block_0 farthest from head
-            param_groups.append({
-                "params": groups[key],
-                "lr": base_lr * (decay ** depth),
-            })
+            param_groups.append(
+                {
+                    "params": groups[key],
+                    "lr": base_lr * (decay**depth),
+                }
+            )
     if "obs_enc" in groups:
-        param_groups.append({
-            "params": groups["obs_enc"],
-            "lr": base_lr * (decay ** (n_layers + 1)),
-        })
+        param_groups.append(
+            {
+                "params": groups["obs_enc"],
+                "lr": base_lr * (decay ** (n_layers + 1)),
+            }
+        )
 
     wd = getattr(cfg, "weight_decay", 1e-4)
     return torch.optim.AdamW(param_groups, weight_decay=wd, eps=1e-5)
-
 
 
 def make_optimizer_frozen(
@@ -223,7 +224,6 @@ FROZEN_EXCEPT_FFN: list[str] = [
 ]
 
 
-
 class _LoRAParametrization(nn.Module):
     """Low-rank parametrization for a weight matrix.
 
@@ -239,7 +239,11 @@ class _LoRAParametrization(nn.Module):
     """
 
     def __init__(
-        self, d_out: int, d_in: int, rank: int, alpha: float,
+        self,
+        d_out: int,
+        d_in: int,
+        rank: int,
+        alpha: float,
     ) -> None:
         super().__init__()
         self.A = nn.Parameter(torch.randn(rank, d_in) * 0.02)  # [r, d_in]
@@ -344,7 +348,6 @@ def make_optimizer_lora(
         weight_decay=getattr(cfg, "weight_decay", 1e-4),
         eps=1e-5,
     )
-
 
 
 def apply_gradients(model: nn.Module, grads: dict[str, Tensor]) -> None:

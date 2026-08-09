@@ -54,7 +54,6 @@ class LossContext:
     cfg: SimpleNamespace
 
 
-
 def _per_sample_masked_ce(
     logits: Tensor,
     x0: Tensor,
@@ -125,8 +124,8 @@ def _forward_and_loss(
     zt = q_sample(x0, t, cfg.mask_token, cfg.pad_token, schedule_fn)  # [B, H]
 
     # Convert to discrete timestep for model
-    t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
-        0, cfg.num_diffusion_steps - 1
+    t_discrete = (
+        (t * cfg.num_diffusion_steps).long().clamp(0, cfg.num_diffusion_steps - 1)
     )  # [B]
 
     # Model forward
@@ -222,10 +221,7 @@ def _kl_from_logits(
     cur_prob = cur_log.exp()
 
     kl = (cur_prob * (cur_log - ref_log)).sum(dim=-1)  # [B, H]
-    kl_masked = (
-        (kl * is_masked).sum(dim=1)
-        / is_masked.sum(dim=1).clamp(min=1.0)
-    )
+    kl_masked = (kl * is_masked).sum(dim=1) / is_masked.sum(dim=1).clamp(min=1.0)
     return kl_masked.mean()
 
 
@@ -279,7 +275,6 @@ def _ewc_penalty(
     return penalty
 
 
-
 def make_loss_baseline(ctx: LossContext) -> LossFn:
     """Standard return-weighted ELBO -- no modifications.
 
@@ -289,6 +284,7 @@ def make_loss_baseline(ctx: LossContext) -> LossFn:
     Returns:
         ``LossFn`` implementing the baseline RL fine-tuning objective.
     """
+
     def loss_fn(
         model: nn.Module,
         local_obs: Tensor,
@@ -328,7 +324,12 @@ def make_loss_kl_penalty(ctx: LossContext) -> LossFn:
         device: torch.device,
     ) -> Tensor:
         per_sample, aux_loss, logits, zt, t_discrete = _forward_and_loss(
-            model, local_obs, global_obs, x0, cfg, device,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            cfg,
+            device,
         )
         if advantages is not None:
             loss = (per_sample * advantages).mean()
@@ -337,8 +338,13 @@ def make_loss_kl_penalty(ctx: LossContext) -> LossFn:
         loss = loss + cfg.aux_loss_weight * aux_loss
 
         kl = _kl_from_logits(
-            logits, ref_model, local_obs, global_obs,
-            zt, t_discrete, cfg,
+            logits,
+            ref_model,
+            local_obs,
+            global_obs,
+            zt,
+            t_discrete,
+            cfg,
         )
         return loss + kl_coef * kl
 
@@ -399,7 +405,12 @@ def make_loss_trust_region_kl(ctx: LossContext) -> LossFn:
         device: torch.device,
     ) -> Tensor:
         per_sample, aux_loss, logits, zt, t_discrete = _forward_and_loss(
-            model, local_obs, global_obs, x0, cfg, device,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            cfg,
+            device,
         )
         if advantages is not None:
             loss = (per_sample * advantages).mean()
@@ -408,11 +419,16 @@ def make_loss_trust_region_kl(ctx: LossContext) -> LossFn:
         loss = loss + cfg.aux_loss_weight * aux_loss
 
         kl = _kl_from_logits(
-            logits, ref_model, local_obs, global_obs,
-            zt, t_discrete, cfg,
+            logits,
+            ref_model,
+            local_obs,
+            global_obs,
+            zt,
+            t_discrete,
+            cfg,
         )
         violation = torch.clamp(kl - threshold, min=0.0)
-        return loss + 1e4 * violation ** 2
+        return loss + 1e4 * violation**2
 
     return loss_fn
 
@@ -429,7 +445,6 @@ def make_loss_mixed_replay(ctx: LossContext) -> LossFn:
     return make_loss_baseline(ctx)
 
 
-
 def make_loss_bc_wins(ctx: LossContext) -> LossFn:
     """Uniform ELBO ignoring advantages (BC on wins).
 
@@ -439,6 +454,7 @@ def make_loss_bc_wins(ctx: LossContext) -> LossFn:
     Returns:
         ``LossFn`` with advantages zeroed out.
     """
+
     def loss_fn(
         model: nn.Module,
         local_obs: Tensor,
@@ -474,8 +490,15 @@ def make_loss_low_t(ctx: LossContext) -> LossFn:
         device: torch.device,
     ) -> Tensor:
         return _core_loss(
-            model, local_obs, global_obs, x0, advantages, cfg, device,
-            t_min=_EPS, t_max=t_max,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            advantages,
+            cfg,
+            device,
+            t_min=_EPS,
+            t_max=t_max,
         )
 
     return loss_fn
@@ -515,8 +538,15 @@ def make_loss_t_curriculum(ctx: LossContext) -> LossFn:
         t_max = max(t_max, t_min + 0.05)
         t_max = min(t_max, 1.0)
         return _core_loss(
-            model, local_obs, global_obs, x0, advantages, cfg, device,
-            t_min=t_min, t_max=t_max,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            advantages,
+            cfg,
+            device,
+            t_min=t_min,
+            t_max=t_max,
         )
 
     return loss_fn
@@ -546,7 +576,12 @@ def make_loss_entropy_bonus(ctx: LossContext) -> LossFn:
         device: torch.device,
     ) -> Tensor:
         per_sample, aux_loss, logits, zt, _ = _forward_and_loss(
-            model, local_obs, global_obs, x0, cfg, device,
+            model,
+            local_obs,
+            global_obs,
+            x0,
+            cfg,
+            device,
         )
         if advantages is not None:
             loss = (per_sample * advantages).mean()
@@ -608,6 +643,7 @@ def make_loss_normalized_adv(ctx: LossContext) -> LossFn:
     Returns:
         ``LossFn`` with std-normalised advantages.
     """
+
     def loss_fn(
         model: nn.Module,
         local_obs: Tensor,
@@ -624,7 +660,6 @@ def make_loss_normalized_adv(ctx: LossContext) -> LossFn:
         return _core_loss(model, local_obs, global_obs, x0, advantages, cfg, device)
 
     return loss_fn
-
 
 
 def make_loss_frozen_backbone(ctx: LossContext) -> LossFn:
@@ -651,7 +686,6 @@ def make_loss_param_isolation(ctx: LossContext) -> LossFn:
     return make_loss_baseline(ctx)
 
 
-
 def make_loss_reward_quality(ctx: LossContext) -> LossFn:
     """Baseline loss; reward filtering and normalisation handled externally.
 
@@ -662,7 +696,6 @@ def make_loss_reward_quality(ctx: LossContext) -> LossFn:
         ``LossFn`` identical to baseline.
     """
     return make_loss_baseline(ctx)
-
 
 
 def estimate_fisher_diagonal(
@@ -687,8 +720,7 @@ def estimate_fisher_diagonal(
         Dict mapping parameter name -> Fisher diagonal tensor.
     """
     accumulator: dict[str, Tensor] = {
-        name: torch.zeros_like(param)
-        for name, param in model.named_parameters()
+        name: torch.zeros_like(param) for name, param in model.named_parameters()
     }
 
     _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
@@ -700,9 +732,7 @@ def estimate_fisher_diagonal(
 
         model.zero_grad()
         with torch.amp.autocast("cuda", enabled=_use_amp):
-            loss = _core_loss(
-                model, local_obs, global_obs, x0, None, cfg, device
-            )
+            loss = _core_loss(model, local_obs, global_obs, x0, None, cfg, device)
         loss.backward()
 
         for name, param in model.named_parameters():

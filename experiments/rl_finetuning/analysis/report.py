@@ -15,6 +15,7 @@ import logging
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
 import matplotlib.pyplot as plt  # noqa: E402
@@ -26,6 +27,7 @@ from experiments.rl_finetuning.ablations.registry import (  # noqa: E402
 from experiments.rl_finetuning.ablations.training import (  # noqa: E402
     AblationHistory,
 )
+
 logger = logging.getLogger(__name__)
 
 _DPI = 150
@@ -33,11 +35,13 @@ _DPI = 150
 _HYPOTHESIS_GROUPS: dict[str, dict] = {
     "Catastrophic Forgetting": {
         "supporting_ablations": [
-            "kl_penalty", "ewc", "llrd", "frozen_backbone", "head_only",
+            "kl_penalty",
+            "ewc",
+            "llrd",
+            "frozen_backbone",
+            "head_only",
         ],
-        "description": (
-            "Pretrained representations are corrupted by RL gradients."
-        ),
+        "description": ("Pretrained representations are corrupted by RL gradients."),
         "recommendation": (
             "Implement strong parameter regularisation (EWC + LLRD) "
             "or use LoRA to restrict update space."
@@ -45,22 +49,21 @@ _HYPOTHESIS_GROUPS: dict[str, dict] = {
     },
     "Gradient Conflict": {
         "supporting_ablations": [
-            "gradient_surgery", "kl_penalty", "low_t",
+            "gradient_surgery",
+            "kl_penalty",
+            "low_t",
         ],
-        "description": (
-            "RL and BC gradients point in conflicting directions."
-        ),
-        "recommendation": (
-            "Apply PCGrad and investigate t-distribution bias."
-        ),
+        "description": ("RL and BC gradients point in conflicting directions."),
+        "recommendation": ("Apply PCGrad and investigate t-distribution bias."),
     },
     "Signal Sparsity": {
         "supporting_ablations": [
-            "bc_wins", "reward_filtering", "running_stats", "reward_model",
+            "bc_wins",
+            "reward_filtering",
+            "running_stats",
+            "reward_model",
         ],
-        "description": (
-            "Returns are too sparse or noisy for useful training signal."
-        ),
+        "description": ("Returns are too sparse or noisy for useful training signal."),
         "recommendation": (
             "Increase episodes per iteration, use reward shaping, "
             "or apply curriculum-based episode selection."
@@ -79,24 +82,19 @@ _HYPOTHESIS_GROUPS: dict[str, dict] = {
     },
     "Mode Collapse": {
         "supporting_ablations": [
-            "entropy_bonus", "advantage_clip", "normalized_adv",
+            "entropy_bonus",
+            "advantage_clip",
+            "normalized_adv",
         ],
         "description": (
-            "Model collapses to degenerate distribution, losing "
-            "action diversity."
+            "Model collapses to degenerate distribution, losing action diversity."
         ),
-        "recommendation": (
-            "Add strong entropy bonus and clip advantages."
-        ),
+        "recommendation": ("Add strong entropy bonus and clip advantages."),
     },
     "t-Bias": {
         "supporting_ablations": ["low_t", "t_curriculum"],
-        "description": (
-            "High-t gradients dominate and carry misleading signal."
-        ),
-        "recommendation": (
-            "Restrict training to low-t regime or use t-curriculum."
-        ),
+        "description": ("High-t gradients dominate and carry misleading signal."),
+        "recommendation": ("Restrict training to low-t regime or use t-curriculum."),
     },
 }
 
@@ -122,7 +120,8 @@ def _score_hypothesis(
         Scoring dict with evidence_score, n_supporting, n_tested.
     """
     baseline_score = results.get("baseline_rl", {}).get(
-        "score", pretrained_score,
+        "score",
+        pretrained_score,
     )
     threshold = max(pretrained_score, baseline_score)
     n_tested = 0
@@ -211,8 +210,7 @@ def generate_diagnosis_report(
     for i, s in enumerate(scored, 1):
         stars = "*" * max(1, int(s["evidence_score"] * 5))
         lines.append(
-            f"### {i}. {s['hypothesis']} "
-            f"[{stars}] ({s['evidence_score']:.0%})"
+            f"### {i}. {s['hypothesis']} [{stars}] ({s['evidence_score']:.0%})"
         )
         lines.append("")
         lines.append(f"**Description:** {s['description']}")
@@ -232,7 +230,8 @@ def generate_diagnosis_report(
     lines.append("|---|---|---|---|")
 
     baseline_score = results.get("baseline_rl", {}).get(
-        "score", pretrained_score,
+        "score",
+        pretrained_score,
     )
     for name in sorted(results.keys()):
         res = results[name]
@@ -240,10 +239,7 @@ def generate_diagnosis_report(
         group = spec.group if spec else "?"
         delta = res["score"] - pretrained_score
         sign = "+" if delta >= 0 else ""
-        lines.append(
-            f"| {name} | {group} | {res['score']:.4f} | "
-            f"{sign}{delta:.4f} |"
-        )
+        lines.append(f"| {name} | {group} | {res['score']:.4f} | {sign}{delta:.4f} |")
 
     # Per-ablation verdicts (reference thresholds)
     lines.append("")
@@ -261,8 +257,7 @@ def generate_diagnosis_report(
             verdict = "NEUTRAL"
         sign = "+" if delta_bl >= 0 else ""
         lines.append(
-            f"| {name} | {res['score']:.4f} | "
-            f"{sign}{delta_bl:.4f} | {verdict} |"
+            f"| {name} | {res['score']:.4f} | {sign}{delta_bl:.4f} | {verdict} |"
         )
 
     lines.append("")
@@ -275,18 +270,14 @@ def generate_diagnosis_report(
     lines.append("")
 
     # Check if ALL RL ablations collapse
-    rl_ablation_names = [
-        n for n in results if n != "baseline_rl"
-    ]
+    rl_ablation_names = [n for n in results if n != "baseline_rl"]
     all_collapse = bool(rl_ablation_names) and all(
-        results[n]["score"] < pretrained_score - 0.1
-        for n in rl_ablation_names
+        results[n]["score"] < pretrained_score - 0.1 for n in rl_ablation_names
     )
 
     if all_collapse:
         lines.append(
-            "**ALL RL ablations collapse** "
-            "(all ID win rates > 10% below pretrained)."
+            "**ALL RL ablations collapse** (all ID win rates > 10% below pretrained)."
         )
         lines.append(
             "Infrastructure is likely fine -- self-generated data "
@@ -296,8 +287,7 @@ def generate_diagnosis_report(
         )
     elif rl_ablation_names:
         n_collapse = sum(
-            1 for n in rl_ablation_names
-            if results[n]["score"] < pretrained_score - 0.1
+            1 for n in rl_ablation_names if results[n]["score"] < pretrained_score - 0.1
         )
         lines.append(
             f"Mixed results: {n_collapse}/{len(rl_ablation_names)} "

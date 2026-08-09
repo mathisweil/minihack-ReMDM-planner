@@ -25,6 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib
+
 matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
 import matplotlib.pyplot as plt  # noqa: E402
@@ -51,7 +52,6 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_FRACTIONS: list[float] = [1.0, 0.9, 0.7, 0.5, 0.0]
 _INTERMEDIATE_FRACTIONS: list[float] = [0.9, 0.7, 0.5]
-
 
 
 def _collect_oracle_data(
@@ -86,27 +86,38 @@ def _collect_oracle_data(
     for i in range(n_episodes):
         env_id = env_ids[i % len(env_ids)]
         ep = run_model_episode(
-            model, env_id, cfg, device, stochastic=True,
+            model,
+            env_id,
+            cfg,
+            device,
+            stochastic=True,
         )
         lo, go, x0, ret = _extract_windows(
-            ep, cfg.seq_len, cfg.pad_token,
+            ep,
+            cfg.seq_len,
+            cfg.pad_token,
         )
         if lo.shape[0] == 0:
             continue
         all_local.append(lo)
         all_global.append(go)
         all_x0.append(x0)
-        all_returns.append(
-            torch.full((lo.shape[0],), ret, dtype=torch.float32)
-        )
+        all_returns.append(torch.full((lo.shape[0],), ret, dtype=torch.float32))
 
     if not all_local:
         empty_lo = torch.empty(0, 9, 9, dtype=torch.long, device=device)
         empty_go = torch.empty(
-            0, 21, 79, dtype=torch.long, device=device,
+            0,
+            21,
+            79,
+            dtype=torch.long,
+            device=device,
         )
         empty_x0 = torch.empty(
-            0, cfg.seq_len, dtype=torch.long, device=device,
+            0,
+            cfg.seq_len,
+            dtype=torch.long,
+            device=device,
         )
         empty_ret = torch.empty(0, dtype=torch.float32, device=device)
         return empty_lo, empty_go, empty_x0, empty_ret
@@ -117,7 +128,6 @@ def _collect_oracle_data(
         torch.cat(all_x0).to(device),
         torch.cat(all_returns).to(device),
     )
-
 
 
 def run_mixing_point(
@@ -165,7 +175,9 @@ def run_mixing_point(
     cfg._schedule_fn = schedule_fn
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=3e-4, weight_decay=1e-4,
+        model.parameters(),
+        lr=3e-4,
+        weight_decay=1e-4,
     )
 
     ctx = LossContext(ref_model=None, schedule_fn=schedule_fn, cfg=cfg)
@@ -179,10 +191,13 @@ def run_mixing_point(
     n_oracle = oracle_local.shape[0]
     if n_oracle > 0 and oracle_fraction > 0.0:
         n_fill = min(
-            int(buf_capacity * oracle_fraction), n_oracle,
+            int(buf_capacity * oracle_fraction),
+            n_oracle,
         )
         oracle_returns = torch.ones(
-            n_oracle, dtype=torch.float32, device=device,
+            n_oracle,
+            dtype=torch.float32,
+            device=device,
         )
         buf.push(
             oracle_local[:n_fill],
@@ -192,7 +207,8 @@ def run_mixing_point(
         )
         logger.info(
             "Pre-filled buffer with %d oracle windows (%.0f%% target)",
-            n_fill, oracle_fraction * 100,
+            n_fill,
+            oracle_fraction * 100,
         )
 
     history: dict[str, list[float] | list[int]] = {
@@ -211,18 +227,28 @@ def run_mixing_point(
         eval_model = ema.make_eval_model(model)
         env_id = env_ids[(iteration - 1) % len(env_ids)]
         ep = run_model_episode(
-            eval_model, env_id, cfg, device, stochastic=True,
+            eval_model,
+            env_id,
+            cfg,
+            device,
+            stochastic=True,
         )
         lo, go, x0, ret = _extract_windows(
-            ep, cfg.seq_len, cfg.pad_token,
+            ep,
+            cfg.seq_len,
+            cfg.pad_token,
         )
         if lo.shape[0] > 0:
             returns_t = torch.full(
-                (lo.shape[0],), ret, dtype=torch.float32,
+                (lo.shape[0],),
+                ret,
+                dtype=torch.float32,
             )
             buf.push(
-                lo.to(device), go.to(device),
-                x0.to(device), returns_t.to(device),
+                lo.to(device),
+                go.to(device),
+                x0.to(device),
+                returns_t.to(device),
             )
 
         # Gradient step
@@ -237,7 +263,13 @@ def run_mixing_point(
             model.train()
             optimizer.zero_grad()
             loss = loss_fn(
-                model, b_lo, b_go, b_x0, adv, cfg, device,
+                model,
+                b_lo,
+                b_go,
+                b_x0,
+                adv,
+                cfg,
+                device,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -262,33 +294,40 @@ def run_mixing_point(
         if iteration % eval_every == 0:
             eval_model = ema.make_eval_model(model)
             results = evaluator.evaluate(
-                cfg.id_envs, eval_model, eval_episodes, cfg, device,
+                cfg.id_envs,
+                eval_model,
+                eval_episodes,
+                cfg,
+                device,
             )
-            id_wr = float(np.mean([
-                v["win_rate"] for v in results.values()
-            ]))
+            id_wr = float(np.mean([v["win_rate"] for v in results.values()]))
             history["id_winrate"].append(id_wr)
             history["id_winrate_iter"].append(iteration)
             logger.info(
                 "  [Oracle-%.0f%%] iter=%d  loss=%.4f  id_wr=%.3f",
-                oracle_fraction * 100, iteration, loss_val, id_wr,
+                oracle_fraction * 100,
+                iteration,
+                loss_val,
+                id_wr,
             )
 
     # Final evaluation
     final_model = ema.make_eval_model(model)
     final_results = evaluator.evaluate(
-        cfg.id_envs, final_model, eval_episodes, cfg, device,
+        cfg.id_envs,
+        final_model,
+        eval_episodes,
+        cfg,
+        device,
     )
-    final_id_wr = float(np.mean([
-        v["win_rate"] for v in final_results.values()
-    ]))
+    final_id_wr = float(np.mean([v["win_rate"] for v in final_results.values()]))
     logger.info(
         "  [Oracle-%.0f%%] FINAL id_win_rate: %.4f",
-        oracle_fraction * 100, final_id_wr,
+        oracle_fraction * 100,
+        final_id_wr,
     )
 
     return history, final_id_wr
-
 
 
 def check_monotonicity(
@@ -315,7 +354,6 @@ def check_monotonicity(
                 f"{rates[i]:.2%} -> {rates[i + 1]:.2%}"
             )
     return len(violations) == 0, violations
-
 
 
 _COLORS_BY_FRAC: dict[float, str] = {
@@ -355,7 +393,12 @@ def generate_mixing_plots(
     frac_pct = [f * 100 for f in fractions]
     rate_pct = [r * 100 for r in rates]
     ax.plot(
-        frac_pct, rate_pct, "ko-", linewidth=2, markersize=8, zorder=3,
+        frac_pct,
+        rate_pct,
+        "ko-",
+        linewidth=2,
+        markersize=8,
+        zorder=3,
     )
     for frac, rate in zip(fractions, rates):
         c = _COLORS_BY_FRAC.get(frac, "gray")
@@ -368,18 +411,22 @@ def generate_mixing_plots(
             fontsize=9,
         )
     ax.axhline(
-        known_100 * 100, color="green", linestyle="--", alpha=0.5,
+        known_100 * 100,
+        color="green",
+        linestyle="--",
+        alpha=0.5,
         label=f"Pure oracle ({known_100:.1%})",
     )
     ax.axhline(
-        known_0 * 100, color="red", linestyle="--", alpha=0.5,
+        known_0 * 100,
+        color="red",
+        linestyle="--",
+        alpha=0.5,
         label=f"Pure RL ({known_0:.1%})",
     )
     ax.set_xlabel("Oracle Data Fraction (%)")
     ax.set_ylabel("ID Win Rate (%)")
-    ax.set_title(
-        "Performance vs Oracle Data Fraction\n(Degradation Curve)"
-    )
+    ax.set_title("Performance vs Oracle Data Fraction\n(Degradation Curve)")
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     ax.set_xlim(-5, 105)
@@ -390,15 +437,24 @@ def generate_mixing_plots(
     # Panel 1: ID win rate over training per fraction
     ax2 = axes[1]
     ax2.axhline(
-        known_100 * 100, color="green", linestyle="--", linewidth=2,
-        label=f"Pure oracle ({known_100:.1%})", alpha=0.7,
+        known_100 * 100,
+        color="green",
+        linestyle="--",
+        linewidth=2,
+        label=f"Pure oracle ({known_100:.1%})",
+        alpha=0.7,
     )
     ax2.axhline(
-        known_0 * 100, color="red", linestyle=":", linewidth=1.5,
-        label=f"Pure RL ({known_0:.1%})", alpha=0.7,
+        known_0 * 100,
+        color="red",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"Pure RL ({known_0:.1%})",
+        alpha=0.7,
     )
     for frac, info in sorted(
-        mixing_results.items(), key=lambda kv: -kv[0],
+        mixing_results.items(),
+        key=lambda kv: -kv[0],
     ):
         hist = info["history"]
         name = f"Oracle-{int(frac * 100)}%"
@@ -423,9 +479,7 @@ def generate_mixing_plots(
 
     # Panel 2: Final ID win rate bar chart
     ax3 = axes[2]
-    bar_labels = [
-        f"{int(f * 100)}%\noracle" for f in fractions
-    ]
+    bar_labels = [f"{int(f * 100)}%\noracle" for f in fractions]
     bar_colors = [_COLORS_BY_FRAC.get(f, "gray") for f in fractions]
     bars = ax3.bar(
         range(len(fractions)),
@@ -434,7 +488,10 @@ def generate_mixing_plots(
         alpha=0.85,
     )
     ax3.axhline(
-        known_100 * 100, color="green", linestyle="--", alpha=0.5,
+        known_100 * 100,
+        color="green",
+        linestyle="--",
+        alpha=0.5,
     )
     ax3.set_xticks(range(len(fractions)))
     ax3.set_xticklabels(bar_labels, fontsize=9)
@@ -457,7 +514,6 @@ def generate_mixing_plots(
     fig.savefig(str(plot_path), dpi=150, bbox_inches="tight")
     plt.close(fig)
     logger.info("Saved mixing plot: %s", plot_path)
-
 
 
 def run_mixing_experiment(
@@ -509,7 +565,9 @@ def run_mixing_experiment(
     logger.info("Loading pretrained checkpoint: %s", pretrained_checkpoint)
     model = make_model(cfg).to(device)
     ckpt = torch.load(
-        pretrained_checkpoint, map_location=device, weights_only=False,
+        pretrained_checkpoint,
+        map_location=device,
+        weights_only=False,
     )
     if "ema_state_dict" in ckpt:
         model.load_state_dict(ckpt["ema_state_dict"])
@@ -528,23 +586,29 @@ def run_mixing_experiment(
     logger.info("Evaluating pretrained model (100%% oracle baseline)...")
     evaluator = Evaluator()
     baseline_results = evaluator.evaluate(
-        cfg.id_envs, model, eval_episodes, cfg, device,
+        cfg.id_envs,
+        model,
+        eval_episodes,
+        cfg,
+        device,
     )
-    known_100 = float(np.mean([
-        v["win_rate"] for v in baseline_results.values()
-    ]))
+    known_100 = float(np.mean([v["win_rate"] for v in baseline_results.values()]))
     logger.info("100%% oracle baseline ID win rate: %.4f", known_100)
 
     # Collect oracle dataset from pretrained rollouts
     n_oracle_episodes = max(
-        getattr(cfg, "mixing_oracle_episodes", 50), 10,
+        getattr(cfg, "mixing_oracle_episodes", 50),
+        10,
     )
     logger.info(
         "Collecting oracle dataset (%d episodes)...",
         n_oracle_episodes,
     )
     oracle_lo, oracle_go, oracle_x0, oracle_ret = _collect_oracle_data(
-        model, cfg, device, n_oracle_episodes,
+        model,
+        cfg,
+        device,
+        n_oracle_episodes,
     )
     logger.info("Oracle dataset: %d windows", oracle_lo.shape[0])
 
@@ -552,8 +616,7 @@ def run_mixing_experiment(
     mixing_results: dict[float, dict] = {}
     for frac in sorted(oracle_fractions, reverse=True):
         logger.info(
-            "=" * 60 + "\nTraining mixing point: Oracle-%.0f%%\n"
-            + "=" * 60,
+            "=" * 60 + "\nTraining mixing point: Oracle-%.0f%%\n" + "=" * 60,
             frac * 100,
         )
         history, final_id = run_mixing_point(
@@ -577,13 +640,24 @@ def run_mixing_experiment(
     # 0% oracle (pure RL) -- train with no oracle data
     logger.info("Training 0%% oracle (pure RL) baseline...")
     empty_lo = torch.empty(
-        0, 9, 9, dtype=torch.long, device=device,
+        0,
+        9,
+        9,
+        dtype=torch.long,
+        device=device,
     )
     empty_go = torch.empty(
-        0, 21, 79, dtype=torch.long, device=device,
+        0,
+        21,
+        79,
+        dtype=torch.long,
+        device=device,
     )
     empty_x0 = torch.empty(
-        0, cfg.seq_len, dtype=torch.long, device=device,
+        0,
+        cfg.seq_len,
+        dtype=torch.long,
+        device=device,
     )
     rl_history, known_0 = run_mixing_point(
         oracle_fraction=0.0,
@@ -607,27 +681,34 @@ def run_mixing_experiment(
     all_fractions = [1.0] + sorted(oracle_fractions, reverse=True) + [0.0]
     all_rates = (
         [known_100]
-        + [mixing_results[f]["final_id"] for f in sorted(
-            oracle_fractions, reverse=True,
-        )]
+        + [
+            mixing_results[f]["final_id"]
+            for f in sorted(
+                oracle_fractions,
+                reverse=True,
+            )
+        ]
         + [known_0]
     )
 
     is_monotonic, violations = check_monotonicity(
-        all_fractions, all_rates,
+        all_fractions,
+        all_rates,
     )
     if is_monotonic:
-        logger.info(
-            "CONFIRMED: Monotonic degradation across all fractions."
-        )
+        logger.info("CONFIRMED: Monotonic degradation across all fractions.")
     else:
         for v in violations:
             logger.info("Non-monotonic violation: %s", v)
 
     # Generate plots
     generate_mixing_plots(
-        all_fractions, all_rates, mixing_results,
-        known_100, known_0, out_path,
+        all_fractions,
+        all_rates,
+        mixing_results,
+        known_100,
+        known_0,
+        out_path,
     )
 
     # Assemble results dict
@@ -641,8 +722,7 @@ def run_mixing_experiment(
             str(frac): {
                 "final_id": float(info["final_id"]),
                 "history": {
-                    k: [float(v) for v in vals]
-                    for k, vals in info["history"].items()
+                    k: [float(v) for v in vals] for k, vals in info["history"].items()
                 },
             }
             for frac, info in mixing_results.items()

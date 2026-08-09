@@ -17,6 +17,7 @@ import logging
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")  # noqa: E402 — must precede pyplot import
 
 import matplotlib.pyplot as plt  # noqa: E402
@@ -55,8 +56,7 @@ _GROUP_COLORS = {
 }
 
 # Line style cycling within groups for visual distinction.
-_LINE_STYLES = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2)),
-                (0, (1, 1))]
+_LINE_STYLES = ["-", "--", "-.", ":", (0, (3, 1, 1, 1)), (0, (5, 2)), (0, (1, 1))]
 _MARKERS = ["o", "s", "D", "^", "v", "P", "X"]
 
 # Cache: ablation name -> (color, linestyle, marker).
@@ -140,7 +140,6 @@ def _save(fig: plt.Figure, path: Path) -> None:
     logger.info("Saved %s", path)
 
 
-
 def plot_training_curve(
     name: str,
     history: AblationHistory,
@@ -164,8 +163,10 @@ def plot_training_curve(
 
         if history.eval_iters:
             ax2.plot(
-                history.eval_iters, history.eval_score,
-                "o-", color=_group_color(name),
+                history.eval_iters,
+                history.eval_score,
+                "o-",
+                color=_group_color(name),
             )
         ax2.set_xlabel("Iteration")
         ax2.set_ylabel("ID Win Rate")
@@ -173,7 +174,6 @@ def plot_training_curve(
 
         fig.tight_layout()
         _save(fig, out_dir / f"train_{name}.png")
-
 
 
 def plot_score_comparison(
@@ -205,7 +205,6 @@ def plot_score_comparison(
         _save(fig, out_dir / "score_comparison.png")
 
 
-
 def plot_grad_alignment(
     results: dict[str, dict],
     out_dir: Path,
@@ -223,20 +222,25 @@ def plot_grad_alignment(
             if h.grad_align_iters:
                 c, ls, mk = _ablation_style(name)
                 ax.plot(
-                    h.grad_align_iters, _ema(h.grad_align),
-                    label=name, color=c, linestyle=ls,
-                    alpha=0.8, linewidth=1.5,
+                    h.grad_align_iters,
+                    _ema(h.grad_align),
+                    label=name,
+                    color=c,
+                    linestyle=ls,
+                    alpha=0.8,
+                    linewidth=1.5,
                 )
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Cosine Similarity (RL vs BC)")
         ax.set_title("Gradient Alignment")
         ax.legend(
-            ncol=3, fontsize=7, loc="upper left",
+            ncol=3,
+            fontsize=7,
+            loc="upper left",
             bbox_to_anchor=(0, -0.15),
         )
         fig.tight_layout()
         _save(fig, out_dir / "grad_alignment.png")
-
 
 
 def plot_repr_drift(
@@ -253,8 +257,10 @@ def plot_repr_drift(
         fig, axes = plt.subplots(1, 4, figsize=(16, 4), sharey=True)
         titles = ["KL mean", "KL low-t", "KL mid-t", "KL high-t"]
         keys = [
-            "repr_drift_kl", "repr_drift_kl_low_t",
-            "repr_drift_kl_mid_t", "repr_drift_kl_high_t",
+            "repr_drift_kl",
+            "repr_drift_kl_low_t",
+            "repr_drift_kl_mid_t",
+            "repr_drift_kl_high_t",
         ]
         for name, res in sorted(results.items()):
             h: AblationHistory = res["history"]
@@ -264,21 +270,26 @@ def plot_repr_drift(
             for ax, key in zip(axes, keys):
                 vals = getattr(h, key)
                 ax.plot(
-                    h.repr_drift_iters, _ema(vals),
-                    label=name, color=c, linestyle=ls, alpha=0.7,
+                    h.repr_drift_iters,
+                    _ema(vals),
+                    label=name,
+                    color=c,
+                    linestyle=ls,
+                    alpha=0.7,
                 )
         for ax, title in zip(axes, titles):
             ax.set_xlabel("Iteration")
             ax.set_title(title)
         axes[0].set_ylabel("KL(ref || cur)")
         axes[0].legend(
-            ncol=3, fontsize=6, loc="upper left",
+            ncol=3,
+            fontsize=6,
+            loc="upper left",
             bbox_to_anchor=(0, -0.18),
         )
         fig.suptitle("Representation Drift", fontsize=14)
         fig.tight_layout()
         _save(fig, out_dir / "repr_drift.png")
-
 
 
 def plot_cka(
@@ -298,20 +309,26 @@ def plot_cka(
             if h.cka_iters:
                 c, ls, mk = _ablation_style(name)
                 ax.plot(
-                    h.cka_iters, h.cka_similarity,
-                    label=name, color=c, linestyle=ls,
-                    marker=mk, markersize=4, alpha=0.8,
+                    h.cka_iters,
+                    h.cka_similarity,
+                    label=name,
+                    color=c,
+                    linestyle=ls,
+                    marker=mk,
+                    markersize=4,
+                    alpha=0.8,
                 )
         ax.set_xlabel("Iteration")
         ax.set_ylabel("CKA")
         ax.set_title("CKA Similarity vs Pretrained")
         ax.legend(
-            ncol=3, fontsize=7, loc="upper left",
+            ncol=3,
+            fontsize=7,
+            loc="upper left",
             bbox_to_anchor=(0, -0.15),
         )
         fig.tight_layout()
         _save(fig, out_dir / "cka_similarity.png")
-
 
 
 def plot_t_bin_norms(
@@ -359,7 +376,6 @@ def plot_t_bin_norms(
         _save(fig, out_dir / "t_bin_norms.png")
 
 
-
 def plot_t_ratio(
     results: dict[str, dict],
     out_dir: Path,
@@ -378,26 +394,32 @@ def plot_t_ratio(
             h: AblationHistory = res["history"]
             if h.t_analysis_iters and h.norm_low_t and h.norm_high_t:
                 ratios = [
-                    hi / (lo + 1e-10)
-                    for hi, lo in zip(h.norm_high_t, h.norm_low_t)
+                    hi / (lo + 1e-10) for hi, lo in zip(h.norm_high_t, h.norm_low_t)
                 ]
                 c, ls, mk = _ablation_style(name)
                 ax.plot(
-                    h.t_analysis_iters, _ema(ratios),
-                    label=name, color=c, linestyle=ls,
-                    marker=mk, alpha=0.8, markersize=4, linewidth=1.5,
+                    h.t_analysis_iters,
+                    _ema(ratios),
+                    label=name,
+                    color=c,
+                    linestyle=ls,
+                    marker=mk,
+                    alpha=0.8,
+                    markersize=4,
+                    linewidth=1.5,
                 )
         ax.axhline(1.0, ls="--", color="black", alpha=0.5, label="Equal")
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Ratio (>1 = high-t dominates)")
         ax.set_title("High-t / Low-t Gradient Norm Ratio")
         ax.legend(
-            ncol=3, fontsize=7, loc="upper left",
+            ncol=3,
+            fontsize=7,
+            loc="upper left",
             bbox_to_anchor=(0, -0.15),
         )
         fig.tight_layout()
         _save(fig, out_dir / "t_ratio.png")
-
 
 
 def plot_win_rate(
@@ -417,20 +439,25 @@ def plot_win_rate(
             if h.iters and h.win_rate:
                 c, ls, _ = _ablation_style(name)
                 ax.plot(
-                    h.iters, _ema(h.win_rate),
-                    label=name, color=c, linestyle=ls,
-                    alpha=0.8, linewidth=1.5,
+                    h.iters,
+                    _ema(h.win_rate),
+                    label=name,
+                    color=c,
+                    linestyle=ls,
+                    alpha=0.8,
+                    linewidth=1.5,
                 )
         ax.set_xlabel("Iteration")
         ax.set_ylabel("Win Rate")
         ax.set_title("Online Win Rate (EMA)")
         ax.legend(
-            ncol=3, fontsize=7, loc="upper left",
+            ncol=3,
+            fontsize=7,
+            loc="upper left",
             bbox_to_anchor=(0, -0.15),
         )
         fig.tight_layout()
         _save(fig, out_dir / "win_rate.png")
-
 
 
 def plot_group_comparison(
@@ -470,7 +497,6 @@ def plot_group_comparison(
         _save(fig, out_dir / "group_comparison.png")
 
 
-
 def plot_gradient_conflict_map(
     results: dict[str, dict],
     out_dir: Path,
@@ -504,8 +530,7 @@ def plot_gradient_conflict_map(
 
     with plt.rc_context(_STYLE):
         fig, ax = plt.subplots(
-            figsize=(max(8, len(sorted_iters) * 0.4),
-                     max(4, len(names) * 0.35)),
+            figsize=(max(8, len(sorted_iters) * 0.4), max(4, len(names) * 0.35)),
         )
         cmap = plt.cm.RdYlGn_r.copy()  # type: ignore[attr-defined]
         cmap.set_bad(color="white")
@@ -514,17 +539,23 @@ def plot_gradient_conflict_map(
         ax.set_yticklabels(names, fontsize=8)
         ax.set_xticks(range(0, len(sorted_iters), max(1, len(sorted_iters) // 10)))
         ax.set_xticklabels(
-            [str(sorted_iters[j]) for j in range(
-                0, len(sorted_iters), max(1, len(sorted_iters) // 10),
-            )],
-            rotation=45, ha="right", fontsize=7,
+            [
+                str(sorted_iters[j])
+                for j in range(
+                    0,
+                    len(sorted_iters),
+                    max(1, len(sorted_iters) // 10),
+                )
+            ],
+            rotation=45,
+            ha="right",
+            fontsize=7,
         )
         ax.set_xlabel("Iteration")
         ax.set_title("Gradient Conflict Map (red = cos_sim(RL, BC) < 0)")
         fig.colorbar(im, ax=ax, label="Conflict", ticks=[0, 1])
         fig.tight_layout()
         _save(fig, out_dir / "gradient_conflict_map.png")
-
 
 
 def plot_score_delta(
@@ -559,7 +590,6 @@ def plot_score_delta(
         _save(fig, out_dir / "score_delta.png")
 
 
-
 def plot_per_env_delta(
     results: dict[str, dict],
     out_dir: Path,
@@ -582,10 +612,7 @@ def plot_per_env_delta(
     if not env_names:
         return
 
-    short_envs = [
-        e.replace("MiniHack-", "").replace("-v0", "")
-        for e in env_names
-    ]
+    short_envs = [e.replace("MiniHack-", "").replace("-v0", "") for e in env_names]
 
     valid_names: list[str] = []
     data_rows: list[list[float]] = []
@@ -594,10 +621,7 @@ def plot_per_env_delta(
         if h.per_env_win_rates and len(h.per_env_win_rates) >= 2:
             start = h.per_env_win_rates[0]
             end = h.per_env_win_rates[-1]
-            data_rows.append([
-                end.get(e, 0.0) - start.get(e, 0.0)
-                for e in env_names
-            ])
+            data_rows.append([end.get(e, 0.0) - start.get(e, 0.0) for e in env_names])
             valid_names.append(name)
 
     if not data_rows:
@@ -608,12 +632,14 @@ def plot_per_env_delta(
 
     with plt.rc_context(_STYLE):
         fig, ax = plt.subplots(
-            figsize=(max(8, len(env_names) * 1.5),
-                     max(4, len(valid_names) * 0.35)),
+            figsize=(max(8, len(env_names) * 1.5), max(4, len(valid_names) * 0.35)),
         )
         im = ax.imshow(
-            matrix, aspect="auto", cmap="RdBu",
-            vmin=-v_abs, vmax=v_abs,
+            matrix,
+            aspect="auto",
+            cmap="RdBu",
+            vmin=-v_abs,
+            vmax=v_abs,
         )
         ax.set_yticks(range(len(valid_names)))
         ax.set_yticklabels(valid_names, fontsize=8)
@@ -623,7 +649,6 @@ def plot_per_env_delta(
         fig.colorbar(im, ax=ax, label="Delta Win Rate")
         fig.tight_layout()
         _save(fig, out_dir / "per_env_delta.png")
-
 
 
 def generate_all_plots(
