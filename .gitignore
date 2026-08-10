@@ -245,7 +245,7 @@ __marimo__/
 # ============================================================
 
 # PyCharm / JetBrains
-# .idea/
+.idea/
 
 # VS Code
 # .vscode/
