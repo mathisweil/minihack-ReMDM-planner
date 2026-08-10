@@ -25,11 +25,11 @@ cd minihack-ReMDM-planner
 # Base environment (CPU / macOS). Installs the dev group (pytest) too.
 uv sync
 
-# GPU (NVIDIA CUDA 12.6, Linux only): torch from the PyTorch cu126 index
+# GPU (NVIDIA CUDA 13.2, Linux only): torch from the PyTorch cu132 index
 uv sync --extra cuda
 ```
 
-Extras: `cuda` is the only extra; it swaps torch for the CUDA 12.6 build on Linux. The same extra name exists in the craftax repo (where it installs `jax[cuda13]`).
+Extras: `cuda` is the only extra; it swaps torch for the CUDA 13.2 build on Linux.
 
 > **Install path must not contain spaces.** MiniHack's `mh_patch_nhdat.sh` interpolates paths unquoted and fails silently on whitespace, leaving every environment as the same default level with no goal staircase. `src/envs/minihack_env.py` detects this and substitutes a Python implementation, but a space-free path avoids the issue entirely.
 
