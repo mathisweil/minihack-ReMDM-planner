@@ -48,7 +48,7 @@ select = ["F", "E4", "E7", "E9", "I", "UP", "C4", "SIM", "RET", "B"]
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu126", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu126", extra = "cuda", marker = "sys_platform == 'linux'" },
 ]
 
 [[tool.uv.index]]
