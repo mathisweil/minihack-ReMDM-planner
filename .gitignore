@@ -11,6 +11,10 @@ checkpoints/
 play_data/
 texture_cache.pbz2
 texture_cache*.pbz2
+checkpoints*/
+artifacts/
+*.pth
+*.pt
 
 # ============================================================
 # Byte-compiled / optimized / DLL files
