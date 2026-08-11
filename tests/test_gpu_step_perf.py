@@ -105,6 +105,47 @@ def test_result_is_float32_regardless_of_input_dtype():
         assert find_staircase_from_glyphs(maps).dtype == torch.float32
 
 
+# ── PERF-C3: fused EMA update ────────────────────────────────────────
+
+
+def test_fused_ema_matches_the_per_parameter_loop(tiny_cfg):
+    torch.manual_seed(0)
+    model = make_model(tiny_cfg)
+    ema = ModelEMA(model, decay=tiny_cfg.ema_decay)
+    reference = {n: p.data.clone() for n, p in model.named_parameters()}
+    decay = tiny_cfg.ema_decay
+
+    for _ in range(5):
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(torch.randn_like(p) * 0.01)
+        ema.update(model)
+        with torch.no_grad():
+            for name, p in model.named_parameters():
+                reference[name].mul_(decay).add_(p.data, alpha=1.0 - decay)
+
+    for name, expected in reference.items():
+        assert torch.equal(ema._shadow[name], expected), name
+
+
+def test_ema_rebuilds_its_cache_for_a_different_model(tiny_cfg):
+    """The cached operand lists must not leak between source models."""
+    torch.manual_seed(0)
+    model_a = make_model(tiny_cfg)
+    model_b = make_model(tiny_cfg)
+    ema = ModelEMA(model_a, decay=0.5)
+
+    # Same update sequence applied to a plain dict, as the reference.
+    shadow = {n: p.data.clone() for n, p in model_a.named_parameters()}
+    for source in (model_a, model_b):
+        ema.update(source)
+        for name, p in source.named_parameters():
+            shadow[name] = shadow[name] * 0.5 + p.data * 0.5
+
+    for name, expected in shadow.items():
+        assert torch.allclose(ema._shadow[name], expected), name
+
+
 # ── PERF-C2: device-side step metrics ────────────────────────────────
 
 
