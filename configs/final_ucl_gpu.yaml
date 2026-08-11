@@ -17,8 +17,24 @@
 #
 # UCL 3090 Ti — 24 GB VRAM. The 4-layer × 256-dim model with
 # batch=2048 and AMP fits with comfortable headroom (~6-8 GB peak).
-# Lower core count than the QMUL cluster, so collection workers
-# capped at 8.
+# Measured on the target box (RTX 3090 Ti, driver 590.44.01, torch
+# 2.13.0+cu126): 6,678 MB peak allocated and 7,065 MB peak reserved
+# over 200 gradient steps, so the estimate above is right. A checkpoint
+# eval at `eval_episodes_per_env: 50` peaks at 123 MB allocated — it
+# runs under no_grad at B<=50, so training is the high-water mark by
+# 54x, not eval. Headroom on an idle card is ~17 GB.
+#
+# `num_collection_workers` below has NO EFFECT on this box. It only
+# feeds `collect_batch_parallel`, and `online.py:147` always takes the
+# `collect_batch_gpu` branch on CUDA with `episodes_per_iteration > 1`.
+# It is left at 8 for parity with the QMUL config; the one cost of a
+# non-zero value is that `DataCollector.__init__` still builds that
+# many unused CPU copies of the model (`collect.py:258-265`).
+#
+# Set TMPDIR to local disk before running. $TMPDIR here defaults to an
+# NFS home, where MiniHack env construction costs 115.7 ms/env against
+# 17.2 ms on local xfs and `env.reset` 8.44 ms against 1.24 ms. That
+# alone moves collection from 6.6 s to 3.7 s per iteration.
 
 # ── Environments ─────────────────────────────────────────────────────
 id_envs:
