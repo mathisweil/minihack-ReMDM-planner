@@ -713,10 +713,15 @@ def run_dagger(
     # torch.compile: wrap for training only; shares parameters with raw_model
     model = try_compile(raw_model, cfg)
 
+    # PERF-C4: `fused=True` folds the whole AdamW update into one kernel
+    # instead of a per-tensor loop over the 72 parameter tensors. CUDA only;
+    # it is safe alongside AMP's GradScaler, which passes its inf check
+    # through to the fused kernel.
     optimizer = torch.optim.AdamW(
         raw_model.parameters(),
         lr=cfg.dagger_lr,
         weight_decay=cfg.weight_decay,
+        fused=str(device).startswith("cuda"),
     )
 
     buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)

@@ -89,10 +89,12 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         """
         _ema_source = raw_model if raw_model is not None else model
         model.train()
+        # PERF-C4: fused AdamW on CUDA — see online.py's `run_dagger`.
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=cfg.offline_lr,
             weight_decay=cfg.weight_decay,
+            fused=str(device).startswith("cuda"),
         )
 
         # Unified budget: `total_timesteps` counts env.step()-equivalent
