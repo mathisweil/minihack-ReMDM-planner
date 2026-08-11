@@ -145,6 +145,12 @@ checkpoint_eval_episodes: 50
 # Mixed-precision (FP16) training via torch.cuda.amp.
 # Speeds up forward/backward ~1.5-2x on GPU. No effect on CPU.
 use_amp: false
+# Autocast dtype when `use_amp` is on: "fp16" (with GradScaler, the
+# default and the dtype every released checkpoint was trained in) or
+# "bf16" (no scaler needed; Ampere and later only). PERF-C6: bf16 is a
+# throughput experiment whose result differs between GPU generations, so
+# it is opt-in and off by default.
+amp_dtype: fp16
 # torch.compile the model for fused kernels (experimental).
 # May cause slow first iteration due to compilation. No effect on CPU.
 torch_compile: false
