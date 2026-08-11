@@ -28,14 +28,14 @@ cd minihack-ReMDM-planner
 uv sync
 
 # Linux, explicit CUDA 13.2 (driver >= 580)
-uv sync --extra cu132
+uv sync --extra cuda13
 
 # Linux, CUDA 12.6 fallback (driver >= 525, or Maxwell/Pascal cards)
-uv sync --extra cu126
+uv sync --extra cuda12
 ```
 
-Extras: `cu132` and `cu126` are mutually exclusive and Linux-only. Neither is needed on a
-modern driver: plain `uv sync` already yields a CUDA 13.0 build on Linux. Use `cu126` only
+Extras: `cuda13` and `cuda12` are mutually exclusive and Linux-only. Neither is needed on a
+modern driver: plain `uv sync` already yields a CUDA 13.0 build on Linux. Use `cuda12` only
 if `nvidia-smi` reports a driver older than 580.
 
 > **Install path must not contain spaces.** MiniHack's `mh_patch_nhdat.sh` interpolates paths unquoted and fails silently on whitespace, leaving every environment as the same default level with no goal staircase. `src/envs/minihack_env.py` detects this and substitutes a Python implementation, but a space-free path avoids the issue entirely.
