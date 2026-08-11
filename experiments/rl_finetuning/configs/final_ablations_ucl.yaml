@@ -26,6 +26,15 @@ diffusion_steps_collect: 5
 # -- GPU performance ----------------------------------------------------------
 use_amp: true
 # Skip torch.compile -- compilation overhead not worth it for 500 iters.
+# Measured on the 4070 Ti SUPER (baseline_rl, 12 iters, batch 4608): the
+# compiled gradient step runs at 273 ms against 385 ms eager (-29%), but
+# the batch is data-limited so its size changes iteration to iteration
+# and Inductor recompiles -- 22.3 s on iteration 1 and a further 15.2 s
+# on iteration 2. Over 500 iterations that is ~56 s saved against ~38 s
+# paid, per ablation and per seed, so ~2% of a ~15 min run. The comment
+# above is confirmed on time. Compilation does cut peak VRAM from 15,087
+# to 14,219 MiB, which is the reason to reach for it on a card where the
+# suite does not otherwise fit.
 torch_compile: false
 
 # -- Evaluation ---------------------------------------------------------------
