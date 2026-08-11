@@ -11,6 +11,7 @@ The planner starts from a fully-masked action sequence and iteratively unmasks t
 ## Setup
 
 Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/). `nle` compiles from source on macOS.
+Linux GPU use needs NVIDIA driver >= 580 for CUDA 13, or >= 525 with `--extra cu126`.
 
 ```bash
 # macOS (arm64)
@@ -22,14 +23,20 @@ sudo apt-get install build-essential cmake bison flex libbz2-dev
 git clone https://github.com/mathisweil/minihack-ReMDM-planner.git
 cd minihack-ReMDM-planner
 
-# Base environment (CPU / macOS). Installs the dev group (pytest) too.
+# Default. macOS gets the PyPI build (MPS); Linux gets PyPI's CUDA 13.0 build.
+# Installs the dev group (pytest) too.
 uv sync
 
-# GPU (NVIDIA CUDA 13.2, Linux only): torch from the PyTorch cu132 index
-uv sync --extra cuda
+# Linux, explicit CUDA 13.2 (driver >= 580)
+uv sync --extra cu132
+
+# Linux, CUDA 12.6 fallback (driver >= 525, or Maxwell/Pascal cards)
+uv sync --extra cu126
 ```
 
-Extras: `cuda` is the only extra; it swaps torch for the CUDA 13.2 build on Linux.
+Extras: `cu132` and `cu126` are mutually exclusive and Linux-only. Neither is needed on a
+modern driver: plain `uv sync` already yields a CUDA 13.0 build on Linux. Use `cu126` only
+if `nvidia-smi` reports a driver older than 580.
 
 > **Install path must not contain spaces.** MiniHack's `mh_patch_nhdat.sh` interpolates paths unquoted and fails silently on whitespace, leaving every environment as the same default level with no goal staircase. `src/envs/minihack_env.py` detects this and substitutes a Python implementation, but a space-free path avoids the issue entirely.
 
@@ -460,7 +467,7 @@ Profile with `python scripts/profile_dagger.py [--override key=value ...]`.
 
 ```bash
 uv run pytest            # ~35s
-uv run pytest -m slow    # adds BC + PPO baseline entry points, ~45s
+uv run pytest -m slow    # slow entry points only (BC + PPO baselines), ~45s
 ```
 
 `tests/test_smoke_src.py` and `tests/test_smoke_experiments.py` cover both pipelines: modules import, the model builds from `configs/defaults.yaml`, a forward pass returns the expected shape and dtype with no NaNs, one training step gives a finite loss, save/reload reproduces identical output, each entry point runs, and all 25 registry ablations step. They assert things *run*, not that results are good. CPU-only, seeded, synthetic data; nothing written outside `tmp_path`. For a quality signal, use `--mode smoke`.
