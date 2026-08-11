@@ -201,6 +201,19 @@ class MixedReplayBuffer:
         n = local_obs.shape[0]
         if n == 0:
             return
+        if n >= self.capacity:
+            # One iteration can collect more windows than the whole
+            # buffer holds. The wrap-around branch below splits the batch
+            # at the buffer boundary and would then try to write n - first
+            # rows into a destination of at most `capacity`. Keep the most
+            # recent `capacity` windows instead, which is exactly what the
+            # ring discipline would have left behind had they been written
+            # one at a time.
+            local_obs = local_obs[-self.capacity :]
+            global_obs = global_obs[-self.capacity :]
+            x0 = x0[-self.capacity :]
+            returns = returns[-self.capacity :]
+            n = self.capacity
         start = self._write_idx % self.capacity
         if start + n <= self.capacity:
             self._local[start : start + n] = local_obs

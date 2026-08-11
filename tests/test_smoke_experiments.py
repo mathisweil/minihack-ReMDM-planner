@@ -153,6 +153,76 @@ def test_mixed_replay_buffer_roundtrip(abl_cfg):
     assert torch.isfinite(returns).all()
 
 
+def _push_marked(buffer, seq_len, values):
+    """Push one window per entry of *values*, tagged by its return."""
+    n = len(values)
+    marks = torch.tensor(values, dtype=torch.float32)
+    buffer.push(
+        torch.zeros(n, 9, 9, dtype=torch.long),
+        torch.zeros(n, 21, 79, dtype=torch.long),
+        torch.zeros(n, seq_len, dtype=torch.long),
+        marks,
+    )
+
+
+def test_mixed_replay_buffer_wraps_without_losing_rows(abl_cfg):
+    """A push that straddles the ring boundary keeps the newest windows."""
+    from experiments.rl_finetuning.ablations.training import MixedReplayBuffer
+
+    buffer = MixedReplayBuffer(
+        capacity=8, seq_len=abl_cfg.seq_len, device=torch.device("cpu")
+    )
+    _push_marked(buffer, abl_cfg.seq_len, list(range(6)))
+    _push_marked(buffer, abl_cfg.seq_len, list(range(6, 12)))
+
+    assert buffer.size == 8
+    held = sorted(buffer._returns.tolist())
+    assert held == [4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0]
+
+
+def test_mixed_replay_buffer_survives_a_push_larger_than_itself(abl_cfg):
+    """One iteration can collect more windows than the buffer holds.
+
+    Under ``--fast`` the buffer is 500 windows and a single iteration
+    collected 1,061, which raised
+    ``RuntimeError: The expanded size of the tensor (500) must match the
+    existing size (561)`` and the suite silently skipped the ablation.
+    """
+    from experiments.rl_finetuning.ablations.training import MixedReplayBuffer
+
+    buffer = MixedReplayBuffer(
+        capacity=8, seq_len=abl_cfg.seq_len, device=torch.device("cpu")
+    )
+
+    _push_marked(buffer, abl_cfg.seq_len, list(range(20)))
+
+    assert buffer.size == 8
+    held = sorted(buffer._returns.tolist())
+    assert held == [12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0], (
+        "an oversized push must leave the most recent `capacity` windows"
+    )
+
+    local, glob, x0, returns = buffer.sample(4)
+    assert local.shape == (4, 9, 9)
+    assert torch.isfinite(returns).all()
+
+
+def test_mixed_replay_buffer_handles_an_oversized_push_after_a_partial_fill(abl_cfg):
+    """The overflow path is also correct when the write index is not 0."""
+    from experiments.rl_finetuning.ablations.training import MixedReplayBuffer
+
+    buffer = MixedReplayBuffer(
+        capacity=8, seq_len=abl_cfg.seq_len, device=torch.device("cpu")
+    )
+    _push_marked(buffer, abl_cfg.seq_len, [100.0, 101.0, 102.0])
+
+    _push_marked(buffer, abl_cfg.seq_len, list(range(20)))
+
+    assert buffer.size == 8
+    held = sorted(buffer._returns.tolist())
+    assert held == [12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0]
+
+
 def test_compute_advantages_is_finite():
     from experiments.rl_finetuning.ablations.training import compute_advantages
 
