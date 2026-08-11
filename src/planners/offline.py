@@ -214,7 +214,13 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         _use_amp = getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
         scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
 
-        loss_history: list[float] = []
+        # PERF-C2: the per-step loss is recorded into a device-side buffer
+        # and materialised once after the loop. `loss_history.append(
+        # loss.item())` ran every step and forced a device sync every step;
+        # nothing reads the history until training finishes. The recorded
+        # values are unchanged.
+        _loss_track = torch.zeros(max(total_grad_steps - step, 0), device=device)
+        _loss_track_n = 0
         _batch_start = time.perf_counter()
         last_ckpt_step = step
         # Periodic eval anchors (env-step units, mirroring online.py).
@@ -302,7 +308,9 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             scheduler.step()
 
             ema_model.update(_ema_source)
-            loss_history.append(loss.item())
+            if _loss_track_n < _loss_track.numel():
+                _loss_track[_loss_track_n] = loss.detach()
+                _loss_track_n += 1
             step += 1
 
             # env-step equivalent: samples processed so far.
@@ -445,6 +453,9 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     device=device,
                 )
                 last_ckpt_step = step
+
+        # Single sync for the whole run's loss history (PERF-C2).
+        loss_history = _loss_track[:_loss_track_n].tolist()
 
         if log is not None:
             log.log_summary(

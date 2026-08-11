@@ -14,7 +14,10 @@ import numpy as np
 import pytest
 import torch
 
+from src.buffer import ReplayBuffer
 from src.diffusion.loss import find_staircase_from_glyphs
+from src.models.denoiser import ModelEMA, make_model
+from src.planners.online import Trainer
 
 STAIR_GLYPHS = (62, 2310, 2368, 2383)
 
@@ -100,6 +103,61 @@ def test_result_is_float32_regardless_of_input_dtype():
         maps = torch.ones(2, 21, 79, dtype=dtype)
         maps[0, 1, 1] = 62
         assert find_staircase_from_glyphs(maps).dtype == torch.float32
+
+
+# ── PERF-C2: device-side step metrics ────────────────────────────────
+
+
+def _trainer(cfg, trajectory=None, device="cpu"):
+    model = make_model(cfg).to(device)
+    buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)
+    if trajectory is not None:
+        buffer.add(trajectory)
+    return Trainer(
+        model,
+        ModelEMA(model, decay=cfg.ema_decay),
+        torch.optim.AdamW(model.parameters(), lr=cfg.dagger_lr),
+        None,
+        buffer,
+        collector=None,
+        evaluator=None,
+        log=None,
+        cfg=cfg,
+        device=device,
+        raw_model=model,
+    )
+
+
+def test_device_step_returns_tensors_and_the_wrapper_returns_floats(
+    tiny_cfg, tiny_trajectory
+):
+    trainer = _trainer(tiny_cfg, tiny_trajectory)
+    trainer.model.train()
+
+    device_metrics = trainer._train_step_device()
+    float_metrics = trainer._train_step()
+
+    assert set(device_metrics) == set(float_metrics)
+    for key, value in device_metrics.items():
+        assert isinstance(value, torch.Tensor), key
+        assert value.ndim == 0, key
+        assert not value.requires_grad, key
+    for key, value in float_metrics.items():
+        assert isinstance(value, float), key
+
+
+def test_empty_buffer_step_is_a_no_op_in_both_forms(tiny_cfg):
+    trainer = _trainer(tiny_cfg)
+
+    assert trainer._train_step() == {
+        "loss": 0.0,
+        "loss_diff": 0.0,
+        "loss_aux": 0.0,
+        "grad_norm": 0.0,
+    }
+    assert all(
+        float(v) == 0.0 for v in trainer._train_step_device().values()
+    )
 
 
 # ── PERF-C1: the int16 transfer widens exactly ───────────────────────

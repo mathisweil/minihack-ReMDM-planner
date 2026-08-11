@@ -37,6 +37,9 @@ from src.planners.logging import (
 
 logger = logging.getLogger(__name__)
 
+# Order of the per-step metrics accumulated on device in `train`.
+_STEP_METRIC_KEYS = ("loss", "loss_diff", "loss_aux", "grad_norm")
+
 
 class Trainer:
     """Full DAgger training loop.
@@ -184,23 +187,30 @@ class Trainer:
             env_steps_total += iter_env_steps
 
             # 2. Gradient steps (EMA updated after each step)
+            # PERF-C2: the per-step metrics stay on the device and are
+            # summed there. Calling `.item()` per step forced four device
+            # syncs per gradient step (400 per iteration), each stalling
+            # the CPU until the GPU drained. The single `.tolist()` below
+            # is the only sync, and it happens where the metrics are
+            # actually logged. The averages are unchanged.
             self.model.train()
-            step_metrics: list[dict[str, float]] = []
             train_start = time.perf_counter()
+            metric_sums = torch.zeros(len(_STEP_METRIC_KEYS), device=self.device)
+            n_steps = 0
             for _ in range(cfg.grad_steps_per_iteration):
-                m = self._train_step()
-                step_metrics.append(m)
+                m = self._train_step_device()
+                metric_sums += torch.stack([m[k] for k in _STEP_METRIC_KEYS])
+                n_steps += 1
                 self.ema_model.update(self._raw_model)
             train_time = time.perf_counter() - train_start
 
             iter_time = time.perf_counter() - iter_start
 
             # 4. Log
-            n_steps = len(step_metrics) or 1
-            avg_loss = sum(m["loss"] for m in step_metrics) / n_steps
-            avg_loss_diff = sum(m["loss_diff"] for m in step_metrics) / n_steps
-            avg_loss_aux = sum(m["loss_aux"] for m in step_metrics) / n_steps
-            avg_grad_norm = sum(m["grad_norm"] for m in step_metrics) / n_steps
+            n_steps = n_steps or 1
+            avg_loss, avg_loss_diff, avg_loss_aux, avg_grad_norm = (
+                metric_sums / n_steps
+            ).tolist()
             current_lr = (
                 self.scheduler.get_last_lr()[0]
                 if self.scheduler is not None
@@ -344,19 +354,33 @@ class Trainer:
             self.save_checkpoint(iteration, env_steps_total)
 
     def _train_step(self) -> dict[str, float]:
-        """One gradient step on a buffer sample.
+        """One gradient step on a buffer sample, as Python floats.
+
+        Convenience wrapper around :meth:`_train_step_device`. Reading the
+        scalars costs one device sync, so the training loop uses the
+        device-side variant directly and syncs once per iteration instead.
+
+        Returns:
+            Dict with ``"loss"``, ``"loss_diff"``, ``"loss_aux"``,
+            and ``"grad_norm"`` float scalars.
+        """
+        return {k: float(v) for k, v in self._train_step_device().items()}
+
+    def _train_step_device(self) -> dict[str, torch.Tensor]:
+        """One gradient step on a buffer sample, metrics left on device.
 
         Uses AMP (mixed precision) when ``cfg.use_amp`` is ``True``
         and training on CUDA.
 
         Returns:
             Dict with ``"loss"``, ``"loss_diff"``, ``"loss_aux"``,
-            and ``"grad_norm"`` scalars.
+            and ``"grad_norm"`` as detached 0-dim tensors.
         """
         cfg = self.cfg
         batch = self.buffer.sample(cfg.dagger_batch_size)
         if batch is None:
-            return {"loss": 0.0, "loss_diff": 0.0, "loss_aux": 0.0, "grad_norm": 0.0}
+            zero = torch.zeros((), device=self.device)
+            return dict.fromkeys(_STEP_METRIC_KEYS, zero)
         local_np, global_np, actions_np = batch
         # PERF-C1: widen on the GPU, not the CPU. The buffer holds glyph
         # maps as int16 (minihack_env.py:720-721), so casting before the
@@ -420,10 +444,10 @@ class Trainer:
             self.scheduler.step()
 
         return {
-            "loss": loss.item(),
-            "loss_diff": loss_diff.item(),
-            "loss_aux": loss_aux.item(),
-            "grad_norm": grad_norm.item(),
+            "loss": loss.detach(),
+            "loss_diff": loss_diff.detach(),
+            "loss_aux": loss_aux.detach(),
+            "grad_norm": grad_norm.detach(),
         }
 
     def save_checkpoint(
