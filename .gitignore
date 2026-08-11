@@ -267,3 +267,7 @@ __marimo__/
 CLAUDE.md
 __pycache__/
 *.pyc
+
+parity/
+CHANGES.md
+CLI_CHANGES.md
