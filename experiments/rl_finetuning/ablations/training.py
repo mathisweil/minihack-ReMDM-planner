@@ -896,6 +896,17 @@ def run_ablation(
     _init_state = {
         k: v.clone() for k, v in raw_model.state_dict().items() if v.is_floating_point()
     }
+    # PERF-X4: operand lists for the fused health metrics below. Parameter
+    # tensors are updated in place by the optimizer, so the lists stay
+    # valid for the whole run.
+    _health_params = [p.data for p in raw_model.parameters()]
+    _drift_pairs = [
+        (p.data, _init_state[n])
+        for n, p in raw_model.named_parameters()
+        if n in _init_state
+    ]
+    _drift_cur = [a for a, _ in _drift_pairs]
+    _drift_init = [b for _, b in _drift_pairs]
 
     # Log model param counts to wandb
     total_params = sum(p.numel() for p in raw_model.parameters())
@@ -1158,19 +1169,23 @@ def run_ablation(
 
         # Model health (every 10 iters)
         if iteration % 10 == 0:
-            p_norm = (
-                sum(p.data.norm(2).item() ** 2 for p in raw_model.parameters()) ** 0.5
+            # PERF-X4: one fused norm over the parameter list and a single
+            # device sync, instead of one `.item()` per tensor twice over
+            # (roughly 144 syncs every 10 iterations). Both quantities are
+            # the root-sum-of-squares of the per-tensor 2-norms, which is
+            # what the Python loop computed.
+            p_norms = torch.stack(torch._foreach_norm(_health_params))
+            drift_norms = torch.stack(
+                torch._foreach_norm(torch._foreach_sub(_drift_cur, _drift_init))
             )
-            wb_metrics["model/param_norm"] = p_norm
-            drift = (
-                sum(
-                    (p.data - _init_state[n]).norm(2).item() ** 2
-                    for n, p in raw_model.named_parameters()
-                    if n in _init_state
-                )
-                ** 0.5
-            )
-            wb_metrics["model/param_drift_from_init"] = drift
+            both = torch.stack(
+                [
+                    torch.linalg.vector_norm(p_norms),
+                    torch.linalg.vector_norm(drift_norms),
+                ]
+            ).tolist()
+            wb_metrics["model/param_norm"] = both[0]
+            wb_metrics["model/param_drift_from_init"] = both[1]
 
         # -- Gradient alignment --
         if iteration % grad_align_every == 0:

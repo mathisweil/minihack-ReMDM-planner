@@ -3,8 +3,9 @@
 Each change here is only admissible if it leaves the ablation's output
 untouched, so the equivalence is pinned rather than asserted in a commit
 message: collection recycles environments instead of rebuilding them,
-the int16 transfer widens losslessly, and the reused eval model carries
-exactly the weights the per-iteration deepcopy produced.
+the int16 transfer widens losslessly, the reused eval model carries
+exactly the weights the per-iteration deepcopy produced, and the fused
+health metrics equal the Python loop they replace.
 """
 
 from __future__ import annotations
@@ -176,6 +177,45 @@ def test_the_denoiser_has_no_buffers_to_go_stale(tiny_model_cfg):
     raw = make_model(tiny_model_cfg)
 
     assert list(raw.named_buffers()) == []
+
+
+# ── PERF-X4: fused health metrics ────────────────────────────────────
+
+
+def test_fused_param_norm_matches_the_per_tensor_loop(tiny_model_cfg):
+    """``_foreach_norm`` reproduces the sum-of-squares the loop computed."""
+    torch.manual_seed(0)
+    raw = make_model(tiny_model_cfg)
+    init = {k: v.clone() for k, v in raw.state_dict().items() if v.is_floating_point()}
+    with torch.no_grad():
+        for p in raw.parameters():
+            p.add_(torch.randn_like(p) * 0.05)
+
+    loop_norm = sum(p.data.norm(2).item() ** 2 for p in raw.parameters()) ** 0.5
+    loop_drift = (
+        sum(
+            (p.data - init[n]).norm(2).item() ** 2
+            for n, p in raw.named_parameters()
+            if n in init
+        )
+        ** 0.5
+    )
+
+    params = [p.data for p in raw.parameters()]
+    pairs = [(p.data, init[n]) for n, p in raw.named_parameters() if n in init]
+    fused_norm = torch.linalg.vector_norm(
+        torch.stack(torch._foreach_norm(params))
+    ).item()
+    fused_drift = torch.linalg.vector_norm(
+        torch.stack(
+            torch._foreach_norm(
+                torch._foreach_sub([a for a, _ in pairs], [b for _, b in pairs])
+            )
+        )
+    ).item()
+
+    assert fused_norm == pytest.approx(loop_norm, rel=1e-6)
+    assert fused_drift == pytest.approx(loop_drift, rel=1e-6)
 
 
 # ── PERF-X1: collection borrows from the pool ────────────────────────
