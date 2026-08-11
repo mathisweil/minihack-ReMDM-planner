@@ -159,13 +159,27 @@ def find_staircase_from_glyphs(global_obs: Tensor) -> Tensor:
         | (global_obs == 2383)
     )
 
-    coords = torch.full((B, 2), -1.0, dtype=torch.float32, device=global_obs.device)
-    for b in range(B):
-        positions = is_stair[b].nonzero(as_tuple=False)  # [N, 2]
-        if positions.shape[0] > 0:
-            row = positions[0, 0].float() / max(1, H - 1)
-            col = positions[0, 1].float() / max(1, W - 1)
-            coords[b, 0] = row
-            coords[b, 1] = col
+    # PERF-C0: vectorised over the batch. The previous form looped over B
+    # calling `is_stair[b].nonzero()`, and `nonzero` needs its output size
+    # on the host, so every sample forced a device sync: 2048 syncs per
+    # gradient step at `dagger_batch_size: 2048`, which dominated the step.
+    #
+    # `nonzero` returns indices in row-major order, so `positions[0]` is the
+    # lowest flat index that is set. Taking the minimum flat index over the
+    # masked positions reproduces that exactly, with no host round-trip.
+    flat = is_stair.reshape(B, H * W)
+    idx = torch.arange(H * W, device=global_obs.device, dtype=torch.int32)
+    masked_idx = torch.where(flat, idx, torch.full_like(idx, H * W))
+    first = masked_idx.min(dim=1).values  # [B]; == H*W when no staircase
+    found = first < H * W
 
-    return coords
+    row = (first // W).float() / max(1, H - 1)
+    col = (first % W).float() / max(1, W - 1)
+    coords = torch.stack(
+        (
+            torch.where(found, row, -1.0),
+            torch.where(found, col, -1.0),
+        ),
+        dim=1,
+    )
+    return coords.to(torch.float32)
