@@ -358,9 +358,14 @@ class Trainer:
         if batch is None:
             return {"loss": 0.0, "loss_diff": 0.0, "loss_aux": 0.0, "grad_norm": 0.0}
         local_np, global_np, actions_np = batch
-        local_t = torch.from_numpy(local_np).long().to(self.device)
-        global_t = torch.from_numpy(global_np).long().to(self.device)
-        actions_t = torch.from_numpy(actions_np).long().to(self.device)
+        # PERF-C1: widen on the GPU, not the CPU. The buffer holds glyph
+        # maps as int16 (minihack_env.py:720-721), so casting before the
+        # transfer sends 4x the bytes over PCIe: `global` alone is 27.2 MB
+        # per step as int64 against 6.8 MB as int16. The widening is exact
+        # for glyph IDs, so values are unchanged.
+        local_t = torch.from_numpy(local_np).to(self.device).long()
+        global_t = torch.from_numpy(global_np).to(self.device).long()
+        actions_t = torch.from_numpy(actions_np).to(self.device).long()
 
         B = actions_t.shape[0]
         t = torch.rand(B, device=self.device).clamp(1e-5, 1.0 - 1e-5)

@@ -10,6 +10,7 @@ CPU-only, like the rest of the suite.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 
@@ -99,3 +100,24 @@ def test_result_is_float32_regardless_of_input_dtype():
         maps = torch.ones(2, 21, 79, dtype=dtype)
         maps[0, 1, 1] = 62
         assert find_staircase_from_glyphs(maps).dtype == torch.float32
+
+
+# ── PERF-C1: the int16 transfer widens exactly ───────────────────────
+
+
+def test_buffer_glyphs_widen_from_int16_without_changing_values(tiny_cfg):
+    """C1 sends glyph maps as int16 and widens on the device instead.
+
+    Both are exact for the glyph range, so the widened values must equal
+    the CPU-side cast the code used to do.
+    """
+    glyphs = np.array(
+        [[0, 1, 62, 2310, 2368, 2383, 5999, np.iinfo(np.int16).max]],
+        dtype=np.int16,
+    )
+
+    widened_on_device = torch.from_numpy(glyphs).to("cpu").long()
+    widened_on_host = torch.from_numpy(glyphs).long().to("cpu")
+
+    assert torch.equal(widened_on_device, widened_on_host)
+    assert widened_on_device.tolist() == glyphs.astype(np.int64).tolist()

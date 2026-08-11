@@ -242,9 +242,12 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             if batch is None:
                 break
             local_np, global_np, actions_np = batch
-            local_t = torch.from_numpy(local_np).long().to(device)
-            global_t = torch.from_numpy(global_np).long().to(device)
-            actions_t = torch.from_numpy(actions_np).long().to(device)
+            # PERF-C1: widen on the GPU, not the CPU — see online.py's
+            # `_train_step`. Same buffer, same int16 glyph maps, same 4x
+            # saving on the PCIe transfer; values are unchanged.
+            local_t = torch.from_numpy(local_np).to(device).long()
+            global_t = torch.from_numpy(global_np).to(device).long()
+            actions_t = torch.from_numpy(actions_np).to(device).long()
 
             B = actions_t.shape[0]
             t = torch.rand(B, device=device)  # [B] in [0, 1)
