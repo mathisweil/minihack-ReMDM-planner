@@ -184,19 +184,22 @@ class Evaluator:
                 # Batch replan for active envs that need it
                 replan_idx = np.where(need_replan & ~done)[0]
                 if len(replan_idx) > 0:
+                    # PERF-X2: the buffers are int16; cross PCIe as int16
+                    # and widen on the device, as the collection and
+                    # training paths now do.
                     local_t = (
                         torch.from_numpy(
                             cur_local[replan_idx],
                         )
-                        .long()
                         .to(device)
+                        .long()
                     )  # [B_r, cs, cs]
                     glb_t = (
                         torch.from_numpy(
                             cur_global[replan_idx],
                         )
-                        .long()
                         .to(device)
+                        .long()
                     )  # [B_r, map_h, map_w]
                     batch_plans = (
                         remdm_sample(

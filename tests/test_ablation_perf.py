@@ -2,7 +2,8 @@
 
 Each change here is only admissible if it leaves the ablation's output
 untouched, so the equivalence is pinned rather than asserted in a commit
-message.
+message: collection recycles environments instead of rebuilding them,
+and the int16 transfer widens losslessly.
 """
 
 from __future__ import annotations
@@ -10,12 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 import yaml
 
 from experiments.rl_finetuning.ablations.training import (
     _collect_training_data_gpu,
+    _extract_windows,
 )
 from src.envs import minihack_env
 from src.envs.minihack_env import close_env_pool
@@ -24,6 +27,85 @@ from tests.conftest import TINY_ENV, TINY_OVERRIDES, requires_minihack
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ABLATION_CONFIGS = PROJECT_ROOT / "experiments" / "rl_finetuning" / "configs"
+
+# NLE glyph IDs index an Embedding(6000, ...), and the two sentinels sit
+# just past the action space. Everything the buffers can hold is inside
+# int16, which is what makes the device-side widening lossless.
+GLYPH_MAX = 5999
+
+
+def _episode(n_steps: int, seed: int = 0) -> dict:
+    """A collection-shaped episode dict with int16 glyph buffers."""
+    rng = np.random.default_rng(seed)
+    return {
+        "local": rng.integers(0, GLYPH_MAX, (n_steps, 9, 9), dtype=np.int16),
+        "global": rng.integers(0, GLYPH_MAX, (n_steps, 21, 79), dtype=np.int16),
+        "actions": rng.integers(0, 12, (n_steps,), dtype=np.int64),
+        "total_reward": 1.25,
+    }
+
+
+# ── PERF-X2: int16 across the transfer, widened on the device ────────
+
+
+def test_extract_windows_keeps_the_buffer_dtype():
+    """Windows leave ``_extract_windows`` as int16, not int64."""
+    lo, go, x0, ret = _extract_windows(_episode(40), seq_len=8, pad_token=13)
+
+    assert lo.dtype == torch.int16
+    assert go.dtype == torch.int16
+    # Actions index the model's action embedding directly and stay int64.
+    assert x0.dtype == torch.int64
+    assert ret == 1.25
+
+
+def test_device_side_widening_equals_the_host_side_cast():
+    """The reordered widening returns the values the old order did."""
+    ep = _episode(40, seed=1)
+    lo, go, x0, _ = _extract_windows(ep, seq_len=8, pad_token=13)
+
+    # What the pre-PERF-X2 code produced: cast on the host, then move.
+    host_local = torch.from_numpy(ep["local"]).long()
+    host_global = torch.from_numpy(ep["global"]).long()
+    host_lo, host_go, host_x0, _ = _extract_windows(
+        {**ep, "local": host_local.numpy(), "global": host_global.numpy()},
+        seq_len=8,
+        pad_token=13,
+    )
+
+    assert torch.equal(lo.long(), host_lo)
+    assert torch.equal(go.long(), host_go)
+    assert torch.equal(x0, host_x0)
+
+
+def test_short_episode_padding_survives_the_dtype_change():
+    """Episodes shorter than the horizon still pad to one window."""
+    lo, go, x0, _ = _extract_windows(_episode(3), seq_len=8, pad_token=13)
+
+    assert lo.shape == (1, 9, 9)
+    assert go.shape == (1, 21, 79)
+    assert x0.shape == (1, 8)
+    assert (x0[0, 3:] == 13).all(), "tail should be PAD"
+    assert lo.dtype == torch.int16
+
+
+def test_empty_episode_returns_empty_int16_windows():
+    """The T == 0 guard keeps the dtype contract."""
+    lo, go, x0, _ = _extract_windows(_episode(0), seq_len=8, pad_token=13)
+
+    assert lo.shape[0] == 0
+    assert lo.dtype == torch.int16
+    assert go.dtype == torch.int16
+    assert x0.dtype == torch.int64
+
+
+def test_int16_to_int64_is_exact_over_the_whole_glyph_range():
+    """No glyph ID the buffers can hold is altered by the widening."""
+    values = np.arange(0, GLYPH_MAX + 1, dtype=np.int16)
+
+    widened = torch.from_numpy(values).long()
+
+    assert torch.equal(widened, torch.arange(0, GLYPH_MAX + 1, dtype=torch.int64))
 
 
 # ── PERF-X1: collection borrows from the pool ────────────────────────

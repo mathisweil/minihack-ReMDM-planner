@@ -349,18 +349,23 @@ def _extract_windows(
 
     Returns:
         Tuple of (local_obs ``[W,9,9]``, global_obs ``[W,21,79]``,
-        x0 ``[W,H]``, episode_return).
+        x0 ``[W,H]``, episode_return). The observation tensors keep the
+        episode buffer's dtype (int16 for glyph maps); callers widen to
+        int64 on the device after the transfer.
     """
-    local_arr = torch.from_numpy(episode["local"]).long()  # [T, 9, 9]
-    global_arr = torch.from_numpy(episode["global"]).long()  # [T, 21, 79]
+    # PERF-X2: no host-side `.long()`. Widening 9x9 and 21x79 glyph maps
+    # to int64 here quadruples both the concatenation and the bytes that
+    # cross PCIe, for several thousand windows an iteration.
+    local_arr = torch.from_numpy(episode["local"])  # [T, 9, 9]
+    global_arr = torch.from_numpy(episode["global"])  # [T, 21, 79]
     actions = torch.from_numpy(episode["actions"]).long()  # [T]
     T = actions.shape[0]
     ret = episode["total_reward"]
 
     if T == 0:
         return (
-            torch.empty(0, 9, 9, dtype=torch.long),
-            torch.empty(0, 21, 79, dtype=torch.long),
+            torch.empty(0, 9, 9, dtype=local_arr.dtype),
+            torch.empty(0, 21, 79, dtype=global_arr.dtype),
             torch.empty(0, seq_len, dtype=torch.long),
             ret,
         )
@@ -471,8 +476,9 @@ def _collect_training_data_seq(
         empty = torch.empty(0)
         return empty, empty, empty, empty
 
-    local_obs = torch.cat(all_local).to(device)
-    global_obs = torch.cat(all_global).to(device)
+    # PERF-X2: transfer at the buffer's dtype, widen on the device.
+    local_obs = torch.cat(all_local).to(device).long()
+    global_obs = torch.cat(all_global).to(device).long()
     x0 = torch.cat(all_x0).to(device)
     returns = torch.cat(all_returns).to(device)
 
@@ -555,19 +561,21 @@ def _collect_training_data_gpu(
             # Batch replan on GPU (stochastic ReMDM)
             replan_idx = np.where(need_replan & ~done)[0]
             if len(replan_idx) > 0:
+                # PERF-X2: the buffers are int16; cross PCIe as int16 and
+                # widen on the device rather than the other way round.
                 local_t = (
                     torch.from_numpy(
                         cur_local[replan_idx],
                     )
-                    .long()
                     .to(device)
+                    .long()
                 )
                 glb_t = (
                     torch.from_numpy(
                         cur_global[replan_idx],
                     )
-                    .long()
                     .to(device)
+                    .long()
                 )
                 batch_plans = (
                     remdm_sample(
@@ -657,9 +665,12 @@ def _collect_training_data_gpu(
         empty = torch.empty(0)
         return empty, empty, empty, empty
 
+    # PERF-X2: transfer at the buffer's dtype, widen on the device. At the
+    # measured several thousand windows an iteration this is the largest
+    # single host-to-device transfer in the loop.
     return (
-        torch.cat(all_local).to(device),
-        torch.cat(all_global).to(device),
+        torch.cat(all_local).to(device).long(),
+        torch.cat(all_global).to(device).long(),
         torch.cat(all_x0).to(device),
         torch.cat(all_returns).to(device),
     )
