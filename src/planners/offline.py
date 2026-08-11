@@ -25,7 +25,7 @@ from src.config import make_run_dir
 from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
-from src.models.denoiser import ModelEMA, amp_dtype, make_model, try_compile
+from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.inference import Evaluator, save_eval_json
 from src.planners.logging import (
     Logger,
@@ -214,12 +214,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
 
         # AMP: enabled when use_amp=true and on CUDA
         _use_amp = getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
-        # PERF-C6: scaler only for fp16 — see online.py's `Trainer.__init__`.
-        _amp_dtype = amp_dtype(cfg)
-        scaler = torch.amp.GradScaler(
-            "cuda",
-            enabled=_use_amp and _amp_dtype is torch.float16,
-        )
+        scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
 
         # PERF-C2: the per-step loss is recorded into a device-side buffer
         # and materialised once after the loop. `loss_history.append(
@@ -280,7 +275,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             )  # [B]
 
             optimizer.zero_grad()
-            with torch.amp.autocast("cuda", enabled=_use_amp, dtype=_amp_dtype):
+            with torch.amp.autocast("cuda", enabled=_use_amp):
                 out = model(local_t, global_t, zt, t_discrete)
 
                 loss_diff = mdlm_loss(

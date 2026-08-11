@@ -342,30 +342,6 @@ def try_compile(model: nn.Module, cfg: SimpleNamespace) -> nn.Module:
     return torch.compile(model, mode="default")  # type: ignore[return-value]
 
 
-_AMP_DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
-
-
-def amp_dtype(cfg: SimpleNamespace) -> torch.dtype:
-    """Autocast dtype selected by ``cfg.amp_dtype``.
-
-    Args:
-        cfg: Config namespace; reads ``amp_dtype`` (``"fp16"`` or
-            ``"bf16"``), defaulting to ``"fp16"``.
-
-    Returns:
-        The corresponding ``torch.dtype``.
-
-    Raises:
-        ValueError: If ``cfg.amp_dtype`` is not a known name.
-    """
-    name = getattr(cfg, "amp_dtype", "fp16")
-    if name not in _AMP_DTYPES:
-        raise ValueError(
-            f"amp_dtype must be one of {sorted(_AMP_DTYPES)}, got {name!r}"
-        )
-    return _AMP_DTYPES[name]
-
-
 class ModelEMA:
     """Exponential moving average of model parameters.
 

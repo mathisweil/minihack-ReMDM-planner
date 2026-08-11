@@ -1,4 +1,4 @@
-"""Pins for the GPU-side performance changes (PERF-C0 to PERF-C6).
+"""Pins for the GPU-side performance changes (PERF-C0 to PERF-C4).
 
 Every change in that set is meant to be arithmetic-preserving: it removes
 device syncs, kernel launches or PCIe traffic without touching the values
@@ -16,11 +16,9 @@ import torch
 
 from src.buffer import ReplayBuffer
 from src.diffusion.loss import find_staircase_from_glyphs
-from src.models.denoiser import ModelEMA, amp_dtype, make_model
+from src.models.denoiser import ModelEMA, make_model
 from src.planners.online import Trainer
-from tests.conftest import requires_cuda
 
-# NLE staircase-down glyphs, as listed in `find_staircase_from_glyphs`.
 STAIR_GLYPHS = (62, 2310, 2368, 2383)
 
 
@@ -222,49 +220,3 @@ def test_buffer_glyphs_widen_from_int16_without_changing_values(tiny_cfg):
 
     assert torch.equal(widened_on_device, widened_on_host)
     assert widened_on_device.tolist() == glyphs.astype(np.int64).tolist()
-
-
-# ── PERF-C6: autocast dtype selection ────────────────────────────────
-
-
-def test_amp_dtype_defaults_to_fp16(tiny_cfg):
-    """The released recipe is fp16; bf16 must stay opt-in."""
-    assert amp_dtype(tiny_cfg) is torch.float16
-
-
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [("fp16", torch.float16), ("bf16", torch.bfloat16)],
-)
-def test_amp_dtype_maps_known_names(tiny_cfg, name, expected):
-    tiny_cfg.amp_dtype = name
-
-    assert amp_dtype(tiny_cfg) is expected
-
-
-def test_amp_dtype_rejects_unknown_names(tiny_cfg):
-    tiny_cfg.amp_dtype = "fp8"
-
-    with pytest.raises(ValueError, match="amp_dtype"):
-        amp_dtype(tiny_cfg)
-
-
-def test_trainer_takes_its_autocast_dtype_from_config(tiny_cfg):
-    tiny_cfg.amp_dtype = "bf16"
-
-    assert _trainer(tiny_cfg)._amp_dtype is torch.bfloat16
-
-
-@requires_cuda
-@pytest.mark.parametrize(
-    ("dtype_name", "scaler_enabled"), [("fp16", True), ("bf16", False)]
-)
-def test_scaler_is_enabled_only_for_fp16_amp(tiny_cfg, dtype_name, scaler_enabled):
-    """bf16 has the dynamic range for the gradients; fp16 needs scaling."""
-    tiny_cfg.use_amp = True
-    tiny_cfg.amp_dtype = dtype_name
-
-    trainer = _trainer(tiny_cfg, device="cuda")
-
-    assert trainer._use_amp is True
-    assert trainer._scaler.is_enabled() is scaler_enabled

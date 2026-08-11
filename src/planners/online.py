@@ -24,7 +24,7 @@ from src.diffusion.forward import q_sample
 from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 from src.diffusion.schedules import get_schedule
 from src.envs.minihack_env import collect_oracle_trajectory
-from src.models.denoiser import ModelEMA, amp_dtype, make_model, try_compile
+from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import DataCollector
 from src.planners.inference import Evaluator, save_eval_json
 from src.planners.logging import (
@@ -95,14 +95,7 @@ class Trainer:
         self._use_amp = getattr(cfg, "use_amp", False) and str(device).startswith(
             "cuda"
         )
-        # PERF-C6: bf16 needs no loss scaling, so the scaler is enabled only
-        # for fp16. A disabled GradScaler passes `scale`/`unscale_`/`step`
-        # straight through, so the step body below is identical either way.
-        self._amp_dtype = amp_dtype(cfg)
-        self._scaler = torch.amp.GradScaler(
-            "cuda",
-            enabled=self._use_amp and self._amp_dtype is torch.float16,
-        )
+        self._scaler = torch.amp.GradScaler("cuda", enabled=self._use_amp)
 
     def train(
         self,
@@ -418,9 +411,7 @@ class Trainer:
         )
 
         self.optimizer.zero_grad()
-        with torch.amp.autocast(
-            "cuda", enabled=self._use_amp, dtype=self._amp_dtype
-        ):
+        with torch.amp.autocast("cuda", enabled=self._use_amp):
             out = self.model(local_t, global_t, zt, t_discrete)
 
             loss_diff = mdlm_loss(
