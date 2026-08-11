@@ -55,7 +55,7 @@ from experiments.rl_finetuning.diagnostics.timestep import (
 )
 from src.diffusion.sampling import remdm_sample
 from src.diffusion.schedules import get_schedule
-from src.envs.minihack_env import make_env
+from src.envs.minihack_env import acquire_env, discard_env, release_env
 from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import run_model_episode
 from src.planners.inference import Evaluator
@@ -515,12 +515,6 @@ def _collect_training_data_gpu(
     envs: list = []
     cur_local = np.zeros((n, cs, cs), dtype=np.int16)
     cur_global = np.zeros((n, cfg.map_h, cfg.map_w), dtype=np.int16)
-    for i, (env_id, seed) in enumerate(tasks):
-        env = make_env(env_id, None, cfg)
-        (local, glb), _ = env.reset(seed=seed)
-        envs.append(env)
-        cur_local[i] = local
-        cur_global[i] = glb
 
     # Pre-allocate history buffers
     obs_local = np.zeros(
@@ -532,8 +526,6 @@ def _collect_training_data_gpu(
         dtype=np.int16,
     )
     act_buf = np.zeros((n, max_steps), dtype=np.int64)
-    obs_local[:, 0] = cur_local
-    obs_global[:, 0] = cur_global
 
     # Per-episode state
     plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
@@ -545,6 +537,20 @@ def _collect_training_data_gpu(
     n_steps = np.zeros(n, dtype=np.int32)
 
     try:
+        # PERF-X1: borrow from the shared pool rather than constructing.
+        # ``shaped_reward`` stays at its default True: the episode return
+        # drives the advantage weights and the win-rate tracking, so
+        # unshaped rewards would change what every ablation optimises.
+        for i, (env_id, seed) in enumerate(tasks):
+            env = acquire_env(env_id, None, cfg)
+            (local, glb), _ = env.reset(seed=seed)
+            envs.append(env)
+            cur_local[i] = local
+            cur_global[i] = glb
+
+        obs_local[:, 0] = cur_local
+        obs_global[:, 0] = cur_global
+
         for _ in range(max_steps):
             # Batch replan on GPU (stochastic ReMDM)
             replan_idx = np.where(need_replan & ~done)[0]
@@ -611,9 +617,15 @@ def _collect_training_data_gpu(
 
             if not any_active:
                 break
-    finally:
+    except BaseException:
+        # An error leaves the env in an unknown state, so close rather
+        # than recycle it.
         for env in envs:
-            env.close()
+            discard_env(env)
+        raise
+    else:
+        for env in envs:
+            release_env(env)
 
     # Extract windows from all episodes
     all_local: list[Tensor] = []
