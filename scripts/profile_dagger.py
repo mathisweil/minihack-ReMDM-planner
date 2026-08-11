@@ -634,6 +634,13 @@ def run_profiling(cfg: SimpleNamespace) -> None:
         t_discrete = (t * cfg.num_diffusion_steps).long().clamp(
             0, cfg.num_diffusion_steps - 1,
         )
+        # The profiled loop above already ran backward through the compiled
+        # graph, so the parameters carry .grad tensors that inductor may have
+        # allocated inside a CUDA graph capture. Reusing them here raises
+        # "accessing gradient tensor output of CUDAGraphs that has been
+        # overwritten by a subsequent run". This audit does not accumulate
+        # gradients, so dropping them first is the fix.
+        model.zero_grad(set_to_none=True)
         out = model(local_t, global_t, zt, t_discrete)
         loss = mdlm_loss(
             out["actions"], actions_t, zt, t,
