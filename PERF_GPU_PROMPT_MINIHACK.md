@@ -1,12 +1,41 @@
-# Task: finish the MiniHack DAgger speed-up on the GPU box
+# Task: implement the GPU half of the MiniHack DAgger speed-up
+
+**This is prompt 1 of 2.** It implements and correctness-checks the changes on a development GPU. `PERF_MEASURE_3090_PROMPT_MINIHACK.md` then certifies them on the target box and produces the numbers the real runs are planned from. Do not do prompt 2's job here, and do not skip it: the decisions it makes cannot be made from a development box.
 
 ## Where you are
 
-`minihack-ReMDM-planner` on the UCL box: RTX 3090 Ti, 24 GB VRAM, 16 CPU cores. A uv project: `uv sync`, run with `uv run`. Repo conventions are in `CLAUDE.md` one level up; UK English, no em dashes, evidence for every claim (command and output, file and line).
+`minihack-ReMDM-planner` on a CUDA box. A uv project: `uv sync`, run with `uv run`. Repo conventions are in `CLAUDE.md` one level up; UK English, no em dashes, evidence for every claim (command and output, file and line).
 
 The collection half of this work is **already done and in the tree you are pulling**. Your job is the GPU half, plus confirming on real hardware that the collection half landed. Read the next section before touching anything: it tells you what changed and what the measured baseline was, so you can tell a regression from a difference in hardware.
 
 **Measure before you change anything, and measure after each change.** Every number in this document was measured on an Apple laptop CPU. The ratios should carry; the absolute values will not. Do not carry my figures into a report as if you had observed them.
+
+### Which box are you on, and what it can decide
+
+The intended target for the real runs is the **3090 Ti box** (24 GB VRAM, i9-12900K, 16 physical cores / 24 threads). This prompt is expected to run on the **4070 Ti dev box** (16 GB VRAM, i7-14700K, 20 physical cores / 28 threads). Record what you are actually on before anything else, and do not infer it from this paragraph:
+
+```
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+uv run python -c "import torch;p=torch.cuda.get_device_properties(0);print(p)"
+lscpu | grep -E '^(Model name|CPU\(s\)|Thread|Core)'
+```
+
+| Question | Dev box (4070 Ti) can answer | Target box (3090 Ti) only |
+|---|---|---|
+| Does the change run, and is it correct? | **Yes.** This is the point of this pass. | |
+| Does the loss trajectory stay put? | **Yes.** Hardware independent. | |
+| Do the collection fixes hold under CUDA and Linux? | **Yes.** First real run of `collect_batch_gpu`. | |
+| Rough ranking of which GPU changes help | Provisional only | Final |
+| Peak VRAM at `dagger_batch_size: 2048` | Indicative, and only if it fits | **Certifying** |
+| ms per grad step, samples/s, hours per seed | No | **Yes** |
+| Whether to revert a change that looked marginal | **No.** Carry it forward. | **Yes** |
+
+Two specific reasons the numbers do not transfer, both worth keeping in mind while you read your own measurements:
+
+- **Memory bandwidth.** The 3090 Ti runs a 384-bit GDDR6X bus against the 4070 Ti's 192-bit, and Ada carries far more L2. The model's global stream embeds 2048 x 1659 = 3.4M glyph lookups per forward into a 435 MB fp32 activation, so it is bandwidth-sensitive, and anything touching it will land differently on the two cards.
+- **Single-core speed.** The i7-14700K here is faster per core than the target's i9-12900K. C3 and C4 below are kernel-launch-overhead fixes, which are CPU-bound. They will look **less** valuable on this box than they will on the target. A change that reads as noise here may be real there.
+
+If you are in fact on the 3090 Ti, run this prompt anyway and then run prompt 2 in the same session: the two passes are still distinct, and prompt 2 covers the certification work this one deliberately omits.
 
 ---
 
@@ -94,11 +123,31 @@ Then project: `total_timesteps / env_steps_per_iteration` gives the iteration co
 
 **Decision gate.** After the collection fixes, collection should be a small minority of iteration time (projection: 1 to 2 s against 25 to 30 s before). If collection is still above 5 s per iteration on this box, stop and report before doing any GPU work. Likely causes, in order: `$TMPDIR` on a network mount, the pool being bypassed on some path, or model episodes running far longer here than the 152-step random-policy mean the projection assumed. Diagnosing that is worth more than any change below.
 
+The 5 s threshold is a smell test, not a target. It is deliberately loose enough to survive the difference between these boxes: collection is now mostly single-threaded env stepping, so it should if anything be *faster* on the 14700K than on the target's 12900K. Collection above 5 s means something is wrong in kind, not in degree.
+
+**VRAM at this point.** Record `torch.cuda.max_memory_allocated()` at the real `dagger_batch_size: 2048`. The `final_ucl_gpu.yaml` header claims roughly 6 to 8 GB peak, which is a comment nobody has verified. Three outcomes:
+
+- It fits with room to spare: good, note the figure, and prompt 2 will certify it on 24 GB.
+- It fits but is close to 16 GB: note it prominently. The target has 24 GB so the run is still viable, but the config comment is wrong and should be corrected.
+- It OOMs: **stop and report. Do not lower the batch size.** `dagger_batch_size: 2048` is pinned to the released checkpoint recipe and to the compute-matched offline baseline (Phase 3). An OOM at 16 GB says nothing about 24 GB, so this is a finding to hand to prompt 2, not a problem to engineer around here. If you need to keep working, do the remaining GPU changes at a reduced batch **for timing ratios only**, and label every number produced that way.
+
 ---
 
 ## Phase 2: the GPU-side changes
 
-Ranked by expected value. Do them one at a time, measure after each, and keep the ones that actually help on this hardware. A change that does not show up in the measurement gets reverted, not kept on principle.
+Ranked by expected value. Do them one at a time, measure after each, and record the delta.
+
+**Do not revert anything on this box's evidence alone.** That rule is inverted from the usual one, deliberately. C3 and C4 are kernel-launch-overhead fixes and this box has the faster CPU of the two, so they will understate here. C1 and C6 touch bandwidth and this box has roughly half the target's. Classify each change instead:
+
+| Verdict | Meaning | Who decides |
+|---|---|---|
+| `keep` | Clear win here, and no reason it would not hold | you, confirmed by prompt 2 |
+| `carry` | Neutral or noise here, but sound in principle | **prompt 2** |
+| `revert` | Actively slower, or changes the loss trajectory | you, now |
+
+Only the third is yours to act on unilaterally, and a loss-trajectory change is a correctness failure rather than a performance one. Everything else ships to prompt 2 with its measurement attached, so the target box can re-run the same comparison and decide.
+
+Each change below is small and independent. Commit them as separate commits so prompt 2 can bisect or drop one without unpicking the others.
 
 **C1. Stop sending 4x the bytes over PCIe.** `online.py:361-363` and `offline.py:245-247` cast to `.long()` on the CPU before transfer, so `global` crosses as int64: 27.2 MB per step, 2.72 GB per iteration, against 6.8 MB and 0.68 GB if you transfer int16 and widen on the GPU.
 
@@ -119,7 +168,7 @@ global_t = torch.from_numpy(global_np).to(self.device, non_blocking=True).long()
 
 **C5. Confirm `torch.compile` is actually engaging.** `try_compile` (`denoiser.py:317`) silently returns the uncompiled model when it cannot find `cc` or `gcc`, which is common on managed GPU nodes. It logs a warning; check the log rather than assuming. `torch_compile: true` in the config means nothing if that fallback fired. If it did, either make a compiler visible or stop paying attention to the flag. Note that only the training model is compiled; collection and eval deliberately use the raw model, which is correct (deep-copying a compiled module breaks FX tracing).
 
-**C6. Measure bf16 against fp16 plus GradScaler.** The 3090 Ti supports bf16. It would remove the scaler's `unscale_` pass and its inf checks. This one is a genuine experiment, not a known win: measure it, and if the loss curve moves at all, drop it.
+**C6. Measure bf16 against fp16 plus GradScaler.** Both Ampere and Ada support bf16, so this is testable here. It would remove the scaler's `unscale_` pass and its inf checks. This one is a genuine experiment, not a known win: measure it, and if the loss curve moves at all, drop it. Default to `carry` rather than `keep` even if it wins here, because the fp16-vs-bf16 throughput ratio is one of the things that differs most between these two cards.
 
 If Phase 1 says collection still dominates after all this, the next lever is that the model rollout steps its 30 envs sequentially in one Python loop (`collect.py:615-617`) while 15 cores idle, and `num_collection_workers: 8` is dead on the CUDA path (it only feeds `collect_batch_parallel`, which CUDA never takes, while `DataCollector.__init__` still allocates 8 unused CPU model copies). Moving env stepping into persistent worker processes is the fix. Do not start it unless the measurement demands it.
 
@@ -150,12 +199,18 @@ Bitwise equality is not available: AMP and cuDNN kernel selection are non-determ
 
 ## Deliverable
 
+You are handing work to prompt 2, so the deliverable is a branch plus a table, not a conclusion.
+
 Report back, in the repo's evidence style (command and output, file and line):
 
-- A before/after table of the Phase 1 quantities, on this hardware.
-- Per change: kept or reverted, and the measurement that decided it.
-- Projected hours per seed and for all 3 seeds, before and after.
+- **The box you were actually on**, from the commands in the first section. Every number below is meaningless without it.
+- A before/after table of the Phase 1 quantities, each labelled with that hardware.
+- Per change: `keep` / `carry` / `revert`, the measurement behind it, and the commit sha.
+- Peak VRAM at `dagger_batch_size: 2048`, or the OOM and at what batch you fell back to for ratios.
+- The loss-trajectory comparison for every change that touches the training step, especially C1.
+- Whether the Phase 1 decision gate passed, and if not, what it turned out to be.
 - Anything you found that is not on this list, especially in the collection path, which is newly changed and least proven.
-- Whether the decision gate in Phase 1 passed, and if not, what it turned out to be.
 
-Commit only when the suite and lint are green. Ask before committing; do not push.
+Do **not** report hours-per-seed as a plan. If you project it, label it as this box's figure and note that prompt 2 supersedes it.
+
+Commit only when the suite and lint are green, one commit per change. Ask before committing; do not push.
