@@ -831,6 +831,14 @@ def run_ablation(
     # Evaluator
     evaluator = Evaluator()
 
+    # PERF-X3: one eval model for the whole run, refreshed in place.
+    # ``make_eval_model`` is a ``copy.deepcopy`` plus an EMA apply, and it
+    # was called once per iteration, once per eval and once at the end.
+    # ``apply_to`` overwrites every named parameter from the same shadow,
+    # so the refreshed model holds exactly the weights the per-iteration
+    # deepcopy produced; ``tests/test_ablation_perf.py`` pins that.
+    eval_model = ema.make_eval_model(raw_model)
+
     # AMP (mixed precision)
     _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
@@ -919,7 +927,8 @@ def run_ablation(
 
         # -- Collect episodes --
         collect_start = time.perf_counter()
-        eval_model = ema.make_eval_model(raw_model)
+        ema.apply_to(eval_model)
+        eval_model.eval()
         local_obs, global_obs, x0, returns = collect_training_data(
             eval_model,
             cfg,
@@ -1271,7 +1280,8 @@ def run_ablation(
 
         # -- Evaluation --
         if iteration % eval_every == 0:
-            eval_model = ema.make_eval_model(raw_model)
+            ema.apply_to(eval_model)
+            eval_model.eval()
             results = evaluator.evaluate(
                 cfg.id_envs,
                 eval_model,
@@ -1312,10 +1322,11 @@ def run_ablation(
         _wandb_log(wb_metrics, step=wandb_step_offset + iteration)
 
     # -- Final evaluation --
-    final_model = ema.make_eval_model(raw_model)
+    ema.apply_to(eval_model)
+    eval_model.eval()
     final_results = evaluator.evaluate(
         cfg.id_envs,
-        final_model,
+        eval_model,
         eval_episodes,
         cfg,
         device,

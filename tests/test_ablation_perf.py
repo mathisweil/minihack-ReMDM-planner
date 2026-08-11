@@ -3,7 +3,8 @@
 Each change here is only admissible if it leaves the ablation's output
 untouched, so the equivalence is pinned rather than asserted in a commit
 message: collection recycles environments instead of rebuilding them,
-and the int16 transfer widens losslessly.
+the int16 transfer widens losslessly, and the reused eval model carries
+exactly the weights the per-iteration deepcopy produced.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from experiments.rl_finetuning.ablations.training import (
 )
 from src.envs import minihack_env
 from src.envs.minihack_env import close_env_pool
-from src.models.denoiser import make_model
+from src.models.denoiser import ModelEMA, make_model
 from tests.conftest import TINY_ENV, TINY_OVERRIDES, requires_minihack
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -106,6 +107,75 @@ def test_int16_to_int64_is_exact_over_the_whole_glyph_range():
     widened = torch.from_numpy(values).long()
 
     assert torch.equal(widened, torch.arange(0, GLYPH_MAX + 1, dtype=torch.int64))
+
+
+# ── PERF-X3: one eval model, refreshed in place ──────────────────────
+
+
+@pytest.fixture
+def tiny_model_cfg() -> SimpleNamespace:
+    """Toy denoiser config, CPU-sized."""
+    merged: dict = yaml.safe_load(
+        (PROJECT_ROOT / "configs" / "defaults.yaml").read_text()
+    )
+    merged.update(TINY_OVERRIDES)
+    return SimpleNamespace(**merged)
+
+
+def test_refreshed_eval_model_matches_a_fresh_deepcopy(tiny_model_cfg):
+    """``apply_to`` on a kept model reproduces ``make_eval_model``."""
+    torch.manual_seed(0)
+    raw = make_model(tiny_model_cfg)
+    ema = ModelEMA(raw, decay=0.9)
+
+    persistent = ema.make_eval_model(raw)
+
+    for _ in range(5):
+        with torch.no_grad():
+            for p in raw.parameters():
+                p.add_(torch.randn_like(p) * 0.01)
+        ema.update(raw)
+
+        ema.apply_to(persistent)
+        persistent.eval()
+        fresh = ema.make_eval_model(raw)
+
+        fresh_params = dict(fresh.named_parameters())
+        for name, param in persistent.named_parameters():
+            assert torch.equal(param, fresh_params[name]), name
+        assert not persistent.training
+
+
+def test_refreshed_eval_model_does_not_track_the_training_weights(tiny_model_cfg):
+    """The kept model holds EMA weights, not the live ones."""
+    torch.manual_seed(0)
+    raw = make_model(tiny_model_cfg)
+    ema = ModelEMA(raw, decay=0.9)
+    persistent = ema.make_eval_model(raw)
+
+    with torch.no_grad():
+        for p in raw.parameters():
+            p.add_(1.0)
+    ema.update(raw)
+    ema.apply_to(persistent)
+
+    raw_params = dict(raw.named_parameters())
+    differs = [
+        n for n, p in persistent.named_parameters() if not torch.equal(p, raw_params[n])
+    ]
+    assert differs, "EMA weights should lag the live weights"
+
+
+def test_the_denoiser_has_no_buffers_to_go_stale(tiny_model_cfg):
+    """Reuse is only safe because there is no non-parameter state.
+
+    ``apply_to`` refreshes named parameters and nothing else, so a kept
+    eval model would drift from a fresh deepcopy the moment the denoiser
+    gained a running statistic.
+    """
+    raw = make_model(tiny_model_cfg)
+
+    assert list(raw.named_buffers()) == []
 
 
 # ── PERF-X1: collection borrows from the pool ────────────────────────
