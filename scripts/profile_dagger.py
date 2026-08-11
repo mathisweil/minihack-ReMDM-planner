@@ -4,7 +4,12 @@ Runs a small number of DAgger iterations and reports per-component
 timing breakdowns. Use this to decide which optimisations matter.
 
 Usage:
-    python scripts/profile_dagger.py [--override key=value ...]
+    python scripts/profile_dagger.py [--config PATH] [--override key=value ...]
+
+Without ``--config`` this profiles ``configs/defaults.yaml``, whose
+performance knobs differ from the cluster configs (``use_amp`` and
+``torch_compile`` are off there, and ``dagger_batch_size`` differs), so
+pass the config the run will actually use.
 """
 
 from __future__ import annotations
@@ -663,16 +668,27 @@ def run_profiling(cfg: SimpleNamespace) -> None:
 
 if __name__ == "__main__":
     cli_overrides = {}
+    config_path: str | None = None
     args = [a for a in sys.argv[1:] if a != "--override"]
+    pending_config = False
     for arg in args:
-        if "=" in arg:
+        if pending_config:
+            config_path = arg
+            pending_config = False
+        elif arg == "--config":
+            pending_config = True
+        elif arg.startswith("--config="):
+            config_path = arg.split("=", 1)[1]
+        elif "=" in arg:
             k, v = arg.split("=", 1)
             cli_overrides[k] = v
+    if pending_config:
+        raise SystemExit("--config expects a path")
 
     # Use smoke-test-like settings for fast profiling
     # but keep realistic episode/grad counts
     cli_overrides.setdefault("use_wandb", "false")
     cli_overrides.setdefault("buffer_capacity", "500")
 
-    cfg = load_config(cli_overrides=cli_overrides)
+    cfg = load_config(config_path, cli_overrides=cli_overrides)
     run_profiling(cfg)

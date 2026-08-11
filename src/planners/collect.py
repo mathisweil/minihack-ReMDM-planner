@@ -22,7 +22,13 @@ import torch
 from src.buffer import ReplayBuffer
 from src.curriculum import DynamicCurriculum, efficiency_filter
 from src.diffusion.sampling import greedy_sample, remdm_sample
-from src.envs.minihack_env import collect_oracle_trajectory, make_env
+from src.envs.minihack_env import (
+    acquire_env,
+    borrow_env,
+    collect_oracle_trajectory,
+    discard_env,
+    release_env,
+)
 
 if TYPE_CHECKING:
     from src.models.denoiser import ModelEMA
@@ -46,6 +52,7 @@ def run_model_episode(
     des_file: str | None = None,
     blind_global: bool = False,
     stochastic: bool = False,
+    shaped_reward: bool = True,
 ) -> dict:
     """Roll out the diffusion model on a single episode.
 
@@ -63,6 +70,9 @@ def run_model_episode(
         blind_global: If ``True``, zero out global map (local-only ablation).
         stochastic: If ``True``, use stochastic ReMDM sampling (evaluation).
             If ``False`` (default), use greedy argmax (DAgger collection).
+        shaped_reward: When ``False``, ``"total_reward"`` omits the
+            BFS-progress and exploration terms. Only set this when the
+            caller discards the reward.
 
     Returns:
         Dict with ``"local"`` ``[T,9,9]``, ``"global"`` ``[T,21,79]``,
@@ -72,8 +82,7 @@ def run_model_episode(
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
 
-    env = make_env(env_id, des_file, cfg)
-    try:
+    with borrow_env(env_id, des_file, cfg, shaped_reward) as env:
         (local, glb), _info = env.reset(seed=seed)
 
         locals_list = [local]
@@ -139,8 +148,6 @@ def run_model_episode(
                 won = True
             if terminated or truncated:
                 break
-    finally:
-        env.close()
 
     # Trim trailing obs
     locals_arr = np.stack(locals_list[:-1], axis=0).astype(np.int16)
@@ -186,6 +193,7 @@ def _collect_episode_thread(
             cfg,
             "cpu",
             seed,
+            shaped_reward=False,
         )
         oracle_result = collect_oracle_trajectory(env_id, seed, cfg)
         oracle_steps = len(oracle_result["actions"]) if oracle_result else 999
@@ -291,13 +299,15 @@ class DataCollector:
         env_id = self.curriculum.sample_env()
         seed = random.randint(0, 2**31 - 1)
 
-        # Model rollout
+        # Model rollout. Only "won" and "steps" are read downstream, so
+        # the shaped reward is not worth its two full-map scans per step.
         model_result = run_model_episode(
             self.ema_model,
             env_id,
             self.cfg,
             self.device,
             seed,
+            shaped_reward=False,
         )
 
         # Oracle rollout (same seed)
@@ -527,9 +537,11 @@ class DataCollector:
             dtype=np.int16,
         )
 
+        # Only "won" and "steps" are read from these rollouts, so the
+        # shaped reward is skipped (see run_model_episode).
         t_reset = time.perf_counter()
         for i, (env_id, seed) in enumerate(tasks):
-            env = make_env(env_id, None, cfg)
+            env = acquire_env(env_id, None, cfg, shaped_reward=False)
             (local, glb), _ = env.reset(seed=seed)
             envs.append(env)
             cur_local[i] = local
@@ -636,9 +648,13 @@ class DataCollector:
 
                 if not any_active:
                     break
-        finally:
+        except BaseException:
             for env in envs:
-                env.close()
+                discard_env(env)
+            raise
+        else:
+            for env in envs:
+                release_env(env)
 
         # Build result dicts
         results: list[dict] = []

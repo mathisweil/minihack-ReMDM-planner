@@ -9,11 +9,13 @@ penalty).
 from __future__ import annotations
 
 import collections
+import contextlib
 import logging
 import os
 import re
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -158,6 +160,9 @@ class AdvancedObservationEnv(gym.Env):
         des_file: Optional ``.des`` file content (for custom levels).
         cfg: Configuration namespace with ``crop_size``, ``action_dim``,
             ``pad_token``, ``map_h``, ``map_w``.
+        shaped_reward: When ``False``, the BFS-progress and exploration
+            terms are skipped (see ``step``). Callers that discard the
+            reward set this to avoid two full-map scans per step.
     """
 
     _UNWALKABLE = frozenset({32, 45, 124, 125})  # space, -, |, }
@@ -170,14 +175,20 @@ class AdvancedObservationEnv(gym.Env):
         env_id: str,
         des_file: str | None,
         cfg: SimpleNamespace,
+        shaped_reward: bool = True,
     ) -> None:
         super().__init__()
         _ensure_nhdat_patch_works()
         self.env_id = env_id
+        self.des_file = des_file
         self._cfg = cfg
         self._crop_half = cfg.crop_size // 2
+        self.shaped_reward = shaped_reward
 
-        obs_keys = ("glyphs", "chars", "pixel")
+        # 'pixel' renders the full tiled RGB screen on every step and
+        # nothing here reads it: requesting it cost 3.56 ms/step against
+        # 0.22 ms without (measured, mean over the four ID envs).
+        obs_keys = ("glyphs", "chars")
         if des_file is not None:
             self._inner = gym.make(
                 "MiniHack-Navigation-Custom-v0",
@@ -226,11 +237,13 @@ class AdvancedObservationEnv(gym.Env):
                 _u.seed(core=seed, disp=seed, reseed=False)
         obs, info = self._inner.reset(seed=seed, options=options)
         self.last_raw_obs = obs
-        self._prev_bfs_dist = self._get_bfs_distance(obs)
         self._visited = set()
-        agent_pos = self._get_agent_pos(obs)
-        if agent_pos is not None:
-            self._visited.add(agent_pos)
+        self._prev_bfs_dist = None
+        if self.shaped_reward:
+            self._prev_bfs_dist = self._get_bfs_distance(obs)
+            agent_pos = self._get_agent_pos(obs)
+            if agent_pos is not None:
+                self._visited.add(agent_pos)
         return self._get_obs(obs), info
 
     def step(
@@ -244,6 +257,10 @@ class AdvancedObservationEnv(gym.Env):
         - BFS progress toward staircase: ``+0.5 * (prev - curr)``
         - New-tile exploration: ``+0.05``
         - Step penalty: ``-0.01``
+
+        The middle two terms each scan the full map and are skipped when
+        ``self.shaped_reward`` is ``False``; observations, transitions and
+        ``info`` are identical either way, only the reward scalar differs.
 
         Args:
             action: Integer action in ``[0, action_dim)``.
@@ -266,17 +283,18 @@ class AdvancedObservationEnv(gym.Env):
         else:
             info["won"] = False
 
-        # BFS shaping
-        curr_dist = self._get_bfs_distance(obs)
-        if curr_dist is not None and self._prev_bfs_dist is not None:
-            reward += (self._prev_bfs_dist - curr_dist) * 0.5
-            self._prev_bfs_dist = curr_dist
+        if self.shaped_reward:
+            # BFS shaping
+            curr_dist = self._get_bfs_distance(obs)
+            if curr_dist is not None and self._prev_bfs_dist is not None:
+                reward += (self._prev_bfs_dist - curr_dist) * 0.5
+                self._prev_bfs_dist = curr_dist
 
-        # Exploration bonus
-        agent_pos = self._get_agent_pos(obs)
-        if agent_pos is not None and agent_pos not in self._visited:
-            reward += 0.05
-            self._visited.add(agent_pos)
+            # Exploration bonus
+            agent_pos = self._get_agent_pos(obs)
+            if agent_pos is not None and agent_pos not in self._visited:
+                reward += 0.05
+                self._visited.add(agent_pos)
 
         # Step penalty
         reward -= 0.01
@@ -482,6 +500,9 @@ def make_env(
 ) -> AdvancedObservationEnv:
     """Create a wrapped MiniHack environment.
 
+    Always constructs a fresh instance. Rollout loops should prefer
+    ``borrow_env`` / ``acquire_env``, which recycle instances.
+
     Args:
         env_id: MiniHack registry ID.
         des_file: Optional ``.des`` file content.
@@ -491,6 +512,171 @@ def make_env(
         Wrapped environment.
     """
     return AdvancedObservationEnv(env_id, des_file, cfg)
+
+
+# Constructing a MiniHack env is expensive out of all proportion to
+# running one: ``MiniHack.__init__`` unconditionally calls
+# ``_patch_nhdat``, which copies the NetHack data directory into a fresh
+# temp dir and forks ``lev_comp`` and ``dlb`` to rebuild the data archive
+# (measured ~183 ms, against 3.0 ms to reset an existing instance). At
+# ``episodes_per_iteration: 30`` the DAgger loop paid that 60 times an
+# iteration. Re-seeding a recycled instance in ``reset`` is trajectory
+# identical -- same actions, same observations, same rewards -- which
+# ``tests/test_env_reuse.py`` pins.
+#
+# The cap bounds retained idle instances only; peak live envs still
+# tracks caller concurrency (30 in collection, eval_episodes_per_env in
+# eval). Lower REMDM_MAX_IDLE_ENVS if a node is short of RAM or its
+# TMPDIR is small: each instance holds a NetHack vardir of a few MB.
+_MAX_IDLE_ENVS = int(os.environ.get("REMDM_MAX_IDLE_ENVS", "64"))
+
+
+class _EnvPool:
+    """Bounded, thread-safe pool of idle environments, keyed by env ID.
+
+    Envs built from a ``des_file`` are never pooled: the level depends on
+    the file's contents, so a cache keyed by registry ID would hand back
+    the wrong level.
+
+    Args:
+        max_idle: Maximum number of idle instances retained. Live
+            (borrowed) envs are not counted, so peak process-wide env
+            count still tracks caller concurrency.
+    """
+
+    def __init__(self, max_idle: int = _MAX_IDLE_ENVS) -> None:
+        self._idle: dict[str, list[AdvancedObservationEnv]] = {}
+        self._n_idle = 0
+        self._max_idle = max_idle
+        self._lock = threading.Lock()
+
+    def acquire(
+        self,
+        env_id: str,
+        des_file: str | None,
+        cfg: SimpleNamespace,
+        shaped_reward: bool = True,
+    ) -> AdvancedObservationEnv:
+        """Return a ready environment, recycled when one is idle."""
+        env: AdvancedObservationEnv | None = None
+        if des_file is None:
+            with self._lock:
+                pool = self._idle.get(env_id)
+                if pool:
+                    env = pool.pop()
+                    self._n_idle -= 1
+        if env is None:
+            env = AdvancedObservationEnv(env_id, des_file, cfg)
+        env.shaped_reward = shaped_reward
+        return env
+
+    def release(self, env: AdvancedObservationEnv | None) -> None:
+        """Return *env* to the pool, or close it if the pool is full."""
+        if env is None:
+            return
+        if env.des_file is not None:
+            env.close()
+            return
+        env.shaped_reward = True
+        evicted: AdvancedObservationEnv | None = None
+        with self._lock:
+            if self._n_idle >= self._max_idle:
+                # Evict from the largest bucket so a pool filled by one
+                # env ID cannot starve the others.
+                widest = max(self._idle, key=lambda k: len(self._idle[k]))
+                evicted = self._idle[widest].pop()
+                self._n_idle -= 1
+            self._idle.setdefault(env.env_id, []).append(env)
+            self._n_idle += 1
+        if evicted is not None:
+            evicted.close()
+
+    def close_all(self) -> None:
+        """Close every idle environment and empty the pool."""
+        with self._lock:
+            envs = [e for pool in self._idle.values() for e in pool]
+            self._idle.clear()
+            self._n_idle = 0
+        for env in envs:
+            env.close()
+
+    @property
+    def n_idle(self) -> int:
+        """Number of environments currently held idle."""
+        return self._n_idle
+
+
+_POOL = _EnvPool()
+
+
+def acquire_env(
+    env_id: str,
+    des_file: str | None,
+    cfg: SimpleNamespace,
+    shaped_reward: bool = True,
+) -> AdvancedObservationEnv:
+    """Borrow an environment from the shared pool.
+
+    The caller must return it with ``release_env`` (on success) or
+    ``discard_env`` (after an error left it in an unknown state).
+
+    Args:
+        env_id: MiniHack registry ID.
+        des_file: Optional ``.des`` file content; such envs bypass the pool.
+        cfg: Configuration namespace.
+        shaped_reward: Passed through to the environment.
+
+    Returns:
+        Environment ready for ``reset``.
+    """
+    return _POOL.acquire(env_id, des_file, cfg, shaped_reward)
+
+
+def release_env(env: AdvancedObservationEnv | None) -> None:
+    """Return a borrowed environment to the shared pool."""
+    _POOL.release(env)
+
+
+def discard_env(env: AdvancedObservationEnv | None) -> None:
+    """Close a borrowed environment instead of pooling it."""
+    if env is not None:
+        env.close()
+
+
+def close_env_pool() -> None:
+    """Close every pooled environment (teardown, tests)."""
+    _POOL.close_all()
+
+
+@contextlib.contextmanager
+def borrow_env(
+    env_id: str,
+    des_file: str | None,
+    cfg: SimpleNamespace,
+    shaped_reward: bool = True,
+):
+    """Borrow a pooled environment for the duration of the block.
+
+    An environment whose block raised is closed rather than pooled, so a
+    half-stepped instance cannot leak into a later episode.
+
+    Args:
+        env_id: MiniHack registry ID.
+        des_file: Optional ``.des`` file content.
+        cfg: Configuration namespace.
+        shaped_reward: Passed through to the environment.
+
+    Yields:
+        Environment ready for ``reset``.
+    """
+    env = acquire_env(env_id, des_file, cfg, shaped_reward)
+    try:
+        yield env
+    except BaseException:
+        discard_env(env)
+        raise
+    else:
+        release_env(env)
 
 
 def collect_oracle_trajectory(
@@ -512,7 +698,9 @@ def collect_oracle_trajectory(
           "actions": [T], "env_id": str}`` on success,
         or ``None`` on failure.
     """
-    env = make_env(env_id, None, cfg)
+    # The shaped reward is discarded here, so skip the two full-map scans
+    # that produce it.
+    env = acquire_env(env_id, None, cfg, shaped_reward=False)
     try:
         (local, glb), _info = env.reset(seed=seed)
         locals_list = [local]
@@ -533,6 +721,7 @@ def collect_oracle_trajectory(
         globals_arr = np.stack(globals_list[:-1], axis=0).astype(np.int16)
         actions_arr = np.array(actions_list, dtype=np.int64)
 
+        release_env(env)
         return {
             "local": locals_arr,
             "global": globals_arr,
@@ -544,6 +733,5 @@ def collect_oracle_trajectory(
             f"Oracle trajectory failed for {env_id} seed={seed}",
             exc_info=True,
         )
+        discard_env(env)
         return None
-    finally:
-        env.close()

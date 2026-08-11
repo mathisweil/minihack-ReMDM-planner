@@ -145,7 +145,7 @@ class Evaluator:
             ``won=False``.
         """
         from src.diffusion.sampling import remdm_sample
-        from src.envs.minihack_env import make_env
+        from src.envs.minihack_env import acquire_env, discard_env, release_env
 
         n = n_episodes
         max_steps = 500
@@ -162,8 +162,9 @@ class Evaluator:
 
         # FIX-B1: env-creation failures raise instead of silently counting
         # the episode as a loss, which deflated eval metrics.
+        # Shaping stays on here: eval reports avg_reward.
         for i in range(n):
-            env = make_env(env_id, des_content, cfg)
+            env = acquire_env(env_id, des_content, cfg)
             (local, glb), _ = env.reset(seed=seeds[i])
             envs.append(env)
             cur_local[i] = local
@@ -251,10 +252,13 @@ class Evaluator:
 
                 if not any_active:
                     break
-        finally:
+        except BaseException:
             for env in envs:
-                if env is not None:
-                    env.close()
+                discard_env(env)
+            raise
+        else:
+            for env in envs:
+                release_env(env)
 
         return [
             {
