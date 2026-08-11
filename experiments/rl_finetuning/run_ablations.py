@@ -39,10 +39,20 @@ from __future__ import annotations
 import argparse
 import datetime
 import logging
+import os
 import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+
+# PERF-X7: the gradient batch is data-limited, so it changes size from
+# iteration to iteration, which fragments the caching allocator's fixed
+# segments. On a 16 GB card at `batch_size: 4608` the suite reaches ~94%
+# of VRAM and the default allocator then OOMs on a backward pass with
+# over a gigabyte reserved-but-unallocated. Expandable segments give that
+# gigabyte back. This must be set before the first CUDA allocation, and
+# an explicit setting from the environment always wins.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import numpy as np
 import orjson
