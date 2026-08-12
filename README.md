@@ -49,8 +49,10 @@ minihack-ReMDM-planner/
 ├── src/                    Model, diffusion, envs, planner pipelines
 ├── experiments/
 │   └── rl_finetuning/      RL fine-tuning ablation suite (run_ablations.py)
-├── scripts/                HF upload utility, DAgger profiler
+├── scripts/                HF upload utilities, DAgger and ablation profilers
 ├── tests/                  Smoke suite — uv run pytest
+├── checkpoints/            Gitignored — offline/, online/ (see Checkpoints)
+├── results/inference/      Eval JSONs from --mode inference (published, see Checkpoints)
 ├── demo_minihack.ipynb     Demo notebook
 ├── main.py                 CLI entry point
 └── pyproject.toml          uv project — deps, cuda extra, dev group
@@ -106,14 +108,18 @@ python main.py --mode inference --checkpoint wandb:entity/project/checkpoint-ite
 # Specific environments, save JSON
 python main.py --mode inference --checkpoint checkpoints/iter600.pth \
     --envs MiniHack-Room-Random-5x5-v0 MiniHack-MazeWalk-45x19-v0 \
-    --episodes 100 --output results.json
+    --episodes 100 --output results/inference/eval.json
 
 python main.py --mode inference --checkpoint checkpoints/iter600.pth \
     --des environments/<your_level>.des        # custom .des scenarios (dir ships empty)
 python main.py --mode inference --checkpoint checkpoints/iter600.pth --no-ema
 ```
 
-`--checkpoint` accepts a local `.pth` path or a `wandb:` artifact reference (`wandb:entity/project/name:version`). Inference uses EMA weights unless `--no-ema` is given; `--episodes` defaults to `eval_episodes_per_env` from the config. Always evaluate with the checkpoint's own config snapshot:
+`--checkpoint` accepts a local `.pth` path or a `wandb:` artifact reference (`wandb:entity/project/name:version`). Inference uses EMA weights unless `--no-ema` is given; `--episodes` defaults to `eval_episodes_per_env` from the config.
+
+Write eval JSONs into `results/inference/` (created for you): `scripts/hf_upload.py` publishes every JSON it finds there.
+
+Always evaluate with the checkpoint's own config snapshot:
 
 ```bash
 DIR=checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M
@@ -201,11 +207,18 @@ uv run hf download mathisweil/remdm-minihack-checkpoints \
     --include "checkpoints/online/Minihack-*/**" --local-dir .
 ```
 
-Each checkpoint directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config_<step>.yaml` (config snapshot) and `selection.json`. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading. Publish new checkpoints with `scripts/hf_upload.py` (`--dry-run` stages without uploading).
+Each checkpoint directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config_<step>.yaml` (config snapshot) and `selection.json`. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading.
+
+### Publishing to the Hub
+
+`scripts/hf_upload.py` rediscovers and uploads three things, each keeping its repo-relative path: `checkpoints/` (adding a `model.safetensors` EMA export and `selection.json` per directory), every `experiments/rl_finetuning/outputs/<run>/` holding a `results.json` (with `diagnosis.md`, `tables/`, `figures/`), and the eval JSONs in `results/inference/`. It drops W&B and hub config keys, shortens absolute paths and regenerates the model card.
 
 ```bash
-HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-minihack-checkpoints
+HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-minihack-checkpoints \
+    --selection-metric "mean ID+OOD win rate" --dry-run
 ```
+
+`--dry-run` prints the staged tree and card without uploading; drop it to upload. `--selection-metric` records what the best-of-N checkpoints were chosen on. Also `--inference-results <FILE|DIR> ...` (eval JSONs kept elsewhere), `--private`, `--yes`. Publish one model per directory with a single `.pth` and config, since the script takes one row per directory and otherwise picks by sort order.
 
 ## Results, citation, licence
 

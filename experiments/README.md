@@ -190,6 +190,31 @@ python experiments/rl_finetuning/run_ablations.py \
 The merged `results.json` is identical in format to a single-run file and can
 be used with `--analyze-only` for further filtering or re-plotting.
 
+**Only merge runs from configs that agree on result-affecting keys.** `--merge`
+averages seeds without checking where they came from, so pooling two machine
+configs is sound only when they train the same model and measure it the same
+way. All published MiniHack ablation results were produced on the **UCL 3090
+Ti** (`final_ablations_ucl.yaml`), which is the reference config.
+
+`final_ablations_qmul.yaml` is **not poolable** with it. It diverges on four
+keys that change the result, not just the wall-clock:
+
+| Key | UCL | QMUL | Effect |
+|---|---|---|---|
+| `batch_size` | 4608 | 512 | ~9x per-update SNR |
+| `episodes_per_iter` | 30 | 20 | 15k vs 10k total episodes |
+| `diffusion_steps_collect` | 5 | 3 | different collection policy |
+| `eval_episodes` | 20 | 10 | noisier score |
+
+Differences in diagnostic cadence (`eval_every`, `cka_every`, `cka_batch_size`,
+`per_layer_every`, `repr_drift_every`, `grad_align_every`, `t_analysis_every`)
+are wall-clock only and do not affect poolability.
+
+`tests/test_config.py` enforces this: every `final_ablations_*.yaml` must be
+declared poolable or not, configs declared poolable must match the reference on
+the result-affecting keys, and the recorded QMUL divergence must stay accurate.
+Aligning QMUL later fails the test until it is moved to the poolable set.
+
 ### Ablations
 
 | Group | Name | Tests |
