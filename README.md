@@ -73,7 +73,7 @@ Two independent training methods; neither depends on the other. An offline BC ch
 ### Online DAgger (primary)
 
 ```bash
-python main.py --mode online                                            # from scratch
+python main.py --mode online                                            # full paper recipe (defaults.yaml)
 python main.py --mode online --config configs/final_qmul_gpu.yaml       # paper run, QMUL H200
 python main.py --mode online --override total_timesteps=1000000 --override dagger_lr=0.0001
 python main.py --mode online --checkpoint checkpoints/iter600.pth       # resume
@@ -97,7 +97,7 @@ python main.py --mode offline --data data/dataset.pt --override total_timesteps=
 python main.py --mode offline --data data/dataset.pt --checkpoint checkpoints/offline_step40000.pth
 ```
 
-Gradient steps = `total_timesteps // offline_batch_size`; ID + OOD eval runs on the `id_eval_every_timesteps` / `ood_eval_every_timesteps` cadence. For paper-fair BC-vs-DAgger comparisons, the `offline_*_grad_steps` keys pin offline metrics in grad-step units; `final_qmul_gpu.yaml` and `final_ucl_gpu.yaml` ship with these pre-set.
+Gradient steps default to `total_timesteps // offline_batch_size`; ID + OOD eval runs on the `id_eval_every_timesteps` / `ood_eval_every_timesteps` cadence. For paper-fair BC-vs-DAgger comparisons the `offline_*_grad_steps` keys pin offline metrics in grad-step units instead, and since `defaults.yaml` is the paper recipe they are set there — so they apply to **every** run unless a preset pins them back to `null`. See the hazard note under [Configuration](#configuration).
 
 ## Evaluation from a checkpoint
 
@@ -169,21 +169,24 @@ python experiments/rl_finetuning/run_ablations.py \
 
 One YAML config holds the experiment; the CLI holds the run.
 
-- **Config files** (`configs/*.yaml`): hyperparameters, model and method settings, ablation definitions. Any file passed via `--config` is deep-merged onto `configs/defaults.yaml`, so presets contain **only their deltas** — never re-state a default value. A preset may also set `extends: <file>` to inherit from another preset first.
+- **`configs/defaults.yaml`**: the **shared final paper recipe**, not a cheap baseline. Both clusters train exactly this; running with no `--config` trains it too.
+- **Config files** (`configs/*.yaml`): any file passed via `--config` is deep-merged onto `defaults.yaml`, so presets contain **only their deltas** — never re-state a default value. Presets are a single layer: they never inherit from one another.
 - **CLI flags**: per-invocation values — `--seed`, `--checkpoint`, `--data`, `--output`, `--episodes`, `--envs`, mode switches.
 - **`--override KEY=VALUE`** (repeatable): ad hoc config overrides. Keys are validated against `defaults.yaml` and values are cast to the key's type; a typo is an error, not a silent no-op.
 
-Precedence, lowest to highest: `configs/defaults.yaml` < `extends` chain (base first) < `--config` file < `--override` and run flags.
+Precedence, lowest to highest: `configs/defaults.yaml` < `--config` file < `--override` and run flags.
+
+> **Hazard when writing a preset.** Four keys silently *override* an env-step-derived value when non-null, and `defaults.yaml` now sets all four as part of the recipe: `offline_total_grad_steps`, `offline_eval_every_grad_steps`, `offline_checkpoint_every_grad_steps`, `offline_buffer_capacity`. A preset that wants its own `total_timesteps` to govern the offline budget must pin them back to **explicit `null`** — omitting them inherits the pins. Left unpinned, `smoke.yaml` would train 60,000 offline gradient steps instead of 19. `tests/test_config.py` enforces the pins for every preset that derives its own budget.
 
 | Preset | Purpose |
 |---|---|
-| `configs/defaults.yaml` | Base defaults for all modes |
+| `configs/defaults.yaml` | **Shared final paper recipe** — the full run both clusters train |
 | `configs/smoke.yaml` | Smoke test (`total_timesteps=5000`, small buffer, W&B off) |
 | `configs/ablation_local_only.yaml` | Local-only planner ablation (`use_global_stream: false`) |
 | `configs/ucl_gpu_bigger_model.yaml` | UCL GPU, larger model (384D, 6 heads) |
 | `configs/ucl_gpu_learning_behaviour.yaml` | UCL GPU learning-behaviour study (eta=0.18, B=6144) |
-| `configs/final_qmul_gpu.yaml` | **Paper run, QMUL H200.** DAgger (iter600 checkpoint) + compute-matched BC |
-| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti.** `extends: final_qmul_gpu.yaml`; only worker counts and paths differ |
+| `configs/final_qmul_gpu.yaml` | **Paper run, QMUL H200.** Machine values only: worker counts (32) and dataset path |
+| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti.** Machine values only: dataset path (workers stay at the default 8) |
 
 Key hyperparameters are documented inline in `configs/defaults.yaml`; the [appendix](#key-hyperparameters) tabulates them.
 

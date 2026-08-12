@@ -37,11 +37,16 @@ rl_finetuning/
 └── configs/
     ├── ablations_default.yaml   # Base: all ablation hyperparameters
     ├── ablations_fast.yaml      # Smoke-test overlay (50 iterations)
-    ├── final_ablations_qmul.yaml  # QMUL H200 overrides only (extends base)
-    └── final_ablations_ucl.yaml   # UCL 3090 Ti overrides only (extends base)
+    ├── final_ablations_qmul.yaml  # QMUL H200 overrides only
+    └── final_ablations_ucl.yaml   # UCL 3090 Ti overrides only (reference)
 ```
 
-### Config inheritance
+### Config layering
+
+Two layers, always. `ablations_default.yaml` carries every ablation
+hyperparameter, including the settings both clusters share (AMP on, three seeds
+per ablation). A machine config carries only what that machine changes.
+Configs never inherit from one another.
 
 Merge order, later wins:
 
@@ -57,20 +62,14 @@ Machine configs carry only the keys they change:
 
 ```yaml
 # final_ablations_ucl.yaml
-extends: ablations_default.yaml
 batch_size: 4608
-use_amp: true
 cka_batch_size: 128
-num_seeds: 3
 ```
 
 | Rule | Behaviour |
 |---|---|
-| `extends: <path>` | Resolved relative to the declaring file; absolute paths accepted |
-| No `extends` key | Implicitly extends `ablations_default.yaml` |
-| `extends:` (empty) | No inheritance |
-| Chain depth | Any; cycles raise `ValueError` |
-| `--fast` | Applied raw after the chain, so machine keys (`use_amp`, `batch_size`, `diffusion_steps_collect`) survive |
+| Base | `ablations_default.yaml`, applied automatically; there is no `extends` key |
+| `--fast` | Applied raw on top, so machine keys (`use_amp`, `batch_size`, `diffusion_steps_collect`) survive |
 | Unknown key | `KeyError`, not a silent no-op. Valid keys are those in `configs/defaults.yaml` plus `ablations_default.yaml` |
 | Restated default | Rejected by `tests/test_config.py`: a key whose value equals what it would inherit is redundant and must be deleted |
 
@@ -78,8 +77,9 @@ Key validation matters here because every ablation reads config through
 `getattr(cfg, key, fallback)`. Without it a typo such as `batch_sze: 512` is
 silently ignored and the real `batch_size` quietly keeps its inherited value.
 
-The inheritance itself is resolved by `src.config.resolve_config_chain`, shared
-with the main `--config` loader so both obey identical rules.
+Note that `use_amp` and `num_seeds` now live in the base, so a bare
+`--fast` run (no `--ablations-config`) inherits `num_seeds: 3` and AMP rather
+than the previous `1` and off. Pass `--num-seeds 1` for a single-seed smoke run.
 
 ### Usage
 
