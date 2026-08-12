@@ -36,7 +36,7 @@ diffusion_steps_collect: 5
 # -- GPU performance ----------------------------------------------------------
 # FP16 mixed precision.  ~2x speedup on gradient steps.  Off by default so the
 # base config stays hardware-neutral; machine configs turn it on.
-use_amp: false
+use_amp: true
 # torch.compile is off by default: compilation overhead is not worth it for
 # 500 iterations.  Measured on the 4070 Ti SUPER (baseline_rl, 12 iters,
 # batch 4608): the compiled gradient step runs at 273 ms against 385 ms eager
@@ -142,4 +142,4 @@ wandb_entity: myopic-planner
 
 # -- Multi-seed ---------------------------------------------------------------
 # Run each ablation num_seeds times, report mean +/- std.
-num_seeds: 1
+num_seeds: 3

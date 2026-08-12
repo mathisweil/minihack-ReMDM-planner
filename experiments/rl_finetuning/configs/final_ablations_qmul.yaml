@@ -6,15 +6,12 @@
 # on this machine live below.
 #
 # Changes vs ablations_default.yaml:
-#   - AMP enabled (FP16 forward/backward)
-#   - Smaller batch (512 vs 3072) fitting comfortably in 8GB with AMP
+#   - Smaller batch (512 vs 4608) fitting comfortably in 8GB with AMP
 #   - Fewer collection episodes per iter (20 vs 30) to cut CPU-bound overhead
 #   - Fewer denoising steps during collection (3 vs 5)
 #   - Less frequent eval + diagnostics to reduce non-training wall-clock
-#   - Three seeds per ablation (vs 1)
 # =============================================================================
 
-extends: ablations_default.yaml
 
 # -- Training loop ------------------------------------------------------------
 # 8GB VRAM: 512 windows per gradient step is the largest that leaves headroom
@@ -27,10 +24,7 @@ episodes_per_iter: 20
 # for argmax decoding; saves 40% of collection GPU time vs 5.
 diffusion_steps_collect: 3
 
-# -- GPU performance ----------------------------------------------------------
-# FP16 mixed precision. ~2x speedup on gradient steps. Model is small
-# (~4M params) so memory is not the bottleneck, but AMP still helps throughput.
-use_amp: true
+# AMP and num_seeds: 3 are inherited from ablations_default.yaml.
 
 # -- Evaluation ---------------------------------------------------------------
 # Evaluate every 50 iters (vs 25 default). 10 eval points over 500 iters
@@ -51,6 +45,3 @@ cka_every: 100
 per_layer_every: 50
 # Smaller CKA batch to save memory during the expensive CKA pass.
 cka_batch_size: 32
-
-# -- Multi-seed ---------------------------------------------------------------
-num_seeds: 3  # C-001 (D7/F-048): three literal seeds (base 0 -> 0, 1, 2), matching the published 3-run tables
