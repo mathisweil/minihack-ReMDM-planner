@@ -249,30 +249,59 @@ Aligning QMUL later fails the test until it is moved to the poolable set.
 
 ```
 experiments/rl_finetuning/outputs/{run_id}/
-├── results.json                    # All histories + final scores (machine-readable)
-├── diagnosis.md                    # Human-readable verdict + evidence + recommendations
-├── diagnosis_decision_tree.png     # Hypothesis evidence bar chart
-├── checkpoint_{name}.pth           # Per-ablation fine-tuned model state dict
-├── train_{name}.png                # Per-ablation training curves (loss + win rate)
-├── score_comparison.png            # Bar chart of final scores across ablations
-├── grad_alignment.png              # Gradient cosine similarity over training
-├── repr_drift.png                  # KL divergence drift by t-range
-├── cka_similarity.png              # CKA similarity vs pretrained over training
-├── t_bin_norms.png                 # Heatmap of per-t-bin gradient norms
-├── t_ratio.png                     # High-t / low-t gradient norm ratio over training
-├── win_rate.png                    # Online win rate over training
-├── group_comparison.png            # Boxplot of scores by ablation group
-├── gradient_conflict_map.png       # Binary heatmap of gradient conflicts (cos_sim < 0)
-├── score_delta.png                 # Sorted bar chart of improvement over baseline_rl
-├── per_env_delta.png               # Heatmap of per-env win rate change (end - start)
-├── main_results.{csv,tex}          # Main results table
-├── group_summary.{csv,tex}         # Group-level summary table
-├── gradient_diagnostics.{csv,tex}  # Gradient alignment at final iteration
-├── repr_drift.{csv,tex}            # KL drift values at final iteration
-├── per_env_win_rates.{csv,tex}     # Per-environment win rates
-├── forgetting_analysis.{csv,tex}   # First collapse iter, min score, recovery
-└── hypothesis_verdicts.{csv,tex}   # Per-ablation hypothesis verdict + conclusion
+├── results.json                       # All histories + final scores (machine-readable)
+├── diagnosis.md                       # Human-readable verdict + evidence + recommendations
+├── checkpoint_{name}.pth              # Per-ablation fine-tuned model state dict
+├── figures/
+│   ├── curves_{name}.png              # Per-ablation 2x3 curves (eval, loss, env score,
+│   │                                  #   KL drift, grad alignment, grad norms)
+│   ├── per_layer_grad_heatmap_{name}.png  # Per-layer gradient norms over training
+│   ├── t_bin_grad_norms_{name}.png    # Per-t-bin gradient norms over training
+│   ├── per_env_collapse_{name}.png    # Per-env win rate over eval checkpoints
+│   ├── final_score_comparison.png     # Bar chart of final scores across ablations
+│   ├── eval_scores_over_training.png  # All ablation eval curves overlaid
+│   ├── score_delta_over_baseline_rl.png  # Sorted bar chart of improvement over baseline_rl
+│   ├── gradient_alignment.png         # Gradient cosine similarity over training
+│   ├── gradient_conflict_map.png      # Binary heatmap of gradient conflicts (cos_sim < 0)
+│   ├── representation_drift.png       # KL divergence drift by t-range
+│   ├── cka_similarity.png             # CKA similarity vs pretrained over training
+│   ├── t_distribution_analysis.png    # High/low-t norm ratio + low-high cosine alignment
+│   ├── t_bin_norms_heatmap.png        # Heatmap of per-t-bin gradient norms (final iter)
+│   ├── win_rate_and_effective_batch_size.png  # Online win rate + effective batch size
+│   ├── group_comparison.png           # Boxplot of scores by ablation group
+│   ├── per_env_delta.png              # Heatmap of per-env win rate change (end - start)
+│   ├── diagnosis_decision_tree.png    # Hypothesis evidence bar chart
+│   └── action_dist/                   # Only with --action-dist (see below)
+│       ├── action_dist_comparison_{name}.png   # Pre/post action frequency bars
+│       ├── probability_change_{name}.png       # Per-action delta and log-ratio
+│       ├── distribution_metrics_{name}.png     # Entropy, effective actions, Gini
+│       ├── episode_analysis_{name}.png         # Return and length histograms
+│       ├── cumulative_distribution_{name}.png  # Cumulative sorted probability
+│       ├── action_transitions_{name}.png       # Pre, post, diff transition matrices
+│       ├── action_distribution_results_{name}.json  # Metrics + statistical tests
+│       └── js_divergence_comparison.png        # JS divergence across ablations
+└── tables/
+    ├── main_results.{csv,tex}         # Main results table
+    ├── significance_test.txt          # Pairwise significance notes
+    ├── group_summary.{csv,tex}        # Group-level summary table
+    ├── gradient_analysis.{csv,tex}    # Grad alignment (mean/final/trend) + KL drift
+    ├── t_distribution.{csv,tex}       # High/low-t ratio, alignment, dominant regime
+    ├── repr_drift.{csv,tex}           # KL drift values at final iteration
+    ├── per_env.{csv,tex}              # Per-environment win rates
+    ├── forgetting_analysis.{csv,tex}  # First collapse iter, min score, recovery
+    └── hypothesis_verdict.{csv,tex}   # Per-ablation hypothesis verdict + conclusion
 ```
+
+This mirrors the `figures/` and `tables/` layout used by the sibling
+`craftax-ReMDM-planner` repository, so the two ablation suites produce
+directly comparable output trees.
+
+**Action distribution analysis** is opt-in via `--action-dist`, because
+MiniHack rollouts are not vectorised: it costs roughly
+`len(id_envs) * --action-dist-episodes * (1 + n_ablations)` episodes. The
+pretrained baseline is rolled out once and reused across ablations. It reads
+the per-ablation `checkpoint_{name}.pth` files, so it only covers ablations
+whose checkpoint was saved.
 
 **`results.json` schema:**
 ```json

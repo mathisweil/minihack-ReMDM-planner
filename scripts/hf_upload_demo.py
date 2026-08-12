@@ -21,12 +21,16 @@ Files staged
 - environments/              # custom .des scenario files (if any)
 - main.py, pyproject.toml, README.md
 - checkpoint_inference.pth   # ema_state_dict only (~21 MB)
-- ablation_assets/{score_comparison,group_comparison,per_env_delta,
-                   grad_alignment,score_delta,gradient_conflict_map,
-                   repr_drift,diagnosis_decision_tree}.png
-- ablation_assets/{main_results,hypothesis_verdicts,
-                   per_env_win_rates,group_summary}.csv
+- ablation_assets/{final_score_comparison,group_comparison,per_env_delta,
+                   gradient_alignment,score_delta_over_baseline_rl,
+                   gradient_conflict_map,representation_drift,
+                   diagnosis_decision_tree}.png
+- ablation_assets/{main_results,hypothesis_verdict,
+                   per_env,group_summary}.csv
 - ablation_assets/results.json
+
+Assets are sourced from the ``figures/`` and ``tables/`` subdirectories of
+the run output and staged flat into ``ablation_assets/``.
 
 The staged layout matches what ``demo_minihack.ipynb`` expects:
 ``snapshot_download`` pulls everything into ``remdm-minihack/`` and the
@@ -59,23 +63,24 @@ ABLATION_SRC = (
 )
 
 # Required assets — stage fails loudly if any of these are missing.
+# Paths are relative to ABLATION_SRC; each is staged flat under its basename.
 REQUIRED_ASSETS = (
-    "score_comparison.png",
-    "group_comparison.png",
-    "per_env_delta.png",
-    "grad_alignment.png",
-    "score_delta.png",
-    "main_results.csv",
-    "hypothesis_verdicts.csv",
+    "figures/final_score_comparison.png",
+    "figures/group_comparison.png",
+    "figures/per_env_delta.png",
+    "figures/gradient_alignment.png",
+    "figures/score_delta_over_baseline_rl.png",
+    "tables/main_results.csv",
+    "tables/hypothesis_verdict.csv",
 )
 
 # Optional assets — staged when present, warned on when absent.
 OPTIONAL_ASSETS = (
-    "gradient_conflict_map.png",
-    "repr_drift.png",
-    "diagnosis_decision_tree.png",
-    "per_env_win_rates.csv",
-    "group_summary.csv",
+    "figures/gradient_conflict_map.png",
+    "figures/representation_drift.png",
+    "figures/diagnosis_decision_tree.png",
+    "tables/per_env.csv",
+    "tables/group_summary.csv",
     "results.json",
 )
 
@@ -145,13 +150,13 @@ def stage(staging_dir: Path) -> None:
 
     # Ablation assets — required ones MUST be present.
     missing_required: list[str] = []
-    for name in REQUIRED_ASSETS:
-        src = ABLATION_SRC / name
+    for rel in REQUIRED_ASSETS:
+        src = ABLATION_SRC / rel
         if not src.exists():
-            missing_required.append(name)
+            missing_required.append(rel)
             continue
-        shutil.copy2(src, ablation_dst / name)
-        logger.info(f"  staged ablation_assets/{name}")
+        shutil.copy2(src, ablation_dst / src.name)
+        logger.info(f"  staged ablation_assets/{src.name}")
     if missing_required:
         raise FileNotFoundError(
             f"Required ablation assets missing from {ABLATION_SRC}: "
@@ -159,13 +164,13 @@ def stage(staging_dir: Path) -> None:
         )
 
     # Optional assets — warn but do not fail.
-    for name in OPTIONAL_ASSETS:
-        src = ABLATION_SRC / name
+    for rel in OPTIONAL_ASSETS:
+        src = ABLATION_SRC / rel
         if not src.exists():
-            logger.warning(f"  optional asset missing, skipping: {name}")
+            logger.warning(f"  optional asset missing, skipping: {rel}")
             continue
-        shutil.copy2(src, ablation_dst / name)
-        logger.info(f"  staged ablation_assets/{name}")
+        shutil.copy2(src, ablation_dst / src.name)
+        logger.info(f"  staged ablation_assets/{src.name}")
 
     total_mb = sum(
         f.stat().st_size for f in staging_dir.rglob("*") if f.is_file()

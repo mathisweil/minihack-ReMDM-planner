@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -341,10 +342,12 @@ def generate_action_distribution_plots(
     metrics: dict,
     action_dim: int,
     out_dir: Path,
+    suffix: str = "",
 ) -> None:
     """Generate six diagnostic plots comparing pre- and post-RL distributions.
 
-    Plots are saved as PNG at 150 DPI in ``out_dir``:
+    Plots are saved as PNG at 150 DPI in ``out_dir``, each with ``suffix``
+    appended to the stem:
         1. ``action_dist_comparison.png`` -- side-by-side bars
         2. ``probability_change.png`` -- delta and log-ratio bars
         3. ``distribution_metrics.png`` -- 2x2 dashboard
@@ -360,6 +363,7 @@ def generate_action_distribution_plots(
         metrics: Dict from ``compute_all_metrics``.
         action_dim: Number of discrete actions.
         out_dir: Directory to write PNG files into (created if needed).
+        suffix: Appended to each filename stem, e.g. ``"_kl_penalty"``.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     labels = [MINIHACK_ACTIONS.get(i, str(i)) for i in range(action_dim)]
@@ -389,7 +393,7 @@ def generate_action_distribution_plots(
     axes[1].set_ylim(0, y_max)
     fig.tight_layout()
     fig.savefig(
-        out_dir / "action_dist_comparison.png",
+        out_dir / f"action_dist_comparison{suffix}.png",
         dpi=_DPI,
         bbox_inches="tight",
     )
@@ -430,7 +434,7 @@ def generate_action_distribution_plots(
     axes[1].set_xticklabels(labels, rotation=45, ha="right")
     fig.tight_layout()
     fig.savefig(
-        out_dir / "probability_change.png",
+        out_dir / f"probability_change{suffix}.png",
         dpi=_DPI,
         bbox_inches="tight",
     )
@@ -544,7 +548,7 @@ def generate_action_distribution_plots(
 
     fig.tight_layout()
     fig.savefig(
-        out_dir / "distribution_metrics.png",
+        out_dir / f"distribution_metrics{suffix}.png",
         dpi=_DPI,
         bbox_inches="tight",
     )
@@ -619,7 +623,7 @@ def generate_action_distribution_plots(
 
     fig.tight_layout()
     fig.savefig(
-        out_dir / "episode_analysis.png",
+        out_dir / f"episode_analysis{suffix}.png",
         dpi=_DPI,
         bbox_inches="tight",
     )
@@ -670,7 +674,7 @@ def generate_action_distribution_plots(
     ax.set_ylim(0, 1.05)
     fig.tight_layout()
     fig.savefig(
-        out_dir / "cumulative_distribution.png",
+        out_dir / f"cumulative_distribution{suffix}.png",
         dpi=_DPI,
         bbox_inches="tight",
     )
@@ -713,7 +717,7 @@ def generate_action_distribution_plots(
         plt.colorbar(im, ax=ax_i, fraction=0.046)
     fig.tight_layout()
     fig.savefig(
-        out_dir / "action_transitions.png",
+        out_dir / f"action_transitions{suffix}.png",
         dpi=_DPI,
         bbox_inches="tight",
     )
@@ -761,6 +765,8 @@ def run_action_distribution_analysis(
     device: torch.device | str,
     out_dir: Path | str,
     num_episodes: int = 50,
+    suffix: str = "",
+    pre_stats: dict | None = None,
 ) -> dict:
     """Run the full action distribution analysis pipeline.
 
@@ -776,6 +782,12 @@ def run_action_distribution_analysis(
         device: Torch device.
         out_dir: Output directory for plots and results JSON.
         num_episodes: Episodes per environment for statistics collection.
+        suffix: Appended to every output filename, e.g. ``"_kl_penalty"``.
+            Lets one output directory hold results for many ablations.
+        pre_stats: Pre-collected pre-RL statistics. When comparing many
+            ablations against the same pretrained model, collect once with
+            ``collect_action_statistics`` and pass it here rather than
+            re-rolling the baseline for every ablation.
 
     Returns:
         Results dict containing metrics, probabilities, episode data,
@@ -787,14 +799,15 @@ def run_action_distribution_analysis(
     env_ids: list[str] = cfg.id_envs
     action_dim: int = cfg.action_dim
 
-    logger.info("Collecting pre-RL action statistics ...")
-    pre_stats = collect_action_statistics(
-        pre_model,
-        env_ids,
-        num_episodes,
-        cfg,
-        device,
-    )
+    if pre_stats is None:
+        logger.info("Collecting pre-RL action statistics ...")
+        pre_stats = collect_action_statistics(
+            pre_model,
+            env_ids,
+            num_episodes,
+            cfg,
+            device,
+        )
     logger.info(
         "Pre-RL: %d actions, win=%.2f%%, return=%.3f",
         len(pre_stats["all_actions"]),
@@ -852,6 +865,7 @@ def run_action_distribution_analysis(
         metrics,
         action_dim,
         out_dir,
+        suffix,
     )
 
     # Interpretation
@@ -873,10 +887,120 @@ def run_action_distribution_analysis(
     }
 
     # Write JSON via orjson
-    json_path = out_dir / "action_distribution_results.json"
+    json_path = out_dir / f"action_distribution_results{suffix}.json"
     json_path.write_bytes(
         orjson.dumps(results, option=orjson.OPT_INDENT_2),
     )
     logger.info("Results saved to %s", json_path)
 
     return results
+
+
+def plot_js_comparison(
+    js_by_ablation: dict[str, float],
+    out_dir: Path,
+) -> None:
+    """Sorted bar chart of pre/post JS divergence across ablations.
+
+    The dashed guides mark the interpretation thresholds: below 0.05 the
+    behaviour is essentially unchanged and the collapse is representational;
+    above 0.15 it is substantial mode collapse.
+
+    Args:
+        js_by_ablation: Mapping of ablation name to JS divergence.
+        out_dir: Output directory.
+    """
+    if not js_by_ablation:
+        return
+
+    names = sorted(js_by_ablation, key=lambda n: js_by_ablation[n])
+    values = [js_by_ablation[n] for n in names]
+
+    with plt.rc_context({"figure.facecolor": "white"}):
+        fig, ax = plt.subplots(figsize=(9, max(4.0, len(names) * 0.35)))
+        ax.barh(range(len(names)), values, color="steelblue", alpha=0.85)
+        ax.axvline(0.05, ls="--", color="green", alpha=0.7, label="0.05 (drift)")
+        ax.axvline(0.15, ls="--", color="red", alpha=0.7, label="0.15 (collapse)")
+        ax.set_yticks(range(len(names)))
+        ax.set_yticklabels(names, fontsize=8)
+        ax.set_xlabel("JS Divergence (pretrained vs fine-tuned)")
+        ax.set_title("Action Distribution Shift by Ablation")
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        path = out_dir / "js_divergence_comparison.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=_DPI, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved %s", path)
+
+
+def run_all_action_distribution_analyses(
+    pretrained_model: torch.nn.Module,
+    trained_models: Iterable[tuple[str, torch.nn.Module]],
+    cfg: SimpleNamespace,
+    device: torch.device | str,
+    output_dir: Path,
+    num_episodes: int = 10,
+) -> dict[str, dict]:
+    """Run action distribution analysis for every completed ablation.
+
+    Figures and per-ablation JSON go in ``output_dir/figures/action_dist/``.
+    The pretrained baseline is rolled out once and reused for every
+    comparison, so cost scales with the number of ablations rather than
+    twice that.
+
+    Args:
+        pretrained_model: Pretrained (BC-only) model.
+        trained_models: Iterable of ``(ablation_name, model)`` pairs. Pass a
+            generator that loads one checkpoint at a time to avoid holding
+            every fine-tuned model in memory at once.
+        cfg: Config namespace.
+        device: Torch device.
+        output_dir: Root output directory.
+        num_episodes: Episodes per environment per model.
+
+    Returns:
+        Mapping of ablation name to that ablation's results dict.
+    """
+    fig_dir = output_dir / "figures" / "action_dist"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(
+        "Collecting pretrained action statistics once (%d episodes/env) ...",
+        num_episodes,
+    )
+    pre_stats = collect_action_statistics(
+        pretrained_model,
+        cfg.id_envs,
+        num_episodes,
+        cfg,
+        device,
+    )
+
+    comparisons: dict[str, dict] = {}
+    js_by_ablation: dict[str, float] = {}
+
+    for name, model in trained_models:
+        logger.info("Action distribution analysis: %s", name)
+        try:
+            res = run_action_distribution_analysis(
+                pretrained_model,
+                model,
+                cfg,
+                device,
+                fig_dir,
+                num_episodes=num_episodes,
+                suffix=f"_{name}",
+                pre_stats=pre_stats,
+            )
+        except Exception:
+            logger.exception("Action distribution analysis failed for %s", name)
+            continue
+        comparisons[name] = res
+        js = res["metrics"].get("JS Divergence")
+        if js is not None:
+            js_by_ablation[name] = float(js)
+
+    plot_js_comparison(js_by_ablation, fig_dir)
+    logger.info("Action distribution analysis saved to %s", fig_dir)
+    return comparisons

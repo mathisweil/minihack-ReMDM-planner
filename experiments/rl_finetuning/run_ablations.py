@@ -42,6 +42,7 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -71,6 +72,9 @@ from experiments.rl_finetuning.ablations.registry import REGISTRY
 from experiments.rl_finetuning.ablations.training import (
     AblationHistory,
     run_ablation,
+)
+from experiments.rl_finetuning.analysis.action_distribution import (
+    run_all_action_distribution_analyses,
 )
 from experiments.rl_finetuning.analysis.plots import generate_all_plots
 from experiments.rl_finetuning.analysis.report import generate_diagnosis_report
@@ -229,6 +233,23 @@ def _build_parser() -> argparse.ArgumentParser:
             "and regenerate analysis. E.g.:\n"
             "  --merge outputs/gpu0/results.json outputs/gpu1/results.json"
         ),
+    )
+
+    p.add_argument(
+        "--action-dist",
+        action="store_true",
+        help=(
+            "After training, roll out the pretrained and fine-tuned models to "
+            "compare action distributions (figures/action_dist/). Off by "
+            "default: MiniHack rollouts are not vectorised, so this adds "
+            "roughly num_envs * episodes * (1 + n_ablations) episodes."
+        ),
+    )
+    p.add_argument(
+        "--action-dist-episodes",
+        type=int,
+        default=10,
+        help="Episodes per environment per model for --action-dist.",
     )
 
     p.add_argument("--output-dir", type=str, default=None)
@@ -440,6 +461,66 @@ def _evaluate_pretrained(
     n_eps = getattr(cfg, "eval_episodes", 20)
     results = evaluator.evaluate(cfg.id_envs, model, n_eps, cfg, device)
     return float(np.mean([v["win_rate"] for v in results.values()]))
+
+
+def _load_pretrained_model(
+    checkpoint_path: str,
+    cfg: SimpleNamespace,
+    device: torch.device | str,
+) -> torch.nn.Module:
+    """Load the pretrained (BC-only) model in eval mode.
+
+    Args:
+        checkpoint_path: DAgger checkpoint path.
+        cfg: Config namespace.
+        device: Torch device.
+
+    Returns:
+        Model with the EMA weights loaded.
+    """
+    from src.models.denoiser import make_model
+
+    model = make_model(cfg).to(device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["ema_state_dict"])
+    model.eval()
+    return model
+
+
+def _iter_ablation_models(
+    results: dict[str, dict],
+    output_dir: Path,
+    cfg: SimpleNamespace,
+    device: torch.device | str,
+) -> Iterator[tuple[str, torch.nn.Module]]:
+    """Yield ``(name, model)`` for each ablation checkpoint on disk.
+
+    Loads one model at a time so the whole suite never sits in memory.
+    Ablations whose checkpoint is missing are skipped with a warning.
+
+    Args:
+        results: Completed ablation results dict.
+        output_dir: Run output directory holding ``checkpoint_{name}.pth``.
+        cfg: Config namespace.
+        device: Torch device.
+
+    Yields:
+        Tuples of ablation name and the fine-tuned model in eval mode.
+    """
+    from src.models.denoiser import make_model
+
+    for name in results:
+        ckpt_path = output_dir / f"checkpoint_{name}.pth"
+        if not ckpt_path.exists():
+            logger.warning("No checkpoint for %s, skipping action dist.", name)
+            continue
+        model = make_model(cfg).to(device)
+        model.load_state_dict(
+            torch.load(ckpt_path, map_location=device, weights_only=False),
+        )
+        model.eval()
+        yield name, model
+        del model
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -773,6 +854,20 @@ def main(argv: list[str] | None = None) -> None:
         generate_summary_tables(results, pretrained_score, output_dir)
         generate_all_plots(results, pretrained_score, output_dir)
         generate_diagnosis_report(results, pretrained_score, output_dir)
+
+    if args.action_dist and results:
+        logger.info("Running action distribution analysis...")
+        try:
+            run_all_action_distribution_analyses(
+                _load_pretrained_model(checkpoint_path, cfg, device),
+                _iter_ablation_models(results, output_dir, cfg, device),
+                cfg,
+                device,
+                output_dir,
+                num_episodes=args.action_dist_episodes,
+            )
+        except Exception:
+            logger.exception("Action distribution analysis failed — continuing.")
 
     if wandb_run is not None:
         try:

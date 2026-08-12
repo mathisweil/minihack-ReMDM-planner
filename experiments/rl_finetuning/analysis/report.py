@@ -6,7 +6,7 @@ Produces ``diagnosis.md`` -- a human-readable verdict that:
 3. Ranks hypotheses by evidence strength
 4. Recommends next experiments
 
-Also generates ``diagnosis_decision_tree.png``.
+Also generates ``figures/diagnosis_decision_tree.png``.
 """
 
 from __future__ import annotations
@@ -179,15 +179,19 @@ def _plot_decision_tree(
 def generate_diagnosis_report(
     results: dict[str, dict],
     pretrained_score: float,
-    out_dir: Path,
+    output_dir: Path,
 ) -> None:
-    """Generate ``diagnosis.md`` and decision tree plot.
+    """Generate ``diagnosis.md`` and the decision tree figure.
+
+    ``diagnosis.md`` is written at the root of ``output_dir``; the decision
+    tree figure goes in ``output_dir/figures/`` alongside the other plots.
 
     Args:
         results: Full ablation results dict.
         pretrained_score: Pretrained model eval score.
-        out_dir: Output directory.
+        output_dir: Root output directory.
     """
+    out_dir = output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     scored = [
@@ -197,7 +201,7 @@ def generate_diagnosis_report(
     scored.sort(key=lambda x: -x["evidence_score"])
 
     # Decision tree plot
-    _plot_decision_tree(scored, out_dir)
+    _plot_decision_tree(scored, out_dir / "figures")
 
     # Markdown report
     lines = [

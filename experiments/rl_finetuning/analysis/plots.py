@@ -140,43 +140,290 @@ def _save(fig: plt.Figure, path: Path) -> None:
     logger.info("Saved %s", path)
 
 
-def plot_training_curve(
+def plot_ablation_curves(
+    name: str,
+    history: AblationHistory,
+    pretrained_score: float,
+    out_dir: Path,
+) -> None:
+    """2x3 grid of per-ablation training curves.
+
+    Panels: eval score, training loss, online env score, KL drift,
+    gradient alignment, gradient norms.
+
+    Args:
+        name: Ablation name.
+        history: Training history.
+        pretrained_score: Pretrained baseline score (dashed horizontal).
+        out_dir: Output directory.
+    """
+    with plt.rc_context(_STYLE):
+        fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+        fig.suptitle(f"Training Curves: {name}", fontsize=14, fontweight="bold")
+        color = _group_color(name)
+
+        ax = axes[0, 0]
+        if history.eval_iters:
+            ax.plot(
+                history.eval_iters,
+                history.eval_score,
+                "o-",
+                color=color,
+                linewidth=1.5,
+                label="eval",
+            )
+        ax.axhline(
+            pretrained_score,
+            ls="--",
+            color="black",
+            alpha=0.6,
+            label="pretrained",
+        )
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("ID Win Rate")
+        ax.set_title("Eval Win Rate vs Iteration")
+        ax.legend()
+
+        ax = axes[0, 1]
+        if history.iters:
+            ax.plot(
+                history.iters,
+                history.loss,
+                color=color,
+                alpha=0.4,
+                linewidth=0.8,
+                label="raw",
+            )
+            ax.plot(
+                history.iters,
+                _ema(history.loss),
+                color=color,
+                linewidth=1.5,
+                label="EMA",
+            )
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Loss")
+        ax.set_title("Training Loss vs Iteration")
+        ax.legend()
+
+        ax = axes[0, 2]
+        if history.env_score_iters:
+            ax.plot(
+                history.env_score_iters,
+                _ema(history.env_score),
+                color=color,
+                linewidth=1.5,
+            )
+        ax.axhline(pretrained_score, ls="--", color="black", alpha=0.6)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Score")
+        ax.set_title("Online Env Score vs Iteration")
+
+        ax = axes[1, 0]
+        if history.repr_drift_iters:
+            ax.plot(
+                history.repr_drift_iters,
+                history.repr_drift_kl,
+                color=color,
+                linewidth=1.5,
+                label="mean",
+            )
+            if history.repr_drift_kl_low_t:
+                ax.plot(
+                    history.repr_drift_iters,
+                    history.repr_drift_kl_low_t,
+                    color=color,
+                    alpha=0.5,
+                    linestyle=":",
+                    label="low-t",
+                )
+            if history.repr_drift_kl_high_t:
+                ax.plot(
+                    history.repr_drift_iters,
+                    history.repr_drift_kl_high_t,
+                    color=color,
+                    alpha=0.5,
+                    linestyle="-.",
+                    label="high-t",
+                )
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("KL Divergence")
+        ax.set_title("KL Drift from Pretrained")
+        ax.legend()
+
+        ax = axes[1, 1]
+        if history.grad_align_iters:
+            ax.plot(
+                history.grad_align_iters,
+                history.grad_align,
+                color=color,
+                linewidth=1.5,
+            )
+            ax.axhline(0, ls="--", color="black", alpha=0.4)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Cosine Similarity")
+        ax.set_title("Gradient Alignment (cos sim vs BC)")
+        ax.set_ylim(-1.1, 1.1)
+
+        ax = axes[1, 2]
+        if history.grad_align_iters:
+            ax.plot(
+                history.grad_align_iters,
+                history.rl_grad_norm,
+                color=color,
+                linewidth=1.5,
+                label="RL grad",
+            )
+            ax.plot(
+                history.grad_align_iters,
+                history.bc_grad_norm,
+                color=color,
+                linestyle="--",
+                linewidth=1.2,
+                label="BC grad",
+            )
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("L2 Norm")
+        ax.set_title("Gradient Norms")
+        ax.legend()
+
+        fig.tight_layout()
+        _save(fig, out_dir / f"curves_{name}.png")
+
+
+def plot_per_layer_gradient_heatmap(
     name: str,
     history: AblationHistory,
     out_dir: Path,
 ) -> None:
-    """Training loss and win-rate curve for a single ablation.
+    """Heatmap of per-layer gradient norms over training iterations.
 
     Args:
         name: Ablation name.
         history: Training history.
         out_dir: Output directory.
     """
+    if not history.per_layer_norms:
+        return
+
+    all_keys = sorted({k for d in history.per_layer_norms for k in d})
+    if not all_keys:
+        return
+
+    matrix = np.array(
+        [[d.get(k, 0.0) for k in all_keys] for d in history.per_layer_norms]
+    ).T
+    iters = history.per_layer_iters or list(range(len(history.per_layer_norms)))
+
     with plt.rc_context(_STYLE):
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-        fig.suptitle(f"{name}: Training Curve", fontsize=14)
-
-        ax1.plot(history.iters, _ema(history.loss), color=_group_color(name))
-        ax1.set_xlabel("Iteration")
-        ax1.set_ylabel("Loss")
-        ax1.set_title("Training Loss (EMA)")
-
-        if history.eval_iters:
-            ax2.plot(
-                history.eval_iters,
-                history.eval_score,
-                "o-",
-                color=_group_color(name),
-            )
-        ax2.set_xlabel("Iteration")
-        ax2.set_ylabel("ID Win Rate")
-        ax2.set_title("Evaluation Win Rate")
-
+        fig_h = max(4.0, min(18.0, len(all_keys) * 0.22))
+        fig, ax = plt.subplots(figsize=(12, fig_h))
+        im = ax.imshow(matrix, aspect="auto", cmap="viridis", interpolation="nearest")
+        ax.set_xticks(range(len(iters)))
+        ax.set_xticklabels([str(i) for i in iters], rotation=45, ha="right", fontsize=7)
+        ax.set_yticks(range(len(all_keys)))
+        ax.set_yticklabels(all_keys, fontsize=5)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Layer")
+        ax.set_title(f"Per-Layer Gradient Norms: {name}")
+        fig.colorbar(im, ax=ax, label="L2 Norm")
         fig.tight_layout()
-        _save(fig, out_dir / f"train_{name}.png")
+        _save(fig, out_dir / f"per_layer_grad_heatmap_{name}.png")
 
 
-def plot_score_comparison(
+def plot_t_bin_grad_norms(
+    name: str,
+    history: AblationHistory,
+    out_dir: Path,
+) -> None:
+    """Per-t-bin gradient norms over training for a single ablation.
+
+    Args:
+        name: Ablation name.
+        history: Training history.
+        out_dir: Output directory.
+    """
+    if not history.t_bin_norms:
+        return
+
+    bins = sorted({k for d in history.t_bin_norms for k in d})
+    iters = history.t_analysis_iters or list(range(len(history.t_bin_norms)))
+    cmap = matplotlib.colormaps["plasma"].resampled(max(len(bins), 1))
+
+    with plt.rc_context(_STYLE):
+        fig, ax = plt.subplots(figsize=(12, 5))
+        for j, bin_key in enumerate(bins):
+            vals = [d.get(bin_key, 0.0) for d in history.t_bin_norms]
+            ax.plot(iters, vals, color=cmap(j), linewidth=1.2, alpha=0.8, label=bin_key)
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("L2 Norm")
+        ax.set_title(f"Per-t-Bin Gradient Norms: {name}")
+        ax.legend(loc="upper right", ncol=3, fontsize=7)
+        fig.tight_layout()
+        _save(fig, out_dir / f"t_bin_grad_norms_{name}.png")
+
+
+def plot_per_env_collapse_heatmap(
+    name: str,
+    history: AblationHistory,
+    out_dir: Path,
+) -> None:
+    """Heatmap: rows=environments, cols=eval iterations, colour=win rate.
+
+    One figure per ablation, showing which environments are lost first
+    during collapse.
+
+    Args:
+        name: Ablation name.
+        history: Training history.
+        out_dir: Output directory.
+    """
+    if not history.per_env_win_rates:
+        return
+
+    env_names = sorted({k for d in history.per_env_win_rates for k in d})
+    if not env_names:
+        return
+
+    short_envs = [e.replace("MiniHack-", "").replace("-v0", "") for e in env_names]
+    n_evals = len(history.per_env_win_rates)
+    matrix = np.array(
+        [[d.get(e, 0.0) for d in history.per_env_win_rates] for e in env_names],
+        dtype=np.float32,
+    )
+    iters = history.eval_iters or list(range(n_evals))
+
+    with plt.rc_context(_STYLE):
+        fig_h = max(3.0, len(env_names) * 0.45 + 1.5)
+        fig, ax = plt.subplots(figsize=(max(10.0, n_evals * 0.5), fig_h))
+        im = ax.imshow(
+            matrix,
+            aspect="auto",
+            interpolation="nearest",
+            vmin=0.0,
+            vmax=1.0,
+            cmap="YlOrRd_r",
+        )
+        ax.set_yticks(range(len(env_names)))
+        ax.set_yticklabels(short_envs, fontsize=8)
+        step = max(1, n_evals // 10)
+        ax.set_xticks(range(0, n_evals, step))
+        ax.set_xticklabels(
+            [str(iters[i]) for i in range(0, n_evals, step)],
+            rotation=45,
+            ha="right",
+            fontsize=7,
+        )
+        ax.set_xlabel("Eval Iteration")
+        ax.set_ylabel("Environment")
+        ax.set_title(f"Per-Environment Collapse Heatmap: {name}")
+        cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+        cbar.set_label("Win Rate", fontsize=8)
+        fig.tight_layout()
+        _save(fig, out_dir / f"per_env_collapse_{name}.png")
+
+
+def plot_final_score_comparison(
     results: dict[str, dict],
     pretrained_score: float,
     out_dir: Path,
@@ -202,10 +449,60 @@ def plot_score_comparison(
         ax.set_title("Final Score Comparison")
         ax.legend()
         fig.tight_layout()
-        _save(fig, out_dir / "score_comparison.png")
+        _save(fig, out_dir / "final_score_comparison.png")
 
 
-def plot_grad_alignment(
+def plot_eval_scores_over_training(
+    results: dict[str, dict],
+    pretrained_score: float,
+    out_dir: Path,
+) -> None:
+    """All ablation eval scores overlaid on the same axes.
+
+    Args:
+        results: Full results dict.
+        pretrained_score: Pretrained baseline score (dashed horizontal).
+        out_dir: Output directory.
+    """
+    with plt.rc_context(_STYLE):
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.axhline(
+            pretrained_score,
+            ls="--",
+            color="black",
+            linewidth=1.5,
+            label="Pretrained",
+        )
+        for name, res in sorted(results.items()):
+            h: AblationHistory = res["history"]
+            if not h.eval_iters:
+                continue
+            c, ls, mk = _ablation_style(name)
+            ax.plot(
+                h.eval_iters,
+                h.eval_score,
+                label=name,
+                color=c,
+                linestyle=ls,
+                marker=mk,
+                markersize=3,
+                alpha=0.8,
+                linewidth=1.2,
+            )
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("ID Win Rate")
+        ax.set_title("Eval Win Rate vs Iteration (all ablations)")
+        ax.legend(
+            ncol=3,
+            fontsize=7,
+            loc="upper left",
+            bbox_to_anchor=(0, -0.15),
+        )
+        fig.tight_layout()
+        _save(fig, out_dir / "eval_scores_over_training.png")
+
+
+def plot_gradient_alignment(
     results: dict[str, dict],
     out_dir: Path,
 ) -> None:
@@ -240,10 +537,10 @@ def plot_grad_alignment(
             bbox_to_anchor=(0, -0.15),
         )
         fig.tight_layout()
-        _save(fig, out_dir / "grad_alignment.png")
+        _save(fig, out_dir / "gradient_alignment.png")
 
 
-def plot_repr_drift(
+def plot_representation_drift(
     results: dict[str, dict],
     out_dir: Path,
 ) -> None:
@@ -289,10 +586,10 @@ def plot_repr_drift(
         )
         fig.suptitle("Representation Drift", fontsize=14)
         fig.tight_layout()
-        _save(fig, out_dir / "repr_drift.png")
+        _save(fig, out_dir / "representation_drift.png")
 
 
-def plot_cka(
+def plot_cka_similarity(
     results: dict[str, dict],
     out_dir: Path,
 ) -> None:
@@ -331,7 +628,7 @@ def plot_cka(
         _save(fig, out_dir / "cka_similarity.png")
 
 
-def plot_t_bin_norms(
+def plot_t_bin_norms_heatmap(
     results: dict[str, dict],
     out_dir: Path,
 ) -> None:
@@ -373,31 +670,37 @@ def plot_t_bin_norms(
         ax.set_title("Gradient Norms by t-bin (final iteration)")
         fig.colorbar(im, ax=ax, label="L2 Norm")
         fig.tight_layout()
-        _save(fig, out_dir / "t_bin_norms.png")
+        _save(fig, out_dir / "t_bin_norms_heatmap.png")
 
 
-def plot_t_ratio(
+def plot_t_analysis(
     results: dict[str, dict],
     out_dir: Path,
 ) -> None:
-    """High-t / low-t gradient norm ratio over training.
+    """High-t / low-t gradient norm ratio and low-high cosine alignment.
 
-    Ratio >> 1 indicates high-t gradients dominate (t-bias hypothesis).
+    Left panel: ratio >> 1 indicates high-t gradients dominate (t-bias
+    hypothesis). Right panel: cosine similarity between the low-t and
+    high-t gradient directions; negative values indicate the two regimes
+    pull against each other.
 
     Args:
         results: Full results dict.
         out_dir: Output directory.
     """
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(12, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         for name, res in sorted(results.items()):
             h: AblationHistory = res["history"]
-            if h.t_analysis_iters and h.norm_low_t and h.norm_high_t:
+            if not h.t_analysis_iters:
+                continue
+            c, ls, mk = _ablation_style(name)
+            if h.norm_low_t and h.norm_high_t:
                 ratios = [
-                    hi / (lo + 1e-10) for hi, lo in zip(h.norm_high_t, h.norm_low_t, strict=False)
+                    hi / (lo + 1e-10)
+                    for hi, lo in zip(h.norm_high_t, h.norm_low_t, strict=False)
                 ]
-                c, ls, mk = _ablation_style(name)
-                ax.plot(
+                axes[0].plot(
                     h.t_analysis_iters,
                     _ema(ratios),
                     label=name,
@@ -408,37 +711,61 @@ def plot_t_ratio(
                     markersize=4,
                     linewidth=1.5,
                 )
-        ax.axhline(1.0, ls="--", color="black", alpha=0.5, label="Equal")
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Ratio (>1 = high-t dominates)")
-        ax.set_title("High-t / Low-t Gradient Norm Ratio")
-        ax.legend(
+            if h.lowhigh_cos:
+                axes[1].plot(
+                    h.t_analysis_iters,
+                    h.lowhigh_cos,
+                    label=name,
+                    color=c,
+                    linestyle=ls,
+                    alpha=0.8,
+                    linewidth=1.2,
+                )
+
+        axes[0].axhline(1.0, ls="--", color="black", alpha=0.5, label="Equal")
+        axes[0].set_xlabel("Iteration")
+        axes[0].set_ylabel("Ratio (>1 = high-t dominates)")
+        axes[0].set_title("High-t / Low-t Gradient Norm Ratio")
+
+        axes[1].axhline(0.0, ls="--", color="black", alpha=0.4)
+        axes[1].set_xlabel("Iteration")
+        axes[1].set_ylabel("Cosine Similarity")
+        axes[1].set_title("Low-t / High-t Gradient Cosine Similarity")
+        axes[1].set_ylim(-1.1, 1.1)
+
+        axes[0].legend(
             ncol=3,
             fontsize=7,
             loc="upper left",
             bbox_to_anchor=(0, -0.15),
         )
         fig.tight_layout()
-        _save(fig, out_dir / "t_ratio.png")
+        _save(fig, out_dir / "t_distribution_analysis.png")
 
 
-def plot_win_rate(
+def plot_return_distributions(
     results: dict[str, dict],
     out_dir: Path,
 ) -> None:
-    """Win rate over training for all ablations.
+    """Online win rate and effective batch size over training.
+
+    Effective batch size is the number of trajectories with non-degenerate
+    advantages; a collapse towards zero means most of the batch contributes
+    no learning signal.
 
     Args:
         results: Full results dict.
         out_dir: Output directory.
     """
     with plt.rc_context(_STYLE):
-        fig, ax = plt.subplots(figsize=(12, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         for name, res in sorted(results.items()):
             h: AblationHistory = res["history"]
-            if h.iters and h.win_rate:
-                c, ls, _ = _ablation_style(name)
-                ax.plot(
+            if not h.iters:
+                continue
+            c, ls, _ = _ablation_style(name)
+            if h.win_rate:
+                axes[0].plot(
                     h.iters,
                     _ema(h.win_rate),
                     label=name,
@@ -447,17 +774,33 @@ def plot_win_rate(
                     alpha=0.8,
                     linewidth=1.5,
                 )
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Win Rate")
-        ax.set_title("Online Win Rate (EMA)")
-        ax.legend(
+            if h.effective_batch_size:
+                axes[1].plot(
+                    h.iters,
+                    _ema(h.effective_batch_size),
+                    label=name,
+                    color=c,
+                    linestyle=ls,
+                    alpha=0.8,
+                    linewidth=1.5,
+                )
+
+        axes[0].set_xlabel("Iteration")
+        axes[0].set_ylabel("Win Rate")
+        axes[0].set_title("Online Win Rate (EMA)")
+
+        axes[1].set_xlabel("Iteration")
+        axes[1].set_ylabel("Effective Batch Size")
+        axes[1].set_title("Effective Batch Size (EMA)")
+
+        axes[0].legend(
             ncol=3,
             fontsize=7,
             loc="upper left",
             bbox_to_anchor=(0, -0.15),
         )
         fig.tight_layout()
-        _save(fig, out_dir / "win_rate.png")
+        _save(fig, out_dir / "win_rate_and_effective_batch_size.png")
 
 
 def plot_group_comparison(
@@ -587,7 +930,7 @@ def plot_score_delta(
         ax.set_xlabel("Delta vs Baseline RL")
         ax.set_title("Score Improvement Over Baseline RL (sorted)")
         fig.tight_layout()
-        _save(fig, out_dir / "score_delta.png")
+        _save(fig, out_dir / "score_delta_over_baseline_rl.png")
 
 
 def plot_per_env_delta(
@@ -654,33 +997,48 @@ def plot_per_env_delta(
 def generate_all_plots(
     results: dict[str, dict],
     pretrained_score: float,
-    out_dir: Path,
+    output_dir: Path,
 ) -> None:
-    """Generate all analysis plots.
+    """Generate all analysis figures and save to ``output_dir/figures/``.
 
     Args:
         results: ``{name: {"score": float, "history": AblationHistory}}``.
         pretrained_score: Pretrained model eval score.
-        out_dir: Output directory for PNGs.
+        output_dir: Root output directory; figures go in ``output_dir/figures/``.
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Generating plots in %s", out_dir)
+    fig_dir = output_dir / "figures"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Generating plots in %s", fig_dir)
 
-    # Per-ablation training curves
+    logger.info("Generating per-ablation training curves...")
     for name, res in results.items():
-        plot_training_curve(name, res["history"], out_dir)
+        plot_ablation_curves(name, res["history"], pretrained_score, fig_dir)
+        plot_per_layer_gradient_heatmap(name, res["history"], fig_dir)
+        plot_t_bin_grad_norms(name, res["history"], fig_dir)
+        plot_per_env_collapse_heatmap(name, res["history"], fig_dir)
 
-    # Cross-ablation comparisons
-    plot_score_comparison(results, pretrained_score, out_dir)
-    plot_grad_alignment(results, out_dir)
-    plot_repr_drift(results, out_dir)
-    plot_cka(results, out_dir)
-    plot_t_bin_norms(results, out_dir)
-    plot_t_ratio(results, out_dir)
-    plot_win_rate(results, out_dir)
-    plot_group_comparison(results, pretrained_score, out_dir)
-    plot_gradient_conflict_map(results, out_dir)
-    plot_score_delta(results, out_dir)
-    plot_per_env_delta(results, out_dir)
+    logger.info("Generating aggregate comparison plots...")
+    plot_final_score_comparison(results, pretrained_score, fig_dir)
+    plot_eval_scores_over_training(results, pretrained_score, fig_dir)
+    plot_score_delta(results, fig_dir)
 
-    logger.info("All plots generated.")
+    logger.info("Generating gradient analysis plots...")
+    plot_gradient_alignment(results, fig_dir)
+    plot_gradient_conflict_map(results, fig_dir)
+
+    logger.info("Generating representation drift plots...")
+    plot_representation_drift(results, fig_dir)
+    plot_cka_similarity(results, fig_dir)
+
+    logger.info("Generating timestep analysis plots...")
+    plot_t_analysis(results, fig_dir)
+    plot_t_bin_norms_heatmap(results, fig_dir)
+
+    logger.info("Generating return / advantage plots...")
+    plot_return_distributions(results, fig_dir)
+
+    logger.info("Generating group comparison plots...")
+    plot_group_comparison(results, pretrained_score, fig_dir)
+    plot_per_env_delta(results, fig_dir)
+
+    logger.info("All plots saved to %s", fig_dir)

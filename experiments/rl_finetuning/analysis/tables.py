@@ -214,29 +214,88 @@ def make_group_summary_table(
     return pl.DataFrame(rows)
 
 
-def make_gradient_diagnostics_table(
+def make_gradient_analysis_table(
     results: dict[str, dict],
 ) -> pl.DataFrame:
-    """Gradient diagnostics at final recorded iteration.
+    """Gradient alignment and representation drift analysis.
+
+    Reports both the mean over training and the final recorded value, so a
+    method that starts aligned and degrades is distinguishable from one that
+    is misaligned throughout.
 
     Args:
         results: Ablation results dict.
 
     Returns:
-        DataFrame with cos_sim, rl_norm, bc_norm per ablation.
+        DataFrame sorted by final gradient alignment, descending.
     """
     rows: list[dict] = []
     for name, res in sorted(results.items()):
         h: AblationHistory = res["history"]
-        if h.grad_align and h.rl_grad_norm and h.bc_grad_norm:
-            rows.append(
-                {
-                    "Method": name,
-                    "Cos_Sim": round(h.grad_align[-1], 4),
-                    "RL_Norm": round(h.rl_grad_norm[-1], 4),
-                    "BC_Norm": round(h.bc_grad_norm[-1], 4),
-                }
-            )
+        if not (h.grad_align and h.rl_grad_norm and h.bc_grad_norm):
+            continue
+
+        aligns = h.grad_align
+        drifts = h.repr_drift_kl
+        trend = (
+            "down"
+            if (len(aligns) > 1 and aligns[-1] < aligns[0])
+            else "up"
+            if (len(aligns) > 1 and aligns[-1] > aligns[0])
+            else "flat"
+        )
+        rows.append(
+            {
+                "Method": name,
+                "Mean_Grad_Align": round(float(np.mean(aligns)), 4),
+                "Final_Grad_Align": round(aligns[-1], 4),
+                "Trend": trend,
+                "RL_Norm": round(h.rl_grad_norm[-1], 4),
+                "BC_Norm": round(h.bc_grad_norm[-1], 4),
+                "Mean_KL_Drift": round(float(np.mean(drifts)), 6)
+                if drifts
+                else float("nan"),
+                "Final_KL_Drift": round(drifts[-1], 6) if drifts else float("nan"),
+            }
+        )
+
+    rows.sort(key=lambda r: r["Final_Grad_Align"], reverse=True)
+    return pl.DataFrame(rows) if rows else pl.DataFrame()
+
+
+def make_t_distribution_table(
+    results: dict[str, dict],
+) -> pl.DataFrame:
+    """Timestep distribution analysis per ablation.
+
+    A high-t dominant regime with negative low-high alignment is the
+    signature of the t-bias hypothesis.
+
+    Args:
+        results: Ablation results dict.
+
+    Returns:
+        DataFrame with the high/low norm ratio, low-high cosine similarity
+        and the dominant regime label per ablation.
+    """
+    rows: list[dict] = []
+    for name, res in sorted(results.items()):
+        h: AblationHistory = res["history"]
+        if not h.norm_high_t:
+            continue
+
+        ratio = float(np.mean(h.norm_high_t)) / (float(np.mean(h.norm_low_t)) + 1e-10)
+        dominant = "high-t" if ratio > 1.5 else "low-t" if ratio < 0.67 else "balanced"
+        rows.append(
+            {
+                "Method": name,
+                "HighLow_Ratio": round(ratio, 3),
+                "LowHigh_Cos_Sim": round(float(np.mean(h.lowhigh_cos)), 4)
+                if h.lowhigh_cos
+                else float("nan"),
+                "Dominant_Regime": dominant,
+            }
+        )
 
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
@@ -411,78 +470,100 @@ def make_hypothesis_verdict_table(
 def generate_summary_tables(
     results: dict[str, dict],
     pretrained_score: float,
-    out_dir: Path,
-) -> None:
-    """Generate all summary tables.
+    output_dir: Path,
+) -> dict[str, pl.DataFrame]:
+    """Generate all summary tables and save to ``output_dir/tables/``.
 
     Args:
         results: Full ablation results dict.
         pretrained_score: Pretrained model eval score.
-        out_dir: Output directory.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Generating tables in %s", out_dir)
+        output_dir: Root output directory; tables go in ``output_dir/tables/``.
 
-    main_df = make_main_results_table(results, pretrained_score)
+    Returns:
+        Dict mapping table name to polars DataFrame.
+    """
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Generating tables in %s", tables_dir)
+
+    tables: dict[str, pl.DataFrame] = {}
+
+    tables["main_results"] = make_main_results_table(results, pretrained_score)
     _save_table(
-        main_df,
-        out_dir / "main_results",
+        tables["main_results"],
+        tables_dir / "main_results",
         caption="Main ablation results",
         label="tab:main-results",
     )
+    write_significance_test(results, tables_dir)  # C-002 (F-035)
 
-    group_df = make_group_summary_table(results, pretrained_score)
+    tables["group_summary"] = make_group_summary_table(results, pretrained_score)
     _save_table(
-        group_df,
-        out_dir / "group_summary",
+        tables["group_summary"],
+        tables_dir / "group_summary",
         caption="Group-level summary",
         label="tab:group-summary",
     )
 
-    grad_df = make_gradient_diagnostics_table(results)
+    grad_df = make_gradient_analysis_table(results)
     if grad_df.shape[0] > 0:
+        tables["gradient_analysis"] = grad_df
         _save_table(
             grad_df,
-            out_dir / "gradient_diagnostics",
-            caption="Gradient diagnostics",
-            label="tab:grad-diag",
+            tables_dir / "gradient_analysis",
+            caption="Gradient alignment and representation drift analysis",
+            label="tab:gradient",
+        )
+
+    t_df = make_t_distribution_table(results)
+    if t_df.shape[0] > 0:
+        tables["t_distribution"] = t_df
+        _save_table(
+            t_df,
+            tables_dir / "t_distribution",
+            caption="Timestep distribution analysis",
+            label="tab:t-dist",
         )
 
     repr_df = make_repr_drift_table(results)
     if repr_df.shape[0] > 0:
+        tables["repr_drift"] = repr_df
         _save_table(
             repr_df,
-            out_dir / "repr_drift",
+            tables_dir / "repr_drift",
             caption="Representation drift (KL)",
             label="tab:repr-drift",
         )
 
     env_df = make_per_env_table(results)
     if env_df.shape[0] > 0:
+        tables["per_env"] = env_df
         _save_table(
             env_df,
-            out_dir / "per_env_win_rates",
+            tables_dir / "per_env",
             caption="Per-environment win rates",
             label="tab:per-env",
         )
-    write_significance_test(results, out_dir)  # C-002 (F-035)
 
     forg_df = make_forgetting_analysis_table(results, pretrained_score)
     if forg_df.shape[0] > 0:
+        tables["forgetting_analysis"] = forg_df
         _save_table(
             forg_df,
-            out_dir / "forgetting_analysis",
+            tables_dir / "forgetting_analysis",
             caption="Forgetting analysis",
             label="tab:forgetting",
         )
 
     hyp_df = make_hypothesis_verdict_table(results, pretrained_score)
     if hyp_df.shape[0] > 0:
+        tables["hypothesis_verdict"] = hyp_df
         _save_table(
             hyp_df,
-            out_dir / "hypothesis_verdicts",
+            tables_dir / "hypothesis_verdict",
             caption="Hypothesis verdicts",
             label="tab:hyp-verdicts",
         )
 
-    logger.info("All tables generated.")
+    logger.info("All tables saved to %s", tables_dir)
+    return tables
