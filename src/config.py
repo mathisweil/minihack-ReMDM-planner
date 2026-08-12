@@ -44,6 +44,11 @@ def _deep_merge(base: dict, override: dict) -> dict:
 # auto-selected at load time and serialised into checkpoint config snapshots.
 _RUN_KEYS = {"device"}
 
+# Config-file-only key naming a base config to inherit from. Resolved and
+# stripped before merging, so it never reaches the namespace. Not valid as a
+# --override.
+_EXTENDS_KEY = "extends"
+
 # Keys used by earlier code versions that survive in released checkpoint
 # config snapshots (e.g. config_iter600.yaml on the HF Hub). Accepted so the
 # documented snapshot-evaluation workflow keeps working; nothing reads them.
@@ -60,6 +65,55 @@ _LEGACY_SNAPSHOT_KEYS = {
     # snapshots from earlier runs still carry the flag. Accepted, unread.
     "use_importance_weighting",
 }
+
+
+def _load_config_chain(path: Path) -> list[tuple[Path, dict]]:
+    """Load a config and its ``extends`` ancestors, base first.
+
+    ``extends`` names a base config, resolved relative to the file that
+    declares it (absolute paths are also accepted). Later entries in the
+    returned list override earlier ones.
+
+    Args:
+        path: Absolute path to the config file passed via ``--config``.
+
+    Returns:
+        ``[(path, raw_dict), ...]`` ordered base first, child last.
+
+    Raises:
+        ValueError: If the chain contains a cycle.
+        FileNotFoundError: If a referenced base config does not exist.
+    """
+    chain: list[tuple[Path, dict]] = []
+    seen: set[Path] = set()
+    current: Path | None = path.resolve()
+
+    while current is not None:
+        if current in seen:
+            visited = " -> ".join(p.name for p, _ in chain)
+            raise ValueError(
+                f"Circular 'extends' chain in configs: {visited} -> {current.name}"
+            )
+        seen.add(current)
+        with open(current) as fh:
+            raw = yaml.safe_load(fh) or {}
+        chain.append((current, raw))
+
+        base = raw.get(_EXTENDS_KEY)
+        if not base:
+            break
+        base_path = Path(base).expanduser()
+        if not base_path.is_absolute():
+            base_path = current.parent / base_path
+        base_path = base_path.resolve()
+        if not base_path.exists():
+            raise FileNotFoundError(
+                f"Base config '{base_path}' referenced by '{current}' does not exist"
+            )
+        current = base_path
+
+    chain.reverse()
+    return chain
 
 
 def _validate_keys(keys, allowed: set[str], source: str) -> None:
@@ -146,7 +200,8 @@ def load_config(
     """Load configuration from YAML with optional overrides.
 
     1. Load ``configs/defaults.yaml``.
-    2. Deep-merge *config_path* on top (if provided and different from defaults).
+    2. Deep-merge *config_path* on top, base first if it declares ``extends``
+       (skipped if it is the defaults file itself).
     3. Apply *cli_overrides* key=value pairs.
     4. Auto-select device (``cuda`` if available, else ``cpu``; honour
        ``DEVICE`` env-var).
@@ -178,10 +233,16 @@ def load_config(
         if not config_path_resolved.is_absolute():
             config_path_resolved = _PROJECT_ROOT / config_path_resolved
         if config_path_resolved.resolve() != defaults_path.resolve():
-            with open(config_path_resolved) as fh:
-                overrides = yaml.safe_load(fh) or {}
-            _validate_keys(overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path))
-            _deep_merge(cfg, overrides)
+            for source, overrides in _load_config_chain(config_path_resolved):
+                _validate_keys(
+                    overrides,
+                    allowed | _LEGACY_SNAPSHOT_KEYS | {_EXTENDS_KEY},
+                    str(source),
+                )
+                _deep_merge(
+                    cfg,
+                    {k: v for k, v in overrides.items() if k != _EXTENDS_KEY},
+                )
 
     _validate_keys(cli_overrides, allowed, "--override")
     for key, value in cli_overrides.items():

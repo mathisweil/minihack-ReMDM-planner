@@ -1,7 +1,14 @@
 # =============================================================================
 # MiniHack ReMDM RL Fine-Tuning Ablation Suite -- Fast Configuration
-# Override keys for quick CI / smoke testing.  Inherits all other values
-# from ablations_default.yaml.
+#
+# Override keys for quick CI / smoke testing.  This file is an OVERLAY, not a
+# link in the extends chain: when --fast is passed it is applied raw on top of
+# whatever ablations config is in use, so it never drags default values back
+# over a machine config (a QMUL run with --fast keeps use_amp, B=512 and
+# diffusion_steps_collect=3, and only picks up the keys listed below).
+#
+# Passing this file to --ablations-config directly still works; it then
+# inherits ablations_default.yaml implicitly like any other config.
 # =============================================================================
 
 # -- Training loop ------------------------------------------------------------

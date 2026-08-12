@@ -4,85 +4,32 @@
 # Optimised for 5x NVIDIA RTX 3090 Ti (24GB VRAM each).
 # Checkpoint trained with configs/qmul_gpu.yaml on QMUL H200 8GB.
 #
+# Inherits everything from ablations_default.yaml; only the keys that differ
+# on this machine live below.  In particular the default cadences are already
+# what we want here (eval/diagnostics every 25 iters, CKA every 50,
+# episodes_per_iter 30, diffusion_steps_collect 5), so they are not repeated.
+#
 # Changes vs ablations_default.yaml:
 #   - AMP enabled (FP16 forward/backward) -- ~2x speedup on 3090 Ti
-#   - Full default batch_size (3072) -- 3090 Ti 24GB handles this easily
-#   - Default episodes_per_iter (30) -- more data per iter than QMUL's 20
-#   - Default diffusion_steps_collect (5) -- better collection quality
-#   - Default diagnostic frequencies (25 iters) -- denser curves than QMUL
-#   - CKA every 50 iters (most expensive diagnostic, keep less frequent)
+#   - Larger batch (4608 vs 3072) -- 3090 Ti 24GB handles this easily
+#   - Full-size CKA batch (128 vs 64) -- memory is not a constraint
+#   - Three seeds per ablation (vs 1)
 # =============================================================================
 
+extends: ablations_default.yaml
+
 # -- Training loop ------------------------------------------------------------
-max_iter: 500
+# See PERF-X7 in run_ablations.py: at this batch size the suite reaches ~94% of
+# VRAM on a 16GB card, hence the expandable_segments allocator setting.  On
+# 24GB it is comfortable.
 batch_size: 4608
-lr: 3.0e-4
-weight_decay: 1.0e-4
-max_grad_norm: 1.0
-grad_steps_per_iter: 1
-episodes_per_iter: 30
-diffusion_steps_collect: 5
 
 # -- GPU performance ----------------------------------------------------------
 use_amp: true
-# Skip torch.compile -- compilation overhead not worth it for 500 iters.
-# Measured on the 4070 Ti SUPER (baseline_rl, 12 iters, batch 4608): the
-# compiled gradient step runs at 273 ms against 385 ms eager (-29%), but
-# the batch is data-limited so its size changes iteration to iteration
-# and Inductor recompiles -- 22.3 s on iteration 1 and a further 15.2 s
-# on iteration 2. Over 500 iterations that is ~56 s saved against ~38 s
-# paid, per ablation and per seed, so ~2% of a ~15 min run. The comment
-# above is confirmed on time. Compilation does cut peak VRAM from 15,087
-# to 14,219 MiB, which is the reason to reach for it on a card where the
-# suite does not otherwise fit.
-torch_compile: false
-
-# -- Evaluation ---------------------------------------------------------------
-eval_every: 25
-eval_episodes: 20
 
 # -- Diagnostic frequencies ---------------------------------------------------
-grad_align_every: 25
-repr_drift_every: 25
-t_analysis_every: 25
-cka_every: 50
-per_layer_every: 25
-t_analysis_n_bins: 10
+# Full-size CKA batch; the 24GB card absorbs the activation cache.
 cka_batch_size: 128
-
-# -- Return / advantage weighting --------------------------------------------
-win_threshold: 0.5
-return_weight_floor: 0.1
-return_weight_cap: 5.0
-
-# -- Group A: Regularisation / Constraint Methods -----------------------------
-ewc_lambda: 100.0
-ewc_fisher_batches: 20
-llrd_decay: 0.9
-lora_rank: 8
-lora_alpha: 16.0
-mixed_replay_ratio: 0.25
-mixed_replay_buffer_size: 10000
-trust_region_kl: 0.05
-kl_coef: 0.1
-
-# -- Group B: Training Signal Modifications ----------------------------------
-t_curriculum_start: 0.8
-t_curriculum_end: 0.2
-t_curriculum_steps: 200
-t_max_low: 0.2
-entropy_coef: 0.01
-adv_clip_eps: 0.2
-
-# -- Group D: Reward / Data Quality ------------------------------------------
-reward_filter_percentile: 75
-running_stats_ema_decay: 0.99
-reward_model_width: 64
-reward_model_depth: 2
-reward_model_lr: 1.0e-3
-reward_model_train_steps: 50
-
-# -- Output / Logging --------------------------------------------------------
 
 # -- Multi-seed ---------------------------------------------------------------
 num_seeds: 3  # C-001 (D7/F-048): three literal seeds (base 0 -> 0, 1, 2), matching the published 3-run tables

@@ -1,173 +1,56 @@
 # =============================================================================
-# UCL 3090 Ti GPU — final paper run config
+# UCL 3090 Ti GPU -- final paper run config
 # =============================================================================
+#
+# Inherits from `final_qmul_gpu.yaml`, which itself deep-merges onto
+# configs/defaults.yaml. Only the genuine UCL deltas live here.
 #
 # This single config drives BOTH the final DAgger run and the
 # compute-matched offline BC baseline used for the paper comparison.
 #
-#   --mode online    → reproduces the iter600 DAgger checkpoint recipe
-#   --mode offline   → trains a fair offline BC baseline against it
+#   --mode online    -> reproduces the iter600 DAgger checkpoint recipe
+#   --mode offline   -> trains a fair offline BC baseline against it
 #
-# All training hyperparameters are IDENTICAL to `final_qmul_gpu.yaml`
-# so cross-cluster runs produce directly comparable results. The only
-# differences are hardware-specific perf knobs (collection workers).
-# See the QMUL config header for the full fairness analysis.
+# Every training hyperparameter is inherited from the QMUL config rather
+# than restated, so cross-cluster runs are directly comparable by
+# construction instead of by convention. The only genuine differences are
+# the hardware perf knobs and output paths below. See the QMUL config
+# header for the full fairness analysis.
 #
-# ── Hardware ─────────────────────────────────────────────────────────
+# Historical note: `offline_batch_size` is now the inherited 2048, matched
+# to DAgger for identical per-update SNR. An earlier UCL config used 4096;
+# the 24 GB card can hold it, but using it would confound the comparison.
+extends: final_qmul_gpu.yaml
+
+# -- Hardware ---------------------------------------------------------
 #
-# UCL 3090 Ti — 24 GB VRAM. The 4-layer × 256-dim model with
-# batch=2048 and AMP fits with comfortable headroom (~6-8 GB peak).
-# Measured on the target box (RTX 3090 Ti, driver 590.44.01, torch
-# 2.13.0+cu126): 6,678 MB peak allocated and 7,065 MB peak reserved
-# over 200 gradient steps, so the estimate above is right. A checkpoint
-# eval at `eval_episodes_per_env: 50` peaks at 123 MB allocated — it
+# UCL 3090 Ti -- 24 GB VRAM. The 4-layer x 256-dim model with batch=2048
+# and AMP fits with comfortable headroom (~6-8 GB peak). Measured on the
+# target box (RTX 3090 Ti, driver 590.44.01, torch 2.13.0+cu126):
+# 6,678 MB peak allocated and 7,065 MB peak reserved over 200 gradient
+# steps, so the estimate above is right. A checkpoint eval at the
+# inherited `eval_episodes_per_env: 50` peaks at 123 MB allocated -- it
 # runs under no_grad at B<=50, so training is the high-water mark by
 # 54x, not eval. Headroom on an idle card is ~17 GB.
-#
-# `num_collection_workers` below has NO EFFECT on this box. It only
-# feeds `collect_batch_parallel`, and `online.py:147` always takes the
-# `collect_batch_gpu` branch on CUDA with `episodes_per_iteration > 1`.
-# It is left at 8 for parity with the QMUL config; the one cost of a
-# non-zero value is that `DataCollector.__init__` still builds that
-# many unused CPU copies of the model (`collect.py:258-265`).
 #
 # Set TMPDIR to local disk before running. $TMPDIR here defaults to an
 # NFS home, where MiniHack env construction costs 115.7 ms/env against
 # 17.2 ms on local xfs and `env.reset` 8.44 ms against 1.24 ms. That
 # alone moves collection from 6.6 s to 3.7 s per iteration.
 
-# ── Environments ─────────────────────────────────────────────────────
-id_envs:
-  - MiniHack-Room-Random-5x5-v0
-  - MiniHack-Room-Random-15x15-v0
-  - MiniHack-Corridor-R2-v0
-  - MiniHack-MazeWalk-9x9-v0
-ood_envs:
-  - MiniHack-Room-Dark-15x15-v0
-  - MiniHack-Corridor-R5-v0
-  - MiniHack-MazeWalk-45x19-v0
-crop_size: 9
-map_h: 21
-map_w: 79
-action_dim: 12
-mask_token: 12
-pad_token: 13
-
-# ── Model (matches checkpoint) ───────────────────────────────────────
-n_embd: 256
-n_head: 4
-n_layer: 4
-n_global_tokens: 8
-seq_len: 64
-global_gate_init: -3.0
-dropout: 0.0
-ema_decay: 0.999
-
-# ── Diffusion (MDLM) — matches checkpoint ────────────────────────────
-noise_schedule: linear
-num_diffusion_steps: 100
-loss_weight_clip: 1000.0
-label_smoothing: 0.0
-eta: 0.15
-remask_strategy: conf
-
-# ── Inference / sampling — matches checkpoint ────────────────────────
-diffusion_steps_eval: 10
-diffusion_steps_collect: 5
-temperature: 0.5
-top_p: 0.9
-replan_every: 16
-physics_aware_sampling: false
-
-# ── Shared training budget (DAgger only) ─────────────────────────────
-# 5.65M env-steps reproduces the env-step budget consumed at iter600
-# of the original DAgger run. Calibrated against a real DAgger run
-# with the same recipe (see QMUL config header for the full derivation).
-# The earlier 3M figure was based on the buggy single-episode env-step
-# accounting in `online.py:155-169` — fixed in the same commit as this
-# config bump. Used by `--mode online` only. Offline mode bypasses
-# this via `offline_total_grad_steps` below.
-total_timesteps: 5650000
-
-# Eval/checkpoint cadence in env-step units (DAgger mode).
-# Scaled with the corrected total_timesteps so the run still produces
-# ~12 ID/OOD evals and ~6 checkpoints over its full duration.
-id_eval_every_timesteps: 470000
-ood_eval_every_timesteps: 470000
-checkpoint_every_timesteps: 940000
-
-# Final-eval episode count (used by both ID/OOD eval triggers and
-# checkpoint-time evals; matches the original DAgger run).
-eval_episodes_per_env: 50
-checkpoint_eval_episodes: 50
-weight_decay: 0.0001
-aux_loss_weight: 0.5
-
-# ── DAgger (matches checkpoint_final/online/config_iter600.yaml) ─────
-dagger_lr: 0.00003
-dagger_batch_size: 2048
-dagger_grad_clip: 1.0
-buffer_capacity: 10000
-episodes_per_iteration: 30
-grad_steps_per_iteration: 100
-efficiency_multiplier: 1.5
-curriculum_queue_size: 100
-curriculum_preseed: true
-
-# ── Offline BC (compute-matched fair baseline) ───────────────────────
-# Per the fairness analysis (see QMUL config header):
-#   * Same gradient compute as DAgger (60k AdamW updates × 2048 batch)
-#   * Same model, diffusion, weight_decay, grad_clip, aux_loss
-#   * BC-tuned LR + cosine schedule (best practice from-scratch)
-#   * Eval/checkpoint counts matched to DAgger via grad-step overrides
-#
-# `offline_batch_size: 2048` is matched to DAgger (NOT the 4096 the
-# previous UCL config used) so per-update SNR is identical between
-# modes — this is the cleanest apples-to-apples optimisation
-# comparison. The 24 GB VRAM can hold a larger batch but using one
-# would confound the comparison.
-offline_lr: 0.0003
-offline_batch_size: 2048
-offline_grad_clip: 1.0
-
-# Compute pin: 60,000 AdamW updates = exactly DAgger@iter600.
-offline_total_grad_steps: 60000
-
-# Eval cadence: 5,000 grad steps → 12 evals (matches DAgger eval count).
-offline_eval_every_grad_steps: 5000
-
-# Checkpoint cadence: 10,000 grad steps → 6 checkpoints (matches DAgger).
-offline_checkpoint_every_grad_steps: 10000
-
-# Buffer cap for offline mode only — must hold the full pre-collected
-# dataset (~1M sliding windows from 20k oracle trajectories). DAgger's
-# `buffer_capacity: 10000` would silently FIFO-evict 99% of the data.
-offline_buffer_capacity: 1500000
-
-# ── Performance (cluster-tuned for 3090 Ti) ──────────────────────────
-use_amp: true
-torch_compile: true
+# -- Performance (cluster-tuned for 3090 Ti) --------------------------
+# HARDWARE-SPECIFIC: pinned back to the defaults.yaml value of 8, against
+# QMUL's inherited 32. `num_collection_workers` has NO EFFECT on this box:
+# it only feeds `collect_batch_parallel`, and `online.py:147` always takes
+# the `collect_batch_gpu` branch on CUDA with `episodes_per_iteration > 1`.
+# The one cost of a non-zero value is that `DataCollector.__init__` still
+# builds that many unused CPU copies of the model
+# (`collect.py:258-265`), so the lower number is the cheaper one here.
+# use_amp and torch_compile are inherited as true.
 num_collection_workers: 8
-
-# ── Data collection (for offline BC dataset) ─────────────────────────
-# 5000 eps × 4 ID envs = 20k oracle trajectories. Strictly more than
-# the ~7k unique trajectories DAgger had in its filtered buffer at
-# iter600 — offline always gets a richer pre-collected pool, which is
-# the standard fairness asymmetry in BC vs DAgger comparisons.
-collect_episodes_per_env: 5000
 collect_num_workers: 8
-collect_output: data/oracle_bc_ucl.pt
 
-# ── Checkpointing & Logging ──────────────────────────────────────────
-checkpoint_dir: checkpoints_ucl
-save_policy: true
-hub_run_id: null
-hub_repo_id: null
-use_wandb: true
-wandb_project: minihack-ReMDM-planner
-wandb_entity: myopic-planner
-wandb_run_name: null
-# wandb_resume_id intentionally omitted — fresh runs by default.
-# Override on the CLI (`wandb_resume_id=...`) to continue an existing run.
-offline_log_every: 50
-seed: null
+# -- Data collection (for offline BC dataset) -------------------------
+# HARDWARE-SPECIFIC path. collect_episodes_per_env stays at the
+# inherited 5000: 20k oracle trajectories over the 4 ID envs.
+collect_output: data/oracle_bc_ucl.pt

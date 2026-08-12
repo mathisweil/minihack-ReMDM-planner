@@ -35,11 +35,42 @@ rl_finetuning/
 │   ├── action_distribution.py  # Pre/post-RL action distribution analysis
 │   └── mixing_experiment.py    # Data quality degradation curve experiment
 └── configs/
-    ├── ablations_default.yaml   # Full-run hyperparameters
-    ├── ablations_fast.yaml      # Smoke-test overrides (50 iterations)
-    ├── final_ablations_qmul.yaml  # QMUL H200 overrides (AMP, B=512, eval/diag every 50)
-    └── final_ablations_ucl.yaml   # UCL 3090 Ti overrides (AMP, B=4608, default cadences)
+    ├── ablations_default.yaml   # Base: all ablation hyperparameters
+    ├── ablations_fast.yaml      # Smoke-test overlay (50 iterations)
+    ├── final_ablations_qmul.yaml  # QMUL H200 overrides only (extends base)
+    └── final_ablations_ucl.yaml   # UCL 3090 Ti overrides only (extends base)
 ```
+
+### Config inheritance
+
+Merge order, later wins:
+
+```
+configs/defaults.yaml         # architecture, env IDs, token IDs
+  -> ablations_default.yaml     # base: all ablation hyperparameters
+  -> --ablations-config FILE    # machine overrides only
+  -> ablations_fast.yaml        # --fast only, raw overlay
+  -> CLI flags                  # --max-iter --batch-size --eval-every --lr --seed
+```
+
+Machine configs carry only the keys they change:
+
+```yaml
+# final_ablations_ucl.yaml
+extends: ablations_default.yaml
+batch_size: 4608
+use_amp: true
+cka_batch_size: 128
+num_seeds: 3
+```
+
+| Rule | Behaviour |
+|---|---|
+| `extends: <path>` | Resolved relative to the declaring file; absolute paths accepted |
+| No `extends` key | Implicitly extends `ablations_default.yaml` |
+| `extends:` (empty) | No inheritance |
+| Chain depth | Any; cycles raise `ValueError` |
+| `--fast` | Applied raw after the chain, so machine keys (`use_amp`, `batch_size`, `diffusion_steps_collect`) survive |
 
 ### Usage
 
@@ -70,6 +101,15 @@ python experiments/rl_finetuning/run_ablations.py \
     --checkpoint path/to/dagger_checkpoint.pth \
     --all \
     --num-seeds 3 \
+    --use-wandb
+```
+
+**Full suite on a specific machine:**
+```bash
+python experiments/rl_finetuning/run_ablations.py \
+    --checkpoint path/to/dagger_checkpoint.pth \
+    --ablations-config experiments/rl_finetuning/configs/final_ablations_ucl.yaml \
+    --all \
     --use-wandb
 ```
 
@@ -225,7 +265,7 @@ with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--mer
 |---|---|
 | `--checkpoint PATH` | Pretrained DAgger checkpoint (`.pth` or `wandb:` artifact) |
 | `--config PATH` | Main config override (default: `configs/defaults.yaml`) |
-| `--ablations-config PATH` | Ablations-specific config (default: `ablations_default.yaml`) |
+| `--ablations-config PATH` | Ablations config, layered on `ablations_default.yaml` (default: `ablations_default.yaml`) |
 | `--all` | Run all 25 ablations |
 | `--ablations NAME [NAME ...]` | Run specific ablations by name |
 | `--list` | Print registered ablations and exit |

@@ -2,28 +2,26 @@
 # MiniHack ReMDM RL Fine-Tuning Ablation Suite -- QMUL H200 8GB Configuration
 #
 # Optimised for training efficiency on QMUL H200 GPU (8GB VRAM).
+# Inherits everything from ablations_default.yaml; only the keys that differ
+# on this machine live below.
+#
 # Changes vs ablations_default.yaml:
 #   - AMP enabled (FP16 forward/backward)
-#   - Larger batch (1024 vs 3072) fitting comfortably in 8GB with AMP
+#   - Smaller batch (512 vs 3072) fitting comfortably in 8GB with AMP
 #   - Fewer collection episodes per iter (20 vs 30) to cut CPU-bound overhead
 #   - Fewer denoising steps during collection (3 vs 5)
 #   - Less frequent eval + diagnostics to reduce non-training wall-clock
+#   - Three seeds per ablation (vs 1)
 # =============================================================================
 
+extends: ablations_default.yaml
+
 # -- Training loop ------------------------------------------------------------
-# Iterations per ablation run.  Range: [50, 5000].
-max_iter: 500
+# 8GB VRAM: 512 windows per gradient step is the largest that leaves headroom
+# for the diagnostic passes.
 batch_size: 512
-# Learning rate for ablation fine-tuning.  Range: [1e-5, 1e-3].
-lr: 3.0e-4
-# AdamW weight decay.  Reference uses 1e-4.  Range: [0, 0.1].
-weight_decay: 1.0e-4
-# Max gradient norm for clipping.
-max_grad_norm: 1.0
-# Number of gradient steps per iteration.
-grad_steps_per_iter: 1
-# Episodes to collect per iteration. Reduced from 30 to cut CPU-bound
-# MiniHack episode overhead (~5-10s saved per iter).
+# Reduced from 30 to cut CPU-bound MiniHack episode overhead
+# (~5-10s saved per iter).
 episodes_per_iter: 20
 # Fewer denoising steps during greedy collection. 3 steps is sufficient
 # for argmax decoding; saves 40% of collection GPU time vs 5.
@@ -33,8 +31,6 @@ diffusion_steps_collect: 3
 # FP16 mixed precision. ~2x speedup on gradient steps. Model is small
 # (~4M params) so memory is not the bottleneck, but AMP still helps throughput.
 use_amp: true
-# Skip torch.compile -- compilation overhead not worth it for 500 iters.
-torch_compile: false
 
 # -- Evaluation ---------------------------------------------------------------
 # Evaluate every 50 iters (vs 25 default). 10 eval points over 500 iters
@@ -50,18 +46,11 @@ eval_episodes: 10
 grad_align_every: 50
 repr_drift_every: 50
 t_analysis_every: 50
-# CKA is the most expensive diagnostic. Run every 100 iters.
+# CKA is the most expensive diagnostic. Run every 100 iters (vs 50 default).
 cka_every: 100
 per_layer_every: 50
-# Number of t bins for analysis.  Range: [5, 20].
-t_analysis_n_bins: 10
 # Smaller CKA batch to save memory during the expensive CKA pass.
 cka_batch_size: 32
-
-# W&B logging is enabled by the --use-wandb CLI flag; this key is not read.
-use_wandb: true
-wandb_project: minihack-ReMDM-planner-ablations
-wandb_entity: myopic-planner
 
 # -- Multi-seed ---------------------------------------------------------------
 num_seeds: 3  # C-001 (D7/F-048): three literal seeds (base 0 -> 0, 1, 2), matching the published 3-run tables

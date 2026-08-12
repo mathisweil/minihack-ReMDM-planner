@@ -63,6 +63,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+_CONFIG_DIR = _PROJECT_ROOT / "experiments" / "rl_finetuning" / "configs"
+_DEFAULT_ABLATIONS_CONFIG = _CONFIG_DIR / "ablations_default.yaml"
+_FAST_ABLATIONS_CONFIG = _CONFIG_DIR / "ablations_fast.yaml"
+
 from experiments.rl_finetuning.ablations.registry import REGISTRY
 from experiments.rl_finetuning.ablations.training import (
     AblationHistory,
@@ -93,6 +97,96 @@ def _load_yaml(path: str | None) -> dict:
         return {}
     with open(Path(path).resolve()) as f:
         return yaml.safe_load(f) or {}
+
+
+def _resolve_extends(value: str, relative_to: Path) -> Path:
+    """Resolve an ``extends`` value against the extending file's directory.
+
+    Args:
+        value: Path string from the ``extends`` key.
+        relative_to: Directory of the file that declared it.
+
+    Returns:
+        Absolute, resolved path.
+    """
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = relative_to / candidate
+    return candidate.resolve()
+
+
+def _load_ablation_config(path: str | None) -> dict:
+    """Load an ablations config, resolving its ``extends`` chain.
+
+    Machine-specific configs (e.g. ``final_ablations_ucl.yaml``) carry only
+    the keys they change and inherit the rest from ``ablations_default.yaml``.
+    The base is chosen by, in order:
+
+    * an explicit ``extends: <path>`` key, resolved relative to the file that
+      declares it (absolute paths are also accepted);
+    * ``extends:`` with an empty value, which opts out of inheritance;
+    * otherwise ``ablations_default.yaml``, unless this *is* that file.
+
+    Later files in the chain override earlier ones.  ``extends`` is stripped
+    from the result so it never reaches the config namespace.
+
+    Args:
+        path: File path or None.
+
+    Returns:
+        Merged config dict.
+
+    Raises:
+        ValueError: If the chain contains a cycle.
+        FileNotFoundError: If a referenced base config does not exist.
+    """
+    if path is None:
+        return {}
+
+    default_base = _DEFAULT_ABLATIONS_CONFIG.resolve()
+    chain: list[tuple[Path, dict]] = []
+    seen: set[Path] = set()
+    current: Path | None = Path(path).expanduser().resolve()
+
+    while current is not None:
+        if current in seen:
+            visited = " -> ".join(p.name for p, _ in chain)
+            raise ValueError(
+                f"Circular 'extends' chain in ablation configs: "
+                f"{visited} -> {current.name}"
+            )
+        seen.add(current)
+        raw = _load_yaml(str(current))
+        chain.append((current, raw))
+
+        if "extends" in raw:
+            parent_value = raw["extends"]
+            parent = (
+                _resolve_extends(str(parent_value), current.parent)
+                if parent_value
+                else None
+            )
+        elif current != default_base:
+            parent = default_base
+        else:
+            parent = None
+
+        if parent is not None and not parent.exists():
+            raise FileNotFoundError(
+                f"Base config '{parent}' referenced by '{current}' does not exist"
+            )
+        current = parent
+
+    merged: dict = {}
+    for _, raw in reversed(chain):  # base first, override last
+        merged.update({k: v for k, v in raw.items() if k != "extends"})
+
+    if len(chain) > 1:
+        logger.info(
+            "Ablation config chain: %s",
+            " -> ".join(p.name for p, _ in reversed(chain)),
+        )
+    return merged
 
 
 def _merge_to_namespace(*dicts: dict) -> SimpleNamespace:
@@ -130,10 +224,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--ablations-config",
         type=str,
-        default=str(
-            _PROJECT_ROOT / "experiments/rl_finetuning/configs/ablations_default.yaml"
+        default=str(_DEFAULT_ABLATIONS_CONFIG),
+        help=(
+            "Ablations-specific config. Layered on top of "
+            "ablations_default.yaml unless it sets its own 'extends'."
         ),
-        help="Ablations-specific config.",
     )
     p.add_argument(
         "--checkpoint",
@@ -498,15 +593,15 @@ def main(argv: list[str] | None = None) -> None:
     main_cfg = _load_yaml(
         args.config or str(_PROJECT_ROOT / "configs" / "defaults.yaml")
     )
-    abl_cfg = _load_yaml(args.ablations_config)
+    abl_cfg = _load_ablation_config(args.ablations_config)
 
-    # Fast overrides
+    # Fast overrides. Loaded raw, NOT through the extends chain: this is an
+    # overlay applied on top of whichever ablations config is in use, so it
+    # must contribute only its own keys and never drag ablations_default.yaml
+    # back over a machine-specific config.
     fast_cfg: dict = {}
     if args.fast:
-        fast_path = (
-            _PROJECT_ROOT / "experiments/rl_finetuning/configs/ablations_fast.yaml"
-        )
-        fast_cfg = _load_yaml(str(fast_path))
+        fast_cfg = _load_yaml(str(_FAST_ABLATIONS_CONFIG))
 
     # CLI overrides
     cli_overrides: dict = {}

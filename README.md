@@ -49,7 +49,7 @@ minihack-ReMDM-planner/
 ├── src/                    Model, diffusion, envs, planner pipelines
 ├── experiments/
 │   └── rl_finetuning/      RL fine-tuning ablation suite (run_ablations.py)
-├── scripts/                HF release/upload utilities, DAgger profiler
+├── scripts/                HF upload utility, DAgger profiler
 ├── tests/                  Smoke suite — uv run pytest
 ├── demo_minihack.ipynb     Demo notebook
 ├── main.py                 CLI entry point
@@ -163,11 +163,11 @@ python experiments/rl_finetuning/run_ablations.py \
 
 One YAML config holds the experiment; the CLI holds the run.
 
-- **Config files** (`configs/*.yaml`): hyperparameters, model and method settings, ablation definitions. Any file passed via `--config` is deep-merged onto `configs/defaults.yaml`, so presets contain only their deltas.
+- **Config files** (`configs/*.yaml`): hyperparameters, model and method settings, ablation definitions. Any file passed via `--config` is deep-merged onto `configs/defaults.yaml`, so presets contain **only their deltas** — never re-state a default value. A preset may also set `extends: <file>` to inherit from another preset first.
 - **CLI flags**: per-invocation values — `--seed`, `--checkpoint`, `--data`, `--output`, `--episodes`, `--envs`, mode switches.
 - **`--override KEY=VALUE`** (repeatable): ad hoc config overrides. Keys are validated against `defaults.yaml` and values are cast to the key's type; a typo is an error, not a silent no-op.
 
-Precedence, lowest to highest: `configs/defaults.yaml` < `--config` file < `--override` and run flags.
+Precedence, lowest to highest: `configs/defaults.yaml` < `extends` chain (base first) < `--config` file < `--override` and run flags.
 
 | Preset | Purpose |
 |---|---|
@@ -177,7 +177,7 @@ Precedence, lowest to highest: `configs/defaults.yaml` < `--config` file < `--ov
 | `configs/ucl_gpu_bigger_model.yaml` | UCL GPU, larger model (384D, 6 heads) |
 | `configs/ucl_gpu_learning_behaviour.yaml` | UCL GPU learning-behaviour study (eta=0.18, B=6144) |
 | `configs/final_qmul_gpu.yaml` | **Paper run, QMUL H200.** DAgger (iter600 checkpoint) + compute-matched BC |
-| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti.** Same training hyperparams; only worker counts and paths differ |
+| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti.** `extends: final_qmul_gpu.yaml`; only worker counts and paths differ |
 
 Key hyperparameters are documented inline in `configs/defaults.yaml`; the [appendix](#key-hyperparameters) tabulates them.
 
@@ -201,7 +201,11 @@ uv run hf download mathisweil/remdm-minihack-checkpoints \
     --include "checkpoints/online/Minihack-*/**" --local-dir .
 ```
 
-Each checkpoint directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config_<step>.yaml` (config snapshot) and `selection.json`. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading. Publish new checkpoints with `scripts/hf_release.py` (`--dry-run` stages without uploading).
+Each checkpoint directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config_<step>.yaml` (config snapshot) and `selection.json`. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading. Publish new checkpoints with `scripts/hf_upload.py` (`--dry-run` stages without uploading).
+
+```bash
+HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-minihack-checkpoints
+```
 
 ## Results, citation, licence
 
