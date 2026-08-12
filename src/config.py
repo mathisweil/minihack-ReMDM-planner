@@ -67,15 +67,24 @@ _LEGACY_SNAPSHOT_KEYS = {
 }
 
 
-def _load_config_chain(path: Path) -> list[tuple[Path, dict]]:
+def resolve_config_chain(
+    path: Path, implicit_base: Path | None = None
+) -> list[tuple[Path, dict]]:
     """Load a config and its ``extends`` ancestors, base first.
 
-    ``extends`` names a base config, resolved relative to the file that
-    declares it (absolute paths are also accepted). Later entries in the
-    returned list override earlier ones.
+    The base is chosen by, in order:
+
+    * an explicit ``extends: <path>`` key, resolved relative to the file that
+      declares it (absolute paths are also accepted);
+    * ``extends:`` with an empty value, which opts out of inheritance;
+    * otherwise *implicit_base*, unless this *is* that file, or it is None.
+
+    Later entries in the returned list override earlier ones.
 
     Args:
-        path: Absolute path to the config file passed via ``--config``.
+        path: Path to the config file to load.
+        implicit_base: Base applied when a file declares no ``extends`` key.
+            None means a missing key ends the chain.
 
     Returns:
         ``[(path, raw_dict), ...]`` ordered base first, child last.
@@ -84,9 +93,10 @@ def _load_config_chain(path: Path) -> list[tuple[Path, dict]]:
         ValueError: If the chain contains a cycle.
         FileNotFoundError: If a referenced base config does not exist.
     """
+    default_base = implicit_base.resolve() if implicit_base else None
     chain: list[tuple[Path, dict]] = []
     seen: set[Path] = set()
-    current: Path | None = path.resolve()
+    current: Path | None = path.expanduser().resolve()
 
     while current is not None:
         if current in seen:
@@ -99,13 +109,19 @@ def _load_config_chain(path: Path) -> list[tuple[Path, dict]]:
             raw = yaml.safe_load(fh) or {}
         chain.append((current, raw))
 
-        base = raw.get(_EXTENDS_KEY)
-        if not base:
+        if _EXTENDS_KEY in raw:
+            base = raw[_EXTENDS_KEY]
+            if not base:
+                break
+            base_path = Path(base).expanduser()
+            if not base_path.is_absolute():
+                base_path = current.parent / base_path
+            base_path = base_path.resolve()
+        elif default_base is not None and current != default_base:
+            base_path = default_base
+        else:
             break
-        base_path = Path(base).expanduser()
-        if not base_path.is_absolute():
-            base_path = current.parent / base_path
-        base_path = base_path.resolve()
+
         if not base_path.exists():
             raise FileNotFoundError(
                 f"Base config '{base_path}' referenced by '{current}' does not exist"
@@ -116,13 +132,16 @@ def _load_config_chain(path: Path) -> list[tuple[Path, dict]]:
     return chain
 
 
-def _validate_keys(keys, allowed: set[str], source: str) -> None:
+def validate_keys(
+    keys, allowed: set[str], source: str, valid_source: str = "configs/defaults.yaml"
+) -> None:
     """Reject unknown config keys instead of silently ignoring them.
 
     Args:
         keys: Keys to check.
         allowed: The full set of valid config keys.
         source: Label for the error message (file path or 'override').
+        valid_source: Where the caller's valid keys are defined.
 
     Raises:
         KeyError: If any key is not a known config key.
@@ -131,7 +150,7 @@ def _validate_keys(keys, allowed: set[str], source: str) -> None:
     if unknown:
         raise KeyError(
             f"Unknown config key(s) {unknown} in {source}. "
-            "Valid keys are defined in configs/defaults.yaml."
+            f"Valid keys are defined in {valid_source}."
         )
 
 
@@ -233,8 +252,8 @@ def load_config(
         if not config_path_resolved.is_absolute():
             config_path_resolved = _PROJECT_ROOT / config_path_resolved
         if config_path_resolved.resolve() != defaults_path.resolve():
-            for source, overrides in _load_config_chain(config_path_resolved):
-                _validate_keys(
+            for source, overrides in resolve_config_chain(config_path_resolved):
+                validate_keys(
                     overrides,
                     allowed | _LEGACY_SNAPSHOT_KEYS | {_EXTENDS_KEY},
                     str(source),
@@ -244,7 +263,7 @@ def load_config(
                     {k: v for k, v in overrides.items() if k != _EXTENDS_KEY},
                 )
 
-    _validate_keys(cli_overrides, allowed, "--override")
+    validate_keys(cli_overrides, allowed, "--override")
     for key, value in cli_overrides.items():
         if isinstance(value, str):
             value = _cast_override(key, value, cfg.get(key))
