@@ -565,3 +565,79 @@ def test_main_baselines_ppo_runs_without_wandb(tiny_config_file):
     )
 
     assert_cli_ok(result)
+
+
+def test_offline_builds_one_eval_model_per_eval_point(tiny_cfg, tiny_trajectory):
+    """PERF-O2: the ID and OOD eval blocks share one EMA copy.
+
+    Both cadences derive from ``offline_eval_every_grad_steps``
+    (``offline.py:157-161``), so they fire on the same step against the
+    same ``_ema_source``. Each block used to build its own
+    ``copy.deepcopy(model)`` plus EMA apply.
+    """
+    import copy as _copy
+
+    import torch
+
+    from src.buffer import ReplayBuffer
+    from src.models.denoiser import ModelEMA, make_model
+    from src.planners.offline import make_offline_trainer
+
+    cfg = _copy.deepcopy(tiny_cfg)
+    cfg.offline_total_grad_steps = 3
+    cfg.offline_eval_every_grad_steps = 1
+    cfg.offline_checkpoint_every_grad_steps = 10**9
+    cfg.checkpoint_every_timesteps = 10**9
+    cfg.offline_log_every = 10**9
+    cfg.use_amp = False
+    cfg.torch_compile = False
+
+    buffer = ReplayBuffer(1000, cfg.seq_len, cfg.pad_token)
+    buffer.load_offline_data(
+        {"trajectories": [tiny_trajectory]}, [tiny_trajectory["env_id"]]
+    )
+
+    torch.manual_seed(0)
+    model = make_model(cfg)
+    ema = ModelEMA(model, decay=0.9)
+
+    built: list[int] = []
+    real_make = ModelEMA.make_eval_model
+
+    def counting_make(self, src):
+        built.append(1)
+        return real_make(self, src)
+
+    seen: list[tuple[str, int]] = []
+
+    class _StubEvaluator:
+        def evaluate(self, env_ids, eval_model, n_episodes, cfg_, device):
+            seen.append((env_ids[0], id(eval_model)))
+            return {e: {"win_rate": 0.0, "avg_reward": 0.0} for e in env_ids}
+
+    ModelEMA.make_eval_model = counting_make
+    try:
+        make_offline_trainer(cfg)(
+            model=model,
+            ema_model=ema,
+            buffer=buffer,
+            cfg=cfg,
+            device=torch.device("cpu"),
+            evaluator=_StubEvaluator(),
+            id_envs=["ID_ENV"],
+            ood_envs=["OOD_ENV"],
+        )
+    finally:
+        ModelEMA.make_eval_model = real_make
+
+    id_calls = [s for s in seen if s[0] == "ID_ENV"]
+    ood_calls = [s for s in seen if s[0] == "OOD_ENV"]
+    assert id_calls, "the ID eval never fired, so the test proves nothing"
+    assert len(id_calls) == len(ood_calls), "both blocks should fire together"
+    # One EMA copy per eval point, not two.
+    assert len(built) == len(id_calls), (
+        f"{len(built)} eval models built for {len(id_calls)} eval points"
+    )
+    # And both blocks were handed the very same model object.
+    for (_, id_obj), (_, ood_obj) in zip(id_calls, ood_calls, strict=True):
+        assert id_obj == ood_obj

@@ -378,6 +378,15 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                     f"(env_steps={env_steps}) loss={loss.item():.4f}"
                 )
 
+            # PERF-O2: at most one eval model per step, shared by the ID
+            # and OOD blocks. Both cadences come from
+            # `offline_eval_every_grad_steps` (offline.py:157-161), so
+            # they fire on the same step against the same `_ema_source`
+            # and each block built its own `copy.deepcopy(model)` plus EMA
+            # apply. Kept lazy rather than hoisted unconditionally so the
+            # two blocks stay independent if the cadences ever diverge.
+            eval_model = None
+
             # Periodic ID eval — env-step delta-check (mirrors
             # online.py:277-305). Eval is opt-in: skipped entirely when
             # no Evaluator was threaded through. The cadence variable
@@ -417,7 +426,8 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 and ood_eval_every_env_steps > 0
                 and env_steps - last_ood_eval_env_steps >= ood_eval_every_env_steps
             ):
-                eval_model = ema_model.make_eval_model(_ema_source)
+                if eval_model is None:
+                    eval_model = ema_model.make_eval_model(_ema_source)
                 results = evaluator.evaluate(
                     ood_envs,
                     eval_model,
