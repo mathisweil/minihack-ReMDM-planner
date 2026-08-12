@@ -79,7 +79,7 @@ from experiments.rl_finetuning.analysis.action_distribution import (
 from experiments.rl_finetuning.analysis.plots import generate_all_plots
 from experiments.rl_finetuning.analysis.report import generate_diagnosis_report
 from experiments.rl_finetuning.analysis.tables import generate_summary_tables
-from src.config import resolve_config_chain, validate_keys
+from src.config import validate_keys
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,53 +105,48 @@ def _load_yaml(path: str | None) -> dict:
 
 
 def _load_ablation_config(path: str | None, allowed: set[str] | None = None) -> dict:
-    """Load an ablations config, resolving its ``extends`` chain.
+    """Load an ablations config on top of ``ablations_default.yaml``.
 
-    Machine-specific configs (e.g. ``final_ablations_ucl.yaml``) carry only
-    the keys they change and inherit the rest from ``ablations_default.yaml``,
-    which is the implicit base when a file declares no ``extends`` key. See
-    ``src.config.resolve_config_chain`` for the full inheritance rules.
-
-    ``extends`` is stripped from the result so it never reaches the config
-    namespace.
+    Two layers, always: the base carries every ablation hyperparameter and
+    the machine config (e.g. ``final_ablations_ucl.yaml``) carries only what
+    that machine changes. Configs never inherit from one another.
 
     Args:
         path: File path or None.
-        allowed: Valid config keys. When given, every file in the chain is
-            validated under its own name; None skips validation.
+        allowed: Valid config keys. When given, both layers are validated
+            under their own names; None skips validation.
 
     Returns:
         Merged config dict.
 
     Raises:
-        ValueError: If the chain contains a cycle.
-        FileNotFoundError: If a referenced base config does not exist.
         KeyError: If *allowed* is given and a file carries an unknown key.
     """
     if path is None:
         return {}
 
-    chain = resolve_config_chain(Path(path), implicit_base=_DEFAULT_ABLATIONS_CONFIG)
+    resolved = Path(path).expanduser().resolve()
+    base = _DEFAULT_ABLATIONS_CONFIG.resolve()
+    layers = [base] if resolved != base else []
+    layers.append(resolved)
 
     merged: dict = {}
-    for source, raw in chain:  # base first, override last
+    for source in layers:  # base first, machine config last
+        raw = _load_yaml(str(source))
         if allowed is not None:
             validate_keys(
                 raw,
-                allowed | {"extends"},
+                allowed,
                 str(source),
                 valid_source=(
                     "configs/defaults.yaml and "
                     "experiments/rl_finetuning/configs/ablations_default.yaml"
                 ),
             )
-        merged.update({k: v for k, v in raw.items() if k != "extends"})
+        merged.update(raw)
 
-    if len(chain) > 1:
-        logger.info(
-            "Ablation config chain: %s",
-            " -> ".join(p.name for p, _ in chain),
-        )
+    if len(layers) > 1:
+        logger.info("Ablation config: %s", " -> ".join(p.name for p in layers))
     return merged
 
 
@@ -191,10 +186,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--ablations-config",
         type=str,
         default=str(_DEFAULT_ABLATIONS_CONFIG),
-        help=(
-            "Ablations-specific config. Layered on top of "
-            "ablations_default.yaml unless it sets its own 'extends'."
-        ),
+        help=("Ablations-specific config, layered on top of ablations_default.yaml."),
     )
     p.add_argument(
         "--checkpoint",
@@ -644,12 +636,9 @@ def main(argv: list[str] | None = None) -> None:
     allowed = set(main_cfg) | set(_load_yaml(str(_DEFAULT_ABLATIONS_CONFIG)))
     abl_cfg = _load_ablation_config(args.ablations_config, allowed=allowed)
 
-    # Fast overrides. Loaded raw, NOT through the extends chain: this is an
-    # overlay applied on top of whichever ablations config is in use, so it
-    # must contribute only its own keys and never drag ablations_default.yaml
-    # back over a machine-specific config.
-    # `extends` is deliberately NOT allowed here: this file is applied raw, so
-    # an extends key would land in the namespace instead of being resolved.
+    # Fast overrides. An overlay applied on top of whichever ablations config
+    # is in use, so it must contribute only its own keys and never drag
+    # ablations_default.yaml back over a machine-specific config.
     fast_cfg: dict = {}
     if args.fast:
         fast_cfg = _load_yaml(str(_FAST_ABLATIONS_CONFIG))
