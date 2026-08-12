@@ -55,7 +55,7 @@ from experiments.rl_finetuning.diagnostics.timestep import (
 )
 from src.diffusion.sampling import remdm_sample
 from src.diffusion.schedules import get_schedule
-from src.envs.minihack_env import make_env
+from src.envs.minihack_env import acquire_env, discard_env, release_env
 from src.models.denoiser import ModelEMA, make_model, try_compile
 from src.planners.collect import run_model_episode
 from src.planners.inference import Evaluator
@@ -201,6 +201,19 @@ class MixedReplayBuffer:
         n = local_obs.shape[0]
         if n == 0:
             return
+        if n >= self.capacity:
+            # One iteration can collect more windows than the whole
+            # buffer holds. The wrap-around branch below splits the batch
+            # at the buffer boundary and would then try to write n - first
+            # rows into a destination of at most `capacity`. Keep the most
+            # recent `capacity` windows instead, which is exactly what the
+            # ring discipline would have left behind had they been written
+            # one at a time.
+            local_obs = local_obs[-self.capacity :]
+            global_obs = global_obs[-self.capacity :]
+            x0 = x0[-self.capacity :]
+            returns = returns[-self.capacity :]
+            n = self.capacity
         start = self._write_idx % self.capacity
         if start + n <= self.capacity:
             self._local[start : start + n] = local_obs
@@ -349,18 +362,23 @@ def _extract_windows(
 
     Returns:
         Tuple of (local_obs ``[W,9,9]``, global_obs ``[W,21,79]``,
-        x0 ``[W,H]``, episode_return).
+        x0 ``[W,H]``, episode_return). The observation tensors keep the
+        episode buffer's dtype (int16 for glyph maps); callers widen to
+        int64 on the device after the transfer.
     """
-    local_arr = torch.from_numpy(episode["local"]).long()  # [T, 9, 9]
-    global_arr = torch.from_numpy(episode["global"]).long()  # [T, 21, 79]
+    # PERF-X2: no host-side `.long()`. Widening 9x9 and 21x79 glyph maps
+    # to int64 here quadruples both the concatenation and the bytes that
+    # cross PCIe, for several thousand windows an iteration.
+    local_arr = torch.from_numpy(episode["local"])  # [T, 9, 9]
+    global_arr = torch.from_numpy(episode["global"])  # [T, 21, 79]
     actions = torch.from_numpy(episode["actions"]).long()  # [T]
     T = actions.shape[0]
     ret = episode["total_reward"]
 
     if T == 0:
         return (
-            torch.empty(0, 9, 9, dtype=torch.long),
-            torch.empty(0, 21, 79, dtype=torch.long),
+            torch.empty(0, 9, 9, dtype=local_arr.dtype),
+            torch.empty(0, 21, 79, dtype=global_arr.dtype),
             torch.empty(0, seq_len, dtype=torch.long),
             ret,
         )
@@ -471,8 +489,9 @@ def _collect_training_data_seq(
         empty = torch.empty(0)
         return empty, empty, empty, empty
 
-    local_obs = torch.cat(all_local).to(device)
-    global_obs = torch.cat(all_global).to(device)
+    # PERF-X2: transfer at the buffer's dtype, widen on the device.
+    local_obs = torch.cat(all_local).to(device).long()
+    global_obs = torch.cat(all_global).to(device).long()
     x0 = torch.cat(all_x0).to(device)
     returns = torch.cat(all_returns).to(device)
 
@@ -515,12 +534,6 @@ def _collect_training_data_gpu(
     envs: list = []
     cur_local = np.zeros((n, cs, cs), dtype=np.int16)
     cur_global = np.zeros((n, cfg.map_h, cfg.map_w), dtype=np.int16)
-    for i, (env_id, seed) in enumerate(tasks):
-        env = make_env(env_id, None, cfg)
-        (local, glb), _ = env.reset(seed=seed)
-        envs.append(env)
-        cur_local[i] = local
-        cur_global[i] = glb
 
     # Pre-allocate history buffers
     obs_local = np.zeros(
@@ -532,8 +545,6 @@ def _collect_training_data_gpu(
         dtype=np.int16,
     )
     act_buf = np.zeros((n, max_steps), dtype=np.int64)
-    obs_local[:, 0] = cur_local
-    obs_global[:, 0] = cur_global
 
     # Per-episode state
     plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
@@ -545,23 +556,39 @@ def _collect_training_data_gpu(
     n_steps = np.zeros(n, dtype=np.int32)
 
     try:
+        # PERF-X1: borrow from the shared pool rather than constructing.
+        # ``shaped_reward`` stays at its default True: the episode return
+        # drives the advantage weights and the win-rate tracking, so
+        # unshaped rewards would change what every ablation optimises.
+        for i, (env_id, seed) in enumerate(tasks):
+            env = acquire_env(env_id, None, cfg)
+            (local, glb), _ = env.reset(seed=seed)
+            envs.append(env)
+            cur_local[i] = local
+            cur_global[i] = glb
+
+        obs_local[:, 0] = cur_local
+        obs_global[:, 0] = cur_global
+
         for _ in range(max_steps):
             # Batch replan on GPU (stochastic ReMDM)
             replan_idx = np.where(need_replan & ~done)[0]
             if len(replan_idx) > 0:
+                # PERF-X2: the buffers are int16; cross PCIe as int16 and
+                # widen on the device rather than the other way round.
                 local_t = (
                     torch.from_numpy(
                         cur_local[replan_idx],
                     )
-                    .long()
                     .to(device)
+                    .long()
                 )
                 glb_t = (
                     torch.from_numpy(
                         cur_global[replan_idx],
                     )
-                    .long()
                     .to(device)
+                    .long()
                 )
                 batch_plans = (
                     remdm_sample(
@@ -611,9 +638,15 @@ def _collect_training_data_gpu(
 
             if not any_active:
                 break
-    finally:
+    except BaseException:
+        # An error leaves the env in an unknown state, so close rather
+        # than recycle it.
         for env in envs:
-            env.close()
+            discard_env(env)
+        raise
+    else:
+        for env in envs:
+            release_env(env)
 
     # Extract windows from all episodes
     all_local: list[Tensor] = []
@@ -645,9 +678,12 @@ def _collect_training_data_gpu(
         empty = torch.empty(0)
         return empty, empty, empty, empty
 
+    # PERF-X2: transfer at the buffer's dtype, widen on the device. At the
+    # measured several thousand windows an iteration this is the largest
+    # single host-to-device transfer in the loop.
     return (
-        torch.cat(all_local).to(device),
-        torch.cat(all_global).to(device),
+        torch.cat(all_local).to(device).long(),
+        torch.cat(all_global).to(device).long(),
         torch.cat(all_x0).to(device),
         torch.cat(all_returns).to(device),
     )
@@ -808,6 +844,14 @@ def run_ablation(
     # Evaluator
     evaluator = Evaluator()
 
+    # PERF-X3: one eval model for the whole run, refreshed in place.
+    # ``make_eval_model`` is a ``copy.deepcopy`` plus an EMA apply, and it
+    # was called once per iteration, once per eval and once at the end.
+    # ``apply_to`` overwrites every named parameter from the same shadow,
+    # so the refreshed model holds exactly the weights the per-iteration
+    # deepcopy produced; ``tests/test_ablation_perf.py`` pins that.
+    eval_model = ema.make_eval_model(raw_model)
+
     # AMP (mixed precision)
     _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
@@ -865,6 +909,17 @@ def run_ablation(
     _init_state = {
         k: v.clone() for k, v in raw_model.state_dict().items() if v.is_floating_point()
     }
+    # PERF-X4: operand lists for the fused health metrics below. Parameter
+    # tensors are updated in place by the optimizer, so the lists stay
+    # valid for the whole run.
+    _health_params = [p.data for p in raw_model.parameters()]
+    _drift_pairs = [
+        (p.data, _init_state[n])
+        for n, p in raw_model.named_parameters()
+        if n in _init_state
+    ]
+    _drift_cur = [a for a, _ in _drift_pairs]
+    _drift_init = [b for _, b in _drift_pairs]
 
     # Log model param counts to wandb
     total_params = sum(p.numel() for p in raw_model.parameters())
@@ -896,7 +951,8 @@ def run_ablation(
 
         # -- Collect episodes --
         collect_start = time.perf_counter()
-        eval_model = ema.make_eval_model(raw_model)
+        ema.apply_to(eval_model)
+        eval_model.eval()
         local_obs, global_obs, x0, returns = collect_training_data(
             eval_model,
             cfg,
@@ -1126,19 +1182,23 @@ def run_ablation(
 
         # Model health (every 10 iters)
         if iteration % 10 == 0:
-            p_norm = (
-                sum(p.data.norm(2).item() ** 2 for p in raw_model.parameters()) ** 0.5
+            # PERF-X4: one fused norm over the parameter list and a single
+            # device sync, instead of one `.item()` per tensor twice over
+            # (roughly 144 syncs every 10 iterations). Both quantities are
+            # the root-sum-of-squares of the per-tensor 2-norms, which is
+            # what the Python loop computed.
+            p_norms = torch.stack(torch._foreach_norm(_health_params))
+            drift_norms = torch.stack(
+                torch._foreach_norm(torch._foreach_sub(_drift_cur, _drift_init))
             )
-            wb_metrics["model/param_norm"] = p_norm
-            drift = (
-                sum(
-                    (p.data - _init_state[n]).norm(2).item() ** 2
-                    for n, p in raw_model.named_parameters()
-                    if n in _init_state
-                )
-                ** 0.5
-            )
-            wb_metrics["model/param_drift_from_init"] = drift
+            both = torch.stack(
+                [
+                    torch.linalg.vector_norm(p_norms),
+                    torch.linalg.vector_norm(drift_norms),
+                ]
+            ).tolist()
+            wb_metrics["model/param_norm"] = both[0]
+            wb_metrics["model/param_drift_from_init"] = both[1]
 
         # -- Gradient alignment --
         if iteration % grad_align_every == 0:
@@ -1248,7 +1308,8 @@ def run_ablation(
 
         # -- Evaluation --
         if iteration % eval_every == 0:
-            eval_model = ema.make_eval_model(raw_model)
+            ema.apply_to(eval_model)
+            eval_model.eval()
             results = evaluator.evaluate(
                 cfg.id_envs,
                 eval_model,
@@ -1289,10 +1350,11 @@ def run_ablation(
         _wandb_log(wb_metrics, step=wandb_step_offset + iteration)
 
     # -- Final evaluation --
-    final_model = ema.make_eval_model(raw_model)
+    ema.apply_to(eval_model)
+    eval_model.eval()
     final_results = evaluator.evaluate(
         cfg.id_envs,
-        final_model,
+        eval_model,
         eval_episodes,
         cfg,
         device,
