@@ -1,3 +1,18 @@
+# =====================================================================
+# Base configuration: the shared final paper recipe.
+#
+# This file holds the full recipe both paper clusters run. A preset
+# passed via `--config` is deep-merged on top and carries ONLY that
+# machine's or that experiment's own values; presets never inherit from
+# one another. Running with no `--config` therefore trains the paper
+# recipe, not a cheap baseline.
+#
+# Consequence for experiment presets: any key you do not restate is
+# inherited from the recipe. Where a preset needs the pre-recipe
+# behaviour it must pin the key explicitly, including pinning back to
+# `null`. See the offline BC compute-match hazard below.
+# =====================================================================
+
 # ── Environments ──────────────────────────────────────────────────────
 id_envs:
   - MiniHack-Room-Random-5x5-v0
@@ -90,45 +105,48 @@ physics_aware_sampling: false
 # than ~2x from the default, the fraction of training covered by the EMA
 # window changes. For very short or very long runs, consider manually
 # setting a matching decay (shorter run → lower decay, longer → higher).
-total_timesteps: 2000000
+total_timesteps: 5650000
 
 # Evaluation + checkpoint cadence, in env-step units. These scale with
 # total_timesteps so every run gets ~N eval points and ~M checkpoints
 # regardless of budget. For offline BC, the cadence is converted to
 # gradient-step intervals via `/ offline_batch_size`.
-id_eval_every_timesteps: 25000
-ood_eval_every_timesteps: 25000
-checkpoint_every_timesteps: 125000
+id_eval_every_timesteps: 470000
+ood_eval_every_timesteps: 470000
+checkpoint_every_timesteps: 940000
 
 # ── Offline BC ────────────────────────────────────────────────────────
 offline_lr: 0.0003
-offline_batch_size: 3584
+offline_batch_size: 2048
 offline_grad_clip: 1.0
 aux_loss_weight: 0.5
-# ── Offline BC compute-match overrides (all opt-in, default null) ───
-# These exist solely to support paper-fair comparisons against a
-# specific DAgger iteration count, where the env-step / grad-step
-# ratio between the two modes (~50x) makes a single shared
-# `total_timesteps` budget unfair to one side. When null, offline
-# falls back to the env-step-derived defaults.
+# ── Offline BC compute-match pins ────────────────────────────────────
+# HAZARD: each of these four silently OVERRIDES an env-step-derived
+# value when non-null. They are part of the paper recipe and are now set
+# here, so any preset that wants the derived behaviour must pin the key
+# back to `null` explicitly — omitting it inherits the pin instead.
+# `smoke.yaml`, `ablation_local_only.yaml`, `ucl_gpu_bigger_model.yaml`
+# and `ucl_gpu_learning_behaviour.yaml` all do exactly that; without the
+# pin, smoke would train 60,000 grad steps instead of 19.
 #
-# offline_total_grad_steps: pin gradient budget (e.g. 60000 to match
-#   600 DAgger iters × 100 grad_steps_per_iter).
-# offline_eval_every_grad_steps: ID/OOD eval cadence in grad-step
-#   units. Without this, dense env-step cadence yields ~500 evals.
+# offline_total_grad_steps: pins the gradient budget (60000 = 600 DAgger
+#   iters × 100 grad_steps_per_iter). Overrides
+#   `total_timesteps // offline_batch_size` (src/planners/offline.py:116).
+# offline_eval_every_grad_steps: ID/OOD eval cadence in grad-step units.
+#   Overrides the value derived from `id_eval_every_timesteps`.
 # offline_checkpoint_every_grad_steps: checkpoint cadence in grad-step
-#   units. Same motivation as eval cadence.
-# offline_buffer_capacity: distinct from `buffer_capacity` (which is
-#   sized for DAgger's small FIFO buffer). The full BC dataset has
-#   ~500k–1M sliding windows; using DAgger's cap silently truncates.
-offline_total_grad_steps: null
-offline_eval_every_grad_steps: null
-offline_checkpoint_every_grad_steps: null
-offline_buffer_capacity: null
+#   units. Overrides the value derived from `checkpoint_every_timesteps`.
+# offline_buffer_capacity: overrides `buffer_capacity`
+#   (src/planners/offline.py:729). The full BC dataset has ~500k-1M
+#   sliding windows; DAgger's 10000 cap silently truncates it.
+offline_total_grad_steps: 60000
+offline_eval_every_grad_steps: 5000
+offline_checkpoint_every_grad_steps: 10000
+offline_buffer_capacity: 1500000
 
 # ── DAgger ────────────────────────────────────────────────────────────
 dagger_lr: 0.00003
-dagger_batch_size: 3584
+dagger_batch_size: 2048
 dagger_grad_clip: 1.0
 weight_decay: 0.0001
 buffer_capacity: 10000
@@ -144,10 +162,10 @@ checkpoint_eval_episodes: 50
 # ── Performance ──────────────────────────────────────────────────────
 # Mixed-precision (FP16) training via torch.cuda.amp.
 # Speeds up forward/backward ~1.5-2x on GPU. No effect on CPU.
-use_amp: false
+use_amp: true
 # torch.compile the model for fused kernels (experimental).
 # May cause slow first iteration due to compilation. No effect on CPU.
-torch_compile: false
+torch_compile: true
 # Number of parallel workers for DAgger episode collection.
 # 0 = sequential (reference behaviour). Recommended: 4-8 on multi-core.
 num_collection_workers: 8
@@ -170,7 +188,7 @@ wandb_project: minihack-ReMDM-planner
 wandb_entity: myopic-planner
 wandb_run_name: null
 wandb_resume_id: null
-offline_log_every: 10
+offline_log_every: 50
 seed: null
 
 # ── SB3 / DT baselines ───────────────────────────────────────────────

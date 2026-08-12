@@ -1,114 +1,37 @@
 # =============================================================================
-# QMUL H200 GPU -- final paper run config
+# QMUL H200 GPU -- machine values for the final paper run
 # =============================================================================
 #
-# Deep-merged onto configs/defaults.yaml: only the deltas live here.
-# Anything not listed below (environments, model, diffusion, sampling,
-# dagger_lr, offline_lr, weight_decay, grad clips, aux_loss_weight,
-# episodes/grad_steps per iteration, eval episode counts, W&B) is
-# inherited unchanged from defaults.yaml and is deliberately not repeated.
+# The training recipe lives in configs/defaults.yaml, which both clusters
+# share. Only this machine's values live here: worker counts and the
+# output path. Everything else -- total_timesteps, batch sizes, the
+# offline BC compute-match pins, AMP and torch.compile -- is inherited.
 #
-# This single config drives BOTH the final DAgger run that produced
-# `checkpoint_final/online/final.pth` AND the compute-matched offline
-# BC baseline used for the paper comparison.
+# This config drives BOTH the final DAgger run that produced
+# `checkpoint_final/online/final.pth` AND the compute-matched offline BC
+# baseline used for the paper comparison.
 #
 #   --mode online    -> reproduces the iter600 DAgger checkpoint recipe
 #   --mode offline   -> trains a fair offline BC baseline against it
 #
-# -- Fairness analysis -----------------------------------------------
-#
-# DAgger compute at iter600 (the checkpointed model):
-#     600 iters x 100 grad_steps_per_iter x 2048 batch_size
-#         = 60,000 AdamW updates
-#         = 122,880,000 sample-equivalents
-#
-# The fair offline BC baseline matches this exactly:
-#     offline_total_grad_steps = 60,000  (override; pinned)
-#     offline_batch_size       = 2048    (matches DAgger; same SNR)
-#     weight_decay, grad_clip, aux_loss_weight, model arch, diffusion
-#         params: all inherited from defaults.yaml, so identical between
-#         modes by construction.
-#
-# LR strategy follows "best-of-each-method" rather than identical
-# optimisers -- DAgger's 3e-5 constant is tuned for online refinement,
-# offline's 3e-4 cosine->3e-5 is BC standard from-scratch. Both
-# converge to the same effective late-training LR. Both are the
-# defaults.yaml values.
-#
-# Eval/checkpoint cadence is matched in *count* across modes (12 evals,
-# 6 checkpoints per run) via the offline_*_every_grad_steps overrides,
-# because the env-step->grad-step ratio differs by ~50x between modes.
+# See configs/defaults.yaml for the fairness analysis behind the shared
+# recipe (60,000 AdamW updates x 2048 batch = DAgger compute at iter600).
 #
 # -- Hardware ---------------------------------------------------------
 #
 # QMUL H200 (constrained VRAM allocation). The DAgger checkpoint was
-# produced on this hardware, so batch_size and AMP settings must stay
-# identical to the original run. AMP + torch.compile + 32-worker
-# collection are the original perf settings.
+# produced on this hardware, so the inherited batch sizes and AMP
+# settings must stay identical to the original run. 32-worker collection
+# is the original perf setting.
 
-# -- Shared training budget (DAgger only) -----------------------------
-# 5.65M env-steps reproduces the env-step budget consumed at iter600
-# of the original DAgger run. This figure is calibrated against a real
-# DAgger run with the same recipe (`p7wfp67q`, episodes_per_iteration=30,
-# grad_steps_per_iteration=100): summing the per-iter env steps over
-# the first 600 iterations gives 30 x 600 x mean(model_steps + oracle_steps)
-# ~= 30 x 600 x (198 + 116) ~= 5.65 M real env.step() calls.
-# (The earlier 3M figure was based on the buggy single-episode env-step
-# accounting in `online.py:155-169` -- fixed in the same commit as this
-# config bump.) Used by `--mode online` only. Offline mode bypasses
-# this via `offline_total_grad_steps` below -- the unified env-step
-# budget is fundamentally unfair when the sample-to-grad-step ratio
-# differs by ~50x between modes.
-total_timesteps: 5650000
-
-# Eval/checkpoint cadence in env-step units (DAgger mode).
-# Scaled with the corrected total_timesteps so the run still produces
-# ~12 ID/OOD evals and ~6 checkpoints over its full duration.
-# 470k -> ~12 evals; 940k -> ~6 checkpoints.
-id_eval_every_timesteps: 470000
-ood_eval_every_timesteps: 470000
-checkpoint_every_timesteps: 940000
-
-# -- DAgger (matches checkpoint_final/online/config_iter600.yaml) -----
-# Only the batch size differs from defaults.yaml (3584); the checkpoint
-# was trained at 2048 and this must not drift.
-dagger_batch_size: 2048
-
-# -- Offline BC (compute-matched fair baseline) -----------------------
-# Same gradient compute as DAgger (60k AdamW updates x 2048 batch), and
-# eval/checkpoint counts matched to DAgger via the grad-step overrides.
-offline_batch_size: 2048
-
-# Compute pin: 60,000 AdamW updates = exactly DAgger@iter600.
-offline_total_grad_steps: 60000
-
-# Eval cadence: 5,000 grad steps -> 12 evals (matches DAgger eval count).
-offline_eval_every_grad_steps: 5000
-
-# Checkpoint cadence: 10,000 grad steps -> 6 checkpoints (matches DAgger).
-offline_checkpoint_every_grad_steps: 10000
-
-# Buffer cap for offline mode only -- must hold the full pre-collected
-# dataset (~1M sliding windows from 20k oracle trajectories). DAgger's
-# inherited `buffer_capacity: 10000` would silently FIFO-evict 99% of
-# the data.
-offline_buffer_capacity: 1500000
-
-# -- Performance (cluster-tuned, matches original DAgger run) ---------
-use_amp: true
-torch_compile: true
+# -- Collection workers -----------------------------------------------
+# HARDWARE-SPECIFIC. UCL leaves these at the defaults.yaml value of 8.
 num_collection_workers: 32
+collect_num_workers: 32
 
 # -- Data collection (for offline BC dataset) -------------------------
-# collect_episodes_per_env stays at the inherited 5000: 5000 eps x 4 ID
-# envs = 20k oracle trajectories, strictly more than the ~7k unique
-# trajectories DAgger had in its filtered buffer at iter600.
-collect_num_workers: 32
+# HARDWARE-SPECIFIC path. collect_episodes_per_env stays at the
+# inherited 5000: 5000 eps x 4 ID envs = 20k oracle trajectories,
+# strictly more than the ~7k unique trajectories DAgger had in its
+# filtered buffer at iter600.
 collect_output: data/oracle_bc_qmul.pt
-
-# -- Checkpointing & Logging ------------------------------------------
-# checkpoint_dir inherited as `checkpoints`; every run on every cluster
-# writes under that one root. wandb_resume_id inherited as null -- fresh
-# runs by default. Override on the CLI
-# (`--override wandb_resume_id=...`) to continue an existing run.
-offline_log_every: 50

@@ -61,6 +61,14 @@ TINY_OVERRIDES: dict = {
     "use_amp": False,
     "device": "cpu",
     "seed": 0,
+    # defaults.yaml is the paper recipe, and these four OVERRIDE the
+    # env-step-derived budget when non-null. Pinned back to null so the
+    # tiny total_timesteps above actually governs the offline run;
+    # inheriting the recipe would train 60000 grad steps and time out.
+    "offline_total_grad_steps": None,
+    "offline_eval_every_grad_steps": None,
+    "offline_checkpoint_every_grad_steps": None,
+    "offline_buffer_capacity": None,
 }
 
 
@@ -206,9 +214,7 @@ def tiny_trajectory(tiny_cfg) -> dict:
         "global": np.random.randint(
             0, 1000, (steps, tiny_cfg.map_h, tiny_cfg.map_w), dtype=np.int16
         ),
-        "actions": np.random.randint(
-            0, tiny_cfg.action_dim, (steps,), dtype=np.int64
-        ),
+        "actions": np.random.randint(0, tiny_cfg.action_dim, (steps,), dtype=np.int64),
         "env_id": TINY_ENV,
     }
 

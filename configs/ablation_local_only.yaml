@@ -4,3 +4,25 @@
 # already-trained dual-stream model. Supported by --mode offline and
 # --mode online.
 use_global_stream: false
+
+# -- Pins against the shared paper recipe in defaults.yaml -------------
+# This preset is an experiment in its own right and predates defaults.yaml
+# becoming the paper recipe. Every key below pins the pre-recipe value so
+# the ablation's resolved config is unchanged; without them the ablation
+# would silently be re-run at the paper budget and its results invalidated.
+#
+# The four offline_* keys OVERRIDE env-step-derived values when non-null,
+# so they must be pinned to null rather than omitted.
+total_timesteps: 2000000
+id_eval_every_timesteps: 25000
+ood_eval_every_timesteps: 25000
+checkpoint_every_timesteps: 125000
+dagger_batch_size: 3584
+offline_batch_size: 3584
+offline_total_grad_steps: null
+offline_eval_every_grad_steps: null
+offline_checkpoint_every_grad_steps: null
+offline_buffer_capacity: null
+offline_log_every: 10
+use_amp: false
+torch_compile: false

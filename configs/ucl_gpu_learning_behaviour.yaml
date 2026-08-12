@@ -21,8 +21,19 @@ offline_batch_size: 6144
 dagger_batch_size: 6144
 
 # -- Performance ------------------------------------------------------
-use_amp: true
-torch_compile: true
+# use_amp and torch_compile are inherited as true from defaults.yaml.
+
+# -- Pins against the shared paper recipe in defaults.yaml -------------
+# These four OVERRIDE env-step-derived values when non-null. This study
+# sets its own total_timesteps (20M) and offline_batch_size (6144), so it
+# must derive its offline budget from those: 3255 grad steps. Inheriting
+# the recipe's 60000 pin would train it 18.4x longer and invalidate the
+# learning-behaviour curves.
+offline_total_grad_steps: null
+offline_eval_every_grad_steps: null
+offline_checkpoint_every_grad_steps: null
+offline_buffer_capacity: null
+offline_log_every: 10
 
 # -- Checkpointing ----------------------------------------------------
 checkpoint_dir: checkpoints/learning_behaviour

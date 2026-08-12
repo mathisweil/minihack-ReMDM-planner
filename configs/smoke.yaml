@@ -14,3 +14,22 @@ eval_episodes_per_env: 2
 checkpoint_eval_episodes: 2
 num_collection_workers: 0
 use_wandb: false
+
+# -- Pins against the shared paper recipe in defaults.yaml -------------
+# defaults.yaml is the full paper recipe, so these are pinned back to the
+# cheap smoke values. Without them a smoke run trains the paper budget.
+#
+# The four offline_* keys OVERRIDE env-step-derived values when non-null,
+# so each must be pinned to null, not merely omitted. Inheriting the
+# recipe's 60000 would give this config 60000 offline grad steps instead
+# of the 19 its own total_timesteps implies (a 3158x increase).
+offline_total_grad_steps: null
+offline_eval_every_grad_steps: null
+offline_checkpoint_every_grad_steps: null
+offline_buffer_capacity: null
+offline_log_every: 10
+# torch.compile must stay off: the first-iteration compile cost dwarfs a
+# smoke run, and the inductor C++ build fails outright when the repo path
+# contains whitespace.
+use_amp: false
+torch_compile: false

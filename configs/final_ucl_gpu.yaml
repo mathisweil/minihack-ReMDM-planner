@@ -1,54 +1,41 @@
 # =============================================================================
-# UCL 3090 Ti GPU -- final paper run config
+# UCL 3090 Ti GPU -- machine values for the final paper run
 # =============================================================================
 #
-# Inherits from `final_qmul_gpu.yaml`, which itself deep-merges onto
-# configs/defaults.yaml. Only the genuine UCL deltas live here.
+# The training recipe lives in configs/defaults.yaml, which both clusters
+# share, so this config and final_qmul_gpu.yaml train an identical model
+# by construction. Only this machine's values live here.
 #
-# This single config drives BOTH the final DAgger run and the
-# compute-matched offline BC baseline used for the paper comparison.
+# In practice that is a single key. The collection worker counts stay at
+# the defaults.yaml value of 8 (QMUL raises them to 32), so the output
+# path is the only genuine UCL delta.
 #
 #   --mode online    -> reproduces the iter600 DAgger checkpoint recipe
 #   --mode offline   -> trains a fair offline BC baseline against it
 #
-# Every training hyperparameter is inherited from the QMUL config rather
-# than restated, so cross-cluster runs are directly comparable by
-# construction instead of by convention. The only genuine differences are
-# the hardware perf knobs and output paths below. See the QMUL config
-# header for the full fairness analysis.
-#
-# Historical note: `offline_batch_size` is now the inherited 2048, matched
-# to DAgger for identical per-update SNR. An earlier UCL config used 4096;
-# the 24 GB card can hold it, but using it would confound the comparison.
-extends: final_qmul_gpu.yaml
-
 # -- Hardware ---------------------------------------------------------
 #
-# UCL 3090 Ti -- 24 GB VRAM. The 4-layer x 256-dim model with batch=2048
-# and AMP fits with comfortable headroom (~6-8 GB peak). Measured on the
+# UCL 3090 Ti -- 24 GB VRAM. The 4-layer x 256-dim model at the inherited
+# batch=2048 with AMP fits with comfortable headroom. Measured on the
 # target box (RTX 3090 Ti, driver 590.44.01, torch 2.13.0+cu126):
 # 6,678 MB peak allocated and 7,065 MB peak reserved over 200 gradient
-# steps, so the estimate above is right. A checkpoint eval at the
-# inherited `eval_episodes_per_env: 50` peaks at 123 MB allocated -- it
-# runs under no_grad at B<=50, so training is the high-water mark by
-# 54x, not eval. Headroom on an idle card is ~17 GB.
+# steps. A checkpoint eval at the inherited `eval_episodes_per_env: 50`
+# peaks at 123 MB allocated -- it runs under no_grad at B<=50, so
+# training is the high-water mark by 54x, not eval. Headroom on an idle
+# card is ~17 GB.
+#
+# `num_collection_workers` has NO EFFECT on this box, which is why it is
+# left at the defaults.yaml value of 8 rather than raised to QMUL's 32.
+# It only feeds `collect_batch_parallel`, and `online.py:147` always
+# takes the `collect_batch_gpu` branch on CUDA with
+# `episodes_per_iteration > 1`. The one cost of a non-zero value is that
+# `DataCollector.__init__` still builds that many unused CPU copies of
+# the model (`collect.py:258-265`).
 #
 # Set TMPDIR to local disk before running. $TMPDIR here defaults to an
 # NFS home, where MiniHack env construction costs 115.7 ms/env against
 # 17.2 ms on local xfs and `env.reset` 8.44 ms against 1.24 ms. That
 # alone moves collection from 6.6 s to 3.7 s per iteration.
-
-# -- Performance (cluster-tuned for 3090 Ti) --------------------------
-# HARDWARE-SPECIFIC: pinned back to the defaults.yaml value of 8, against
-# QMUL's inherited 32. `num_collection_workers` has NO EFFECT on this box:
-# it only feeds `collect_batch_parallel`, and `online.py:147` always takes
-# the `collect_batch_gpu` branch on CUDA with `episodes_per_iteration > 1`.
-# The one cost of a non-zero value is that `DataCollector.__init__` still
-# builds that many unused CPU copies of the model
-# (`collect.py:258-265`), so the lower number is the cheaper one here.
-# use_amp and torch_compile are inherited as true.
-num_collection_workers: 8
-collect_num_workers: 8
 
 # -- Data collection (for offline BC dataset) -------------------------
 # HARDWARE-SPECIFIC path. collect_episodes_per_env stays at the
