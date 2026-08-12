@@ -71,6 +71,15 @@ num_seeds: 3
 | `extends:` (empty) | No inheritance |
 | Chain depth | Any; cycles raise `ValueError` |
 | `--fast` | Applied raw after the chain, so machine keys (`use_amp`, `batch_size`, `diffusion_steps_collect`) survive |
+| Unknown key | `KeyError`, not a silent no-op. Valid keys are those in `configs/defaults.yaml` plus `ablations_default.yaml` |
+| Restated default | Rejected by `tests/test_config.py`: a key whose value equals what it would inherit is redundant and must be deleted |
+
+Key validation matters here because every ablation reads config through
+`getattr(cfg, key, fallback)`. Without it a typo such as `batch_sze: 512` is
+silently ignored and the real `batch_size` quietly keeps its inherited value.
+
+The inheritance itself is resolved by `src.config.resolve_config_chain`, shared
+with the main `--config` loader so both obey identical rules.
 
 ### Usage
 
