@@ -75,6 +75,7 @@ from experiments.rl_finetuning.ablations.training import (
 from experiments.rl_finetuning.analysis.plots import generate_all_plots
 from experiments.rl_finetuning.analysis.report import generate_diagnosis_report
 from experiments.rl_finetuning.analysis.tables import generate_summary_tables
+from src.config import resolve_config_chain, validate_keys
 
 logging.basicConfig(
     level=logging.INFO,
@@ -99,39 +100,21 @@ def _load_yaml(path: str | None) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def _resolve_extends(value: str, relative_to: Path) -> Path:
-    """Resolve an ``extends`` value against the extending file's directory.
-
-    Args:
-        value: Path string from the ``extends`` key.
-        relative_to: Directory of the file that declared it.
-
-    Returns:
-        Absolute, resolved path.
-    """
-    candidate = Path(value).expanduser()
-    if not candidate.is_absolute():
-        candidate = relative_to / candidate
-    return candidate.resolve()
-
-
-def _load_ablation_config(path: str | None) -> dict:
+def _load_ablation_config(path: str | None, allowed: set[str] | None = None) -> dict:
     """Load an ablations config, resolving its ``extends`` chain.
 
     Machine-specific configs (e.g. ``final_ablations_ucl.yaml``) carry only
-    the keys they change and inherit the rest from ``ablations_default.yaml``.
-    The base is chosen by, in order:
+    the keys they change and inherit the rest from ``ablations_default.yaml``,
+    which is the implicit base when a file declares no ``extends`` key. See
+    ``src.config.resolve_config_chain`` for the full inheritance rules.
 
-    * an explicit ``extends: <path>`` key, resolved relative to the file that
-      declares it (absolute paths are also accepted);
-    * ``extends:`` with an empty value, which opts out of inheritance;
-    * otherwise ``ablations_default.yaml``, unless this *is* that file.
-
-    Later files in the chain override earlier ones.  ``extends`` is stripped
-    from the result so it never reaches the config namespace.
+    ``extends`` is stripped from the result so it never reaches the config
+    namespace.
 
     Args:
         path: File path or None.
+        allowed: Valid config keys. When given, every file in the chain is
+            validated under its own name; None skips validation.
 
     Returns:
         Merged config dict.
@@ -139,52 +122,31 @@ def _load_ablation_config(path: str | None) -> dict:
     Raises:
         ValueError: If the chain contains a cycle.
         FileNotFoundError: If a referenced base config does not exist.
+        KeyError: If *allowed* is given and a file carries an unknown key.
     """
     if path is None:
         return {}
 
-    default_base = _DEFAULT_ABLATIONS_CONFIG.resolve()
-    chain: list[tuple[Path, dict]] = []
-    seen: set[Path] = set()
-    current: Path | None = Path(path).expanduser().resolve()
-
-    while current is not None:
-        if current in seen:
-            visited = " -> ".join(p.name for p, _ in chain)
-            raise ValueError(
-                f"Circular 'extends' chain in ablation configs: "
-                f"{visited} -> {current.name}"
-            )
-        seen.add(current)
-        raw = _load_yaml(str(current))
-        chain.append((current, raw))
-
-        if "extends" in raw:
-            parent_value = raw["extends"]
-            parent = (
-                _resolve_extends(str(parent_value), current.parent)
-                if parent_value
-                else None
-            )
-        elif current != default_base:
-            parent = default_base
-        else:
-            parent = None
-
-        if parent is not None and not parent.exists():
-            raise FileNotFoundError(
-                f"Base config '{parent}' referenced by '{current}' does not exist"
-            )
-        current = parent
+    chain = resolve_config_chain(Path(path), implicit_base=_DEFAULT_ABLATIONS_CONFIG)
 
     merged: dict = {}
-    for _, raw in reversed(chain):  # base first, override last
+    for source, raw in chain:  # base first, override last
+        if allowed is not None:
+            validate_keys(
+                raw,
+                allowed | {"extends"},
+                str(source),
+                valid_source=(
+                    "configs/defaults.yaml and "
+                    "experiments/rl_finetuning/configs/ablations_default.yaml"
+                ),
+            )
         merged.update({k: v for k, v in raw.items() if k != "extends"})
 
     if len(chain) > 1:
         logger.info(
             "Ablation config chain: %s",
-            " -> ".join(p.name for p, _ in reversed(chain)),
+            " -> ".join(p.name for p, _ in chain),
         )
     return merged
 
@@ -593,15 +555,24 @@ def main(argv: list[str] | None = None) -> None:
     main_cfg = _load_yaml(
         args.config or str(_PROJECT_ROOT / "configs" / "defaults.yaml")
     )
-    abl_cfg = _load_ablation_config(args.ablations_config)
+    # Valid ablation keys: the main config supplies model/env/diffusion
+    # settings, ablations_default.yaml the RL fine-tuning knobs. A key in
+    # neither is a typo, which would otherwise be silent: every consumer
+    # reads through `getattr(cfg, key, fallback)`, so a misspelt key just
+    # leaves the real one at its inherited value.
+    allowed = set(main_cfg) | set(_load_yaml(str(_DEFAULT_ABLATIONS_CONFIG)))
+    abl_cfg = _load_ablation_config(args.ablations_config, allowed=allowed)
 
     # Fast overrides. Loaded raw, NOT through the extends chain: this is an
     # overlay applied on top of whichever ablations config is in use, so it
     # must contribute only its own keys and never drag ablations_default.yaml
     # back over a machine-specific config.
+    # `extends` is deliberately NOT allowed here: this file is applied raw, so
+    # an extends key would land in the namespace instead of being resolved.
     fast_cfg: dict = {}
     if args.fast:
         fast_cfg = _load_yaml(str(_FAST_ABLATIONS_CONFIG))
+        validate_keys(fast_cfg, allowed, str(_FAST_ABLATIONS_CONFIG))
 
     # CLI overrides
     cli_overrides: dict = {}
