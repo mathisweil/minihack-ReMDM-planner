@@ -262,9 +262,6 @@ __marimo__/
 # macOS
 .DS_Store
 
-#Claude specific
-.claude/
-CLAUDE.md
 __pycache__/
 *.pyc
 
