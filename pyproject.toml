@@ -75,8 +75,7 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q -m 'not slow'"
+addopts = "-q --durations=10 -m 'not slow'"
 markers = [
     "slow: entry points that take more than a few seconds (deselected by default; run with -m slow)",
 ]
-filterwarnings = ["ignore::UserWarning", "ignore::DeprecationWarning"]
