@@ -268,3 +268,6 @@ __pycache__/
 parity/
 CHANGES.md
 CLI_CHANGES.md
+
+# Claude Code: per-machine settings stay local; the rest of .claude/ is shared
+.claude/settings.local.json
