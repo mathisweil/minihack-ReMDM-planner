@@ -11,7 +11,7 @@ and answer the question: *which intervention prevents RL fine-tuning collapse?*
 ## `rl_finetuning/` -- RL Fine-Tuning Ablation Suite
 
 Diagnoses why RL fine-tuning of the diffusion model collapses and which interventions fix it.
-Implements **25 ablations** across five groups, plus a comprehensive diagnostic and analysis pipeline.
+Implements **25 ablations**: a baseline plus four groups (A: Regularisation, B: Training Signal, C: Architecture, D: Data Quality), with a comprehensive diagnostic and analysis pipeline.
 
 ### Directory structure
 
