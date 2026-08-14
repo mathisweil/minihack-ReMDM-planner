@@ -160,7 +160,7 @@ class Evaluator:
         )
         failed = np.zeros(n, dtype=bool)
 
-        # FIX-B1: env-creation failures raise instead of silently counting
+        # Env-creation failures raise instead of silently counting
         # the episode as a loss, which deflated eval metrics.
         # Shaping stays on here: eval reports avg_reward.
         for i in range(n):
@@ -184,7 +184,7 @@ class Evaluator:
                 # Batch replan for active envs that need it
                 replan_idx = np.where(need_replan & ~done)[0]
                 if len(replan_idx) > 0:
-                    # PERF-X2: the buffers are int16; cross PCIe as int16
+                    # The buffers are int16; cross PCIe as int16
                     # and widen on the device, as the collection and
                     # training paths now do.
                     local_t = (
@@ -240,7 +240,7 @@ class Evaluator:
                     if step_in_plan[i] >= cfg.replan_every:
                         need_replan[i] = True
 
-                    # FIX-B1: step failures raise instead of ending the
+                    # Step failures raise instead of ending the
                     # episode as a silent loss.
                     obs, reward, term, trunc, info = envs[i].step(action)
                     local, glb = obs

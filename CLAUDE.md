@@ -25,7 +25,3 @@ PyTorch ReMDM planner on MiniHack; supervision by the built-in BFS oracle (no ex
 
 - The install path must not contain spaces: MiniHack's `mh_patch_nhdat.sh` fails silently (Python fallback in `src/envs/minihack_env.py`).
 - Custom `.des` scenarios belong in `environments/` (ships empty).
-
-## Cautions
-
-- Comments/docstrings cite documents and tracker IDs not present in the repo (e.g. `METHOD_PARITY`, `CHANGES.md`, `CLEANUP_PLAN.md`, FIX-*/PERF-*/CH-* IDs). Treat these as unresolved references, not as sources.

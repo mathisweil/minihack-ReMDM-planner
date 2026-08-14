@@ -1,11 +1,10 @@
 """ReMDM reverse denoising with remasking strategies.
 
 remdm_sample implements ReMDM Algorithm 1 (Wang et al.): Bernoulli
-posterior unmasking with the Section 4.1 remasking schedules. Shared
-pseudocode lines 8-12 (METHOD_PARITY 2.1); the craftax twin is
-src/diffusion/sampling.py:sample_plan. greedy_sample is a separate
-MaskGIT-style argmax decoder used only for DAgger collection (CH-6,
-documented engineering choice).
+posterior unmasking with the Section 4.1 remasking schedules. The
+craftax twin is src/diffusion/sampling.py:sample_plan. greedy_sample
+is a separate MaskGIT-style argmax decoder used only for DAgger
+collection (a documented engineering choice).
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ _N_PHYSICS_CHECK = 8  # only inspect the first N plan positions
 
 # Stability guards; values must match the craftax twin exactly.
 _SIGMA_DENOM_EPS = 1e-8  # sigma_max and posterior denominators
-# Demotion value for hazardous actions under the conf strategy (CH-6).
+# Demotion value for hazardous actions under the conf strategy.
 _HAZARD_DECODE_PROB = 0.001
 
 
@@ -63,7 +62,7 @@ def _check_hazard(local_crop: np.ndarray, action: int) -> bool:
 
 
 def top_p_filter(logits: Tensor, top_p: float) -> Tensor:
-    """Nucleus filtering (ReMDM Sec 5; CH-1 replaced top-k filtering).
+    """Nucleus filtering (ReMDM Sec 5).
 
     Keeps the smallest prefix of the descending-sorted distribution whose
     cumulative mass reaches ``top_p``; all other logits go to ``-inf``.
@@ -95,9 +94,9 @@ def _compute_remask_prob(
 ) -> Tensor | float:
     """Compute per-token remasking probability.
 
-    FIX-3 (ADJUDICATION B-3): the ``conf`` strategy now consumes the
-    stored decoding probability ``psi`` from the step each token was last
-    unmasked (ReMDM Sec 4.1), not the current step's fresh confidence.
+    The ``conf`` strategy consumes the stored decoding probability
+    ``psi`` from the step each token was last unmasked (ReMDM Sec 4.1),
+    not the current step's fresh confidence.
 
     Args:
         strategy: One of ``"rescale"``, ``"cap"``, ``"conf"``.
@@ -208,19 +207,17 @@ def remdm_sample(
     seq = torch.full((B, seq_len), mask_token, dtype=torch.long, device=device)
     psi = torch.full((B, seq_len), float("inf"), device=device)
 
-    # FIX-3 (ADJUDICATION B-3): ReMDM Algorithm 1 (Wang et al.). Masked
-    # tokens unmask via independent Bernoulli draws from the approximate
-    # posterior; committed tokens remask w.p. sigma from the Sec 4.1
-    # schedule. Replaces the previous MaskGIT count-based unmasking and
-    # its unsourced 10% min-keep floor. Shared pseudocode lines 8-12
-    # (METHOD_PARITY 2.1); the craftax twin is sample_plan.
+    # ReMDM Algorithm 1 (Wang et al.). Masked tokens unmask via
+    # independent Bernoulli draws from the approximate posterior;
+    # committed tokens remask w.p. sigma from the Sec 4.1 schedule.
+    # The craftax twin is sample_plan.
     for idx in range(K):
         t = (K - idx) / K
         s = (K - idx - 1) / K
         alpha_t = float(schedule_fn(torch.tensor(t)))
         alpha_s = float(schedule_fn(torch.tensor(s)))
         # Discrete conditioning bin for the learned timestep embedding
-        # (B-9, free per MDLM Sec 3.5: time conditioning is optional).
+        # (free per MDLM Sec 3.5: time conditioning is optional).
         t_discrete = torch.full(
             (B,),
             min(int(t * cfg.num_diffusion_steps), cfg.num_diffusion_steps - 1),
@@ -236,7 +233,7 @@ def remdm_sample(
 
         logits = logits / cfg.temperature
 
-        # Nucleus filtering (CH-1)
+        # Nucleus filtering
         logits = top_p_filter(logits, cfg.top_p)
 
         probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]
@@ -244,7 +241,7 @@ def remdm_sample(
 
         decode_prob = probs.gather(-1, preds.unsqueeze(-1)).squeeze(-1)  # [B, seq_len]
 
-        # Physics softener (unsourced engineering, default off; CH-6):
+        # Physics softener (unsourced engineering, default off):
         # demote hazardous cardinal actions to decode_prob=0.001 so the
         # conf strategy preferentially remasks them.
         if physics_aware and local_np is not None:

@@ -89,7 +89,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         """
         _ema_source = raw_model if raw_model is not None else model
         model.train()
-        # PERF-C4: fused AdamW on CUDA — see online.py's `run_dagger`.
+        # Fused AdamW on CUDA — see online.py's `run_dagger`.
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=cfg.offline_lr,
@@ -191,7 +191,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             optimizer.load_state_dict(resume_state["optimizer_state_dict"])
             scheduler.load_state_dict(resume_state["scheduler_state_dict"])
             step = resume_state["step"]
-            # FIX-B4 (offline arm): a resume without the saved RNG state
+            # A resume without the saved RNG state
             # would silently continue with fresh randomness; see the
             # online.py counterpart.
             rng = resume_state.get("rng_states", {})
@@ -216,7 +216,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
         _use_amp = getattr(cfg, "use_amp", False) and str(device).startswith("cuda")
         scaler = torch.amp.GradScaler("cuda", enabled=_use_amp)
 
-        # PERF-C2: the per-step loss is recorded into a device-side buffer
+        # The per-step loss is recorded into a device-side buffer
         # and materialised once after the loop. `loss_history.append(
         # loss.item())` ran every step and forced a device sync every step;
         # nothing reads the history until training finishes. The recorded
@@ -250,7 +250,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
             if batch is None:
                 break
             local_np, global_np, actions_np = batch
-            # PERF-C1: widen on the GPU, not the CPU — see online.py's
+            # Widen on the GPU, not the CPU — see online.py's
             # `_train_step`. Same buffer, same int16 glyph maps, same 4x
             # saving on the PCIe transfer; values are unchanged.
             local_t = torch.from_numpy(local_np).to(device).long()
@@ -466,7 +466,7 @@ def make_offline_trainer(cfg: SimpleNamespace) -> Callable:
                 )
                 last_ckpt_step = step
 
-        # Single sync for the whole run's loss history (PERF-C2).
+        # Single sync for the whole run's loss history.
         loss_history = _loss_track[:_loss_track_n].tolist()
 
         if log is not None:
@@ -557,7 +557,7 @@ def _save_offline_checkpoint(
 
     # Save config snapshot alongside checkpoint (mirrors DAgger).
     config_path: Path | None = ckpt_dir / f"config_offline_step{step}.yaml"
-    # FIX-B3: snapshot failures raise (see online.py counterpart).
+    # Snapshot failures raise (see online.py counterpart).
     cfg_dict = {k: v for k, v in vars(cfg).items() if not k.startswith("_")}
     with open(config_path, "w") as f:
         yaml.dump(cfg_dict, f, default_flow_style=False)
@@ -658,7 +658,7 @@ def _save_offline_checkpoint(
                     }
                 )
         except Exception:
-            # FIX-B3: selection integrity (see online.py counterpart).
+            # Selection integrity (see online.py counterpart).
             logger.error("Offline checkpoint eval failed", exc_info=True)
             raise
 

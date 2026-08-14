@@ -358,7 +358,7 @@ class ModelEMA:
         self._shadow: dict[str, Tensor] = {}
         for name, param in model.named_parameters():
             self._shadow[name] = param.data.clone()
-        # PERF-C3: cached operand lists for the fused update, rebuilt only
+        # Cached operand lists for the fused update, rebuilt only
         # when `update` is called with a different model object.
         self._fused_src: nn.Module | None = None
         self._fused_shadow: list[Tensor] = []
@@ -371,7 +371,7 @@ class ModelEMA:
         Args:
             model: Source model whose parameters are blended in.
         """
-        # PERF-C3: one fused kernel per operation instead of a Python loop
+        # One fused kernel per operation instead of a Python loop
         # over every parameter tensor. The loop issued two kernel launches
         # per parameter after every gradient step; `torch._foreach_*` issues
         # two in total. The arithmetic per element is unchanged.

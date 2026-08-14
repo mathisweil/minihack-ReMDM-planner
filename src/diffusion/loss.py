@@ -1,7 +1,6 @@
 """MDLM ELBO loss with SUBS parameterisation.
 
-Shared pseudocode lines 2-6 (METHOD_PARITY 2.1); the craftax twin is
-src/diffusion/loss.py:compute_loss.
+The craftax twin is src/diffusion/loss.py:compute_loss.
 
 Computes continuous-time loss on masked positions only, with analytic
 SUBS weighting clipped for numerical stability.
@@ -40,7 +39,7 @@ def mdlm_loss(
     the batch mean. This is the estimator stated by MDLM eq (10) and
     Shi et al. eq (4) under a constant per-token normalisation.
 
-    FIX-1 (ADJUDICATION B-1): replaces the previous default flat average
+    Replaces a flat average
     over all masked tokens in the batch — the MaskGIT loss of Shi et al.
     App. eq (28), which is not a likelihood bound — and the opt-in
     ``use_importance_weighting`` path, which divided by the realised
@@ -159,7 +158,7 @@ def find_staircase_from_glyphs(global_obs: Tensor) -> Tensor:
         | (global_obs == 2383)
     )
 
-    # PERF-C0: vectorised over the batch. The previous form looped over B
+    # Vectorised over the batch. The previous form looped over B
     # calling `is_stair[b].nonzero()`, and `nonzero` needs its output size
     # on the host, so every sample forced a device sync: 2048 syncs per
     # gradient step at `dagger_batch_size: 2048`, which dominated the step.

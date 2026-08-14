@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# FIX-B2: a missing oracle trajectory masquerades as oracle_steps=999, so a
+# A missing oracle trajectory masquerades as oracle_steps=999, so a
 # persistently failing oracle silently removes all DAgger supervision while
 # training keeps running. Halt after this many consecutive failures.
 _MAX_CONSECUTIVE_ORACLE_FAILURES = 10
@@ -270,7 +270,7 @@ class DataCollector:
         self.ema_model.eval()
 
     def _note_oracle_result(self, oracle_result, env_id: str) -> None:
-        """FIX-B2: raise once the oracle fails persistently."""
+        """Raise once the oracle fails persistently."""
         if oracle_result is not None:
             self._oracle_failure_streak = 0
             return

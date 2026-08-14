@@ -261,7 +261,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 ## Diffusion
 
 - **Forward process (MDLM):** each action token is independently replaced with `MASK` (12) with probability `1 - alpha(t)`, `alpha(t)` linear or cosine. PAD (13) is never masked.
-- **Loss:** continuous-time MDLM NELBO (FIX-1): per sample `w(t) * sum_masked(CE) / L` with `w(t) = -alpha'(t) / (1 - alpha(t))` clipped to `[0, 1000]`; optional `label_smoothing`.
+- **Loss:** continuous-time MDLM NELBO: per sample `w(t) * sum_masked(CE) / L` with `w(t) = -alpha'(t) / (1 - alpha(t))` clipped to `[0, 1000]`; optional `label_smoothing`.
 - **Greedy sampling:** used for DAgger collection. Same MaskGIT loop, argmax decoding, no temperature/top-K/remasking, `diffusion_steps_collect` steps.
 
 **Reverse sampling (ReMDM)**, over `K` steps (default 10):
@@ -494,7 +494,7 @@ uv run pytest -m slow    # slow entry points only (BC + PPO baselines), ~45s
 
 ## Implementation notes
 
-- **MDLM loss** returns `0.0` (not NaN) when no masked positions exist. NELBO-weighted per MDLM eq (10); see FIX-1 in CHANGES.md.
+- **MDLM loss** returns `0.0` (not NaN) when no masked positions exist. NELBO-weighted per MDLM eq (10).
 - **PAD tokens** are never masked and are excluded from the loss.
 - **Sampling paths:** evaluation uses stochastic ReMDM (temperature, top-K, remasking, `diffusion_steps_eval`); DAgger collection uses greedy argmax (`diffusion_steps_collect`).
 - **`remdm_sample`** guarantees a fully committed output via a final-step commit and an assertion. A min-keep 10% safety net prevents degenerate all-masked states.

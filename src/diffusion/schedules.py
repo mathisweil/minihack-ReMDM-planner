@@ -92,8 +92,8 @@ def get_schedule_deriv_for(
 ) -> Callable[[Tensor], Tensor]:
     """Analytic derivative for a registered schedule function.
 
-    FIX-1 (ADJUDICATION B-1): the NELBO weight uses the analytic
-    d(alpha)/dt as stated in MDLM eq (10) / Shi eq (4).
+    The NELBO weight uses the analytic d(alpha)/dt as stated in
+    MDLM eq (10) / Shi eq (4).
 
     Raises:
         KeyError: If *schedule_fn* is not a registered schedule.

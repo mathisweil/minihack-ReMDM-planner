@@ -82,7 +82,7 @@ def _save_table(
 
 
 def write_significance_test(results: dict[str, dict], out_dir: Path) -> None:
-    """C-002 (F-035): baseline vs best condition, exact permutation test + bootstrap CI.
+    """Baseline vs best condition, exact permutation test + bootstrap CI.
 
     Writes ``significance_test.txt``. With three seeds per condition the
     permutation test is exact (C(6,3) = 20 relabellings).
@@ -166,7 +166,7 @@ def make_main_results_table(
                 "Score": round(score, 4),
                 "Score_Std": round(
                     float(res.get("score_std", 0.0)), 4
-                ),  # C-002 (F-035): popstd over seeds
+                ),  # popstd over seeds
                 "Delta_Pretrained": round(delta_pre, 4),
                 "Delta_Baseline": round(delta_bl, 4),
                 "Verdict": verdict,
@@ -341,7 +341,7 @@ def make_per_env_table(
     """
     rows: list[dict] = []
     for name, res in sorted(results.items()):
-        # C-002 (F-024): average per-seed final win rates when recorded;
+        # Average per-seed final win rates when recorded;
         # fall back to the legacy single merged history otherwise.
         finals = [
             f["per_env_win_rates"]
@@ -495,7 +495,7 @@ def generate_summary_tables(
         caption="Main ablation results",
         label="tab:main-results",
     )
-    write_significance_test(results, tables_dir)  # C-002 (F-035)
+    write_significance_test(results, tables_dir)
 
     tables["group_summary"] = make_group_summary_table(results, pretrained_score)
     _save_table(

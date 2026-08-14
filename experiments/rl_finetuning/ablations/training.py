@@ -366,7 +366,7 @@ def _extract_windows(
         episode buffer's dtype (int16 for glyph maps); callers widen to
         int64 on the device after the transfer.
     """
-    # PERF-X2: no host-side `.long()`. Widening 9x9 and 21x79 glyph maps
+    # No host-side `.long()`. Widening 9x9 and 21x79 glyph maps
     # to int64 here quadruples both the concatenation and the bytes that
     # cross PCIe, for several thousand windows an iteration.
     local_arr = torch.from_numpy(episode["local"])  # [T, 9, 9]
@@ -489,7 +489,7 @@ def _collect_training_data_seq(
         empty = torch.empty(0)
         return empty, empty, empty, empty
 
-    # PERF-X2: transfer at the buffer's dtype, widen on the device.
+    # Transfer at the buffer's dtype, widen on the device.
     local_obs = torch.cat(all_local).to(device).long()
     global_obs = torch.cat(all_global).to(device).long()
     x0 = torch.cat(all_x0).to(device)
@@ -556,7 +556,7 @@ def _collect_training_data_gpu(
     n_steps = np.zeros(n, dtype=np.int32)
 
     try:
-        # PERF-X1: borrow from the shared pool rather than constructing.
+        # Borrow from the shared pool rather than constructing.
         # ``shaped_reward`` stays at its default True: the episode return
         # drives the advantage weights and the win-rate tracking, so
         # unshaped rewards would change what every ablation optimises.
@@ -574,7 +574,7 @@ def _collect_training_data_gpu(
             # Batch replan on GPU (stochastic ReMDM)
             replan_idx = np.where(need_replan & ~done)[0]
             if len(replan_idx) > 0:
-                # PERF-X2: the buffers are int16; cross PCIe as int16 and
+                # The buffers are int16; cross PCIe as int16 and
                 # widen on the device rather than the other way round.
                 local_t = (
                     torch.from_numpy(
@@ -678,7 +678,7 @@ def _collect_training_data_gpu(
         empty = torch.empty(0)
         return empty, empty, empty, empty
 
-    # PERF-X2: transfer at the buffer's dtype, widen on the device. At the
+    # Transfer at the buffer's dtype, widen on the device. At the
     # measured several thousand windows an iteration this is the largest
     # single host-to-device transfer in the loop.
     return (
@@ -844,7 +844,7 @@ def run_ablation(
     # Evaluator
     evaluator = Evaluator()
 
-    # PERF-X3: one eval model for the whole run, refreshed in place.
+    # One eval model for the whole run, refreshed in place.
     # ``make_eval_model`` is a ``copy.deepcopy`` plus an EMA apply, and it
     # was called once per iteration, once per eval and once at the end.
     # ``apply_to`` overwrites every named parameter from the same shadow,
@@ -909,7 +909,7 @@ def run_ablation(
     _init_state = {
         k: v.clone() for k, v in raw_model.state_dict().items() if v.is_floating_point()
     }
-    # PERF-X4: operand lists for the fused health metrics below. Parameter
+    # Operand lists for the fused health metrics below. Parameter
     # tensors are updated in place by the optimizer, so the lists stay
     # valid for the whole run.
     _health_params = [p.data for p in raw_model.parameters()]
@@ -1182,7 +1182,7 @@ def run_ablation(
 
         # Model health (every 10 iters)
         if iteration % 10 == 0:
-            # PERF-X4: one fused norm over the parameter list and a single
+            # One fused norm over the parameter list and a single
             # device sync, instead of one `.item()` per tensor twice over
             # (roughly 144 syncs every 10 iterations). Both quantities are
             # the root-sum-of-squares of the per-tensor 2-norms, which is

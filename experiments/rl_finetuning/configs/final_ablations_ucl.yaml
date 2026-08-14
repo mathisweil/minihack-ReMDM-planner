@@ -17,7 +17,7 @@
 # =============================================================================
 
 # -- Training loop ------------------------------------------------------------
-# See PERF-X7 in run_ablations.py: at this batch size the suite reaches ~94% of
+# See the data-limited batch note in run_ablations.py: at this batch size the suite reaches ~94% of
 # VRAM on a 16GB card, hence the expandable_segments allocator setting.  On
 # 24GB it is comfortable.
 batch_size: 4608

@@ -177,8 +177,8 @@ class Trainer:
                 "oracle_steps": oracle_steps_iter,
             }
 
-            # (B-11, documented): this budget charges oracle env.step() calls;
-            # the craftax repo counts learner frames only (METHOD_PARITY 2.5).
+            # This budget charges oracle env.step() calls; the craftax repo
+            # counts learner frames only.
             # Advance the unified env-step budget. Both model and oracle
             # rollouts consume real env.step() calls (the oracle rollout
             # runs in its own env instance in collect_oracle_trajectory),
@@ -187,7 +187,7 @@ class Trainer:
             env_steps_total += iter_env_steps
 
             # 2. Gradient steps (EMA updated after each step)
-            # PERF-C2: the per-step metrics stay on the device and are
+            # The per-step metrics stay on the device and are
             # summed there. Calling `.item()` per step forced four device
             # syncs per gradient step (400 per iteration), each stalling
             # the CPU until the GPU drained. The single `.tolist()` below
@@ -382,7 +382,7 @@ class Trainer:
             zero = torch.zeros((), device=self.device)
             return dict.fromkeys(_STEP_METRIC_KEYS, zero)
         local_np, global_np, actions_np = batch
-        # PERF-C1: widen on the GPU, not the CPU. The buffer holds glyph
+        # Widen on the GPU, not the CPU. The buffer holds glyph
         # maps as int16 (minihack_env.py:720-721), so casting before the
         # transfer sends 4x the bytes over PCIe: `global` alone is 27.2 MB
         # per step as int64 against 6.8 MB as int16. The widening is exact
@@ -488,14 +488,14 @@ class Trainer:
             },
         }
 
-        # FIX-B3: a failed save must halt the run, not let hours of
+        # A failed save must halt the run, not let hours of
         # training finish with no usable checkpoint.
         torch.save(state, path)
         logger.info(f"Checkpoint saved: {path}")
 
         # Save config snapshot alongside checkpoint
         config_path = ckpt_dir / f"config_iter{iteration}.yaml"
-        # FIX-B3: the snapshot backs the evaluate-with-snapshot workflow;
+        # The snapshot backs the evaluate-with-snapshot workflow;
         # a checkpoint without one is a defect, so failures raise.
         cfg_dict = {
             k: v for k, v in vars(self.cfg).items() if not k.startswith("_")
@@ -606,7 +606,7 @@ class Trainer:
                 }
             )
         except Exception:
-            # FIX-B3: best-checkpoint selection reads these evals; a
+            # Best-checkpoint selection reads these evals; a
             # silently skipped eval biases selection toward the
             # checkpoints whose eval happened to succeed.
             logger.error("Checkpoint eval failed", exc_info=True)
@@ -659,7 +659,7 @@ class Trainer:
 
         self.collector.curriculum.load_state_dict(ckpt["curriculum_state"])
 
-        # FIX-B4: a resume that cannot restore the saved RNG state would
+        # A resume that cannot restore the saved RNG state would
         # silently continue with fresh randomness while claiming to be a
         # resume, corrupting the seed provenance the interval estimates
         # depend on. All checkpoints from the current code carry
@@ -713,7 +713,7 @@ def run_dagger(
     # torch.compile: wrap for training only; shares parameters with raw_model
     model = try_compile(raw_model, cfg)
 
-    # PERF-C4: `fused=True` folds the whole AdamW update into one kernel
+    # `fused=True` folds the whole AdamW update into one kernel
     # instead of a per-tensor loop over the 72 parameter tensors. CUDA only;
     # it is safe alongside AMP's GradScaler, which passes its inf check
     # through to the fused kernel.

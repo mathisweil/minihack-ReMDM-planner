@@ -1,4 +1,4 @@
-"""Failure-behaviour tests for FIX-B1..B4 (ADJUDICATION handler ruling).
+"""Failure-behaviour tests: hard failures raise instead of degrading silently.
 
 Each fix converts a silently-swallowed failure that could produce
 plausible-looking wrong results into a raised error. These tests prove
@@ -12,7 +12,7 @@ import pytest
 
 
 def test_eval_raises_on_broken_env(tiny_cfg):
-    """FIX-B1: an evaluation episode that cannot be created raises instead
+    """An evaluation episode that cannot be created raises instead
     of counting as a silent loss in the win-rate denominator."""
     from src.models.denoiser import make_model
     from src.planners.inference import Evaluator
@@ -25,7 +25,7 @@ def test_eval_raises_on_broken_env(tiny_cfg):
 
 
 def test_collector_halts_on_persistent_oracle_failure(tiny_cfg):
-    """FIX-B2: ten consecutive missing oracle trajectories raise instead of
+    """Ten consecutive missing oracle trajectories raise instead of
     silently removing DAgger supervision (oracle_steps=999 masquerade)."""
     from src.buffer import ReplayBuffer
     from src.curriculum import DynamicCurriculum
@@ -56,7 +56,7 @@ def test_collector_halts_on_persistent_oracle_failure(tiny_cfg):
 
 
 def test_offline_snapshot_save_failure_raises(tiny_cfg, tmp_path, monkeypatch):
-    """FIX-B3: a checkpoint whose config snapshot cannot be written raises
+    """A checkpoint whose config snapshot cannot be written raises
     instead of shipping a checkpoint the snapshot-evaluation workflow
     cannot use."""
     import yaml as yaml_mod
@@ -85,7 +85,7 @@ def test_offline_snapshot_save_failure_raises(tiny_cfg, tmp_path, monkeypatch):
 def test_offline_checkpoint_saves_and_requires_rng_states(
     tiny_cfg, tmp_path, monkeypatch
 ):
-    """FIX-B4 (offline arm): offline checkpoints carry rng_states, and an
+    """Offline arm: offline checkpoints carry rng_states, and an
     offline resume without them raises instead of continuing with fresh
     randomness under a resume's identity."""
     import torch
@@ -145,7 +145,7 @@ def test_inference_rejects_bare_state_dict(tiny_cfg, tmp_path):
 
 
 def test_resume_refuses_corrupt_rng_state(tiny_cfg, tmp_path):
-    """FIX-B4: rng_states present but unrestorable raises instead of
+    """rng_states present but unrestorable raises instead of
     continuing with fresh randomness under a resume's identity; a
     checkpoint without rng_states raises (all current checkpoints
     carry it, so absence means malformed)."""

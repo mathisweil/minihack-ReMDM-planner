@@ -1,4 +1,4 @@
-"""Pins for the GPU-side performance changes (PERF-C0 to PERF-C4).
+"""Pins for the GPU-side performance optimisations.
 
 Every change in that set is meant to be arithmetic-preserving: it removes
 device syncs, kernel launches or PCIe traffic without touching the values
@@ -23,7 +23,7 @@ STAIR_GLYPHS = (62, 2310, 2368, 2383)
 
 
 def _reference_staircase(global_obs: torch.Tensor) -> torch.Tensor:
-    """The pre-PERF-C0 implementation: a Python loop over the batch.
+    """The unvectorised reference: a Python loop over the batch.
 
     Kept here as the specification of the vectorised version.
     """
@@ -42,7 +42,7 @@ def _reference_staircase(global_obs: torch.Tensor) -> torch.Tensor:
     return coords
 
 
-# ── PERF-C0: vectorised staircase lookup ─────────────────────────────
+# ── Vectorised staircase lookup ─────────────────────────────
 
 
 @pytest.mark.parametrize("glyph", STAIR_GLYPHS)
@@ -105,7 +105,7 @@ def test_result_is_float32_regardless_of_input_dtype():
         assert find_staircase_from_glyphs(maps).dtype == torch.float32
 
 
-# ── PERF-C3: fused EMA update ────────────────────────────────────────
+# ── Fused EMA update ────────────────────────────────────────
 
 
 def test_fused_ema_matches_the_per_parameter_loop(tiny_cfg):
@@ -146,7 +146,7 @@ def test_ema_rebuilds_its_cache_for_a_different_model(tiny_cfg):
         assert torch.allclose(ema._shadow[name], expected), name
 
 
-# ── PERF-C2: device-side step metrics ────────────────────────────────
+# ── Device-side step metrics ────────────────────────────────
 
 
 def _trainer(cfg, trajectory=None, device="cpu"):
@@ -201,7 +201,7 @@ def test_empty_buffer_step_is_a_no_op_in_both_forms(tiny_cfg):
     )
 
 
-# ── PERF-C1: the int16 transfer widens exactly ───────────────────────
+# ── The int16 transfer widens exactly ───────────────────────
 
 
 def test_buffer_glyphs_widen_from_int16_without_changing_values(tiny_cfg):

@@ -1,4 +1,4 @@
-"""Regressions for the RL fine-tuning speed pass (PERF-X1 onwards).
+"""Regressions for the RL fine-tuning speed pass.
 
 Each change here is only admissible if it leaves the ablation's output
 untouched, so the equivalence is pinned rather than asserted in a commit
@@ -47,7 +47,7 @@ def _episode(n_steps: int, seed: int = 0) -> dict:
     }
 
 
-# ── PERF-X2: int16 across the transfer, widened on the device ────────
+# ── Int16 across the transfer, widened on the device ────────
 
 
 def test_extract_windows_keeps_the_buffer_dtype():
@@ -66,7 +66,7 @@ def test_device_side_widening_equals_the_host_side_cast():
     ep = _episode(40, seed=1)
     lo, go, x0, _ = _extract_windows(ep, seq_len=8, pad_token=13)
 
-    # What the pre-PERF-X2 code produced: cast on the host, then move.
+    # The unoptimised form: cast on the host, then move.
     host_local = torch.from_numpy(ep["local"]).long()
     host_global = torch.from_numpy(ep["global"]).long()
     host_lo, host_go, host_x0, _ = _extract_windows(
@@ -110,7 +110,7 @@ def test_int16_to_int64_is_exact_over_the_whole_glyph_range():
     assert torch.equal(widened, torch.arange(0, GLYPH_MAX + 1, dtype=torch.int64))
 
 
-# ── PERF-X3: one eval model, refreshed in place ──────────────────────
+# ── One eval model, refreshed in place ──────────────────────
 
 
 @pytest.fixture
@@ -179,7 +179,7 @@ def test_the_denoiser_has_no_buffers_to_go_stale(tiny_model_cfg):
     assert list(raw.named_buffers()) == []
 
 
-# ── PERF-X4: fused health metrics ────────────────────────────────────
+# ── Fused health metrics ────────────────────────────────────
 
 
 def test_fused_param_norm_matches_the_per_tensor_loop(tiny_model_cfg):
@@ -218,7 +218,7 @@ def test_fused_param_norm_matches_the_per_tensor_loop(tiny_model_cfg):
     assert fused_drift == pytest.approx(loop_drift, rel=1e-6)
 
 
-# ── PERF-X1: collection borrows from the pool ────────────────────────
+# ── Collection borrows from the pool ────────────────────────
 
 
 @pytest.fixture

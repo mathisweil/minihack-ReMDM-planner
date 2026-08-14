@@ -111,8 +111,8 @@ def test_cosine_sq_schedule_closed_form():
 def test_schedule_registry_names_follow_mdlm_e1():
     """The label "cosine" must denote MDLM eq (92), not eq (91).
 
-    Source: MDLM App E.1; ADJUDICATION B-6 (label collision fixed by
-    FIX-5). Guards against the two repos' "cosine" diverging again.
+    Source: MDLM App E.1. Guards against the two repos' "cosine"
+    diverging again.
     """
     t = torch.tensor([0.5], dtype=torch.float64)
     assert torch.allclose(get_schedule("cosine")(t),
@@ -132,7 +132,7 @@ def test_forward_marginal_endpoints_and_pad():
     PAD positions are never corrupted.
 
     Source: MDLM Sec 3.2.1 (forward masking marginal); PAD exclusion is the
-    benchmark-forced extension documented in METHOD_PARITY 2.1. Endpoints
+    benchmark-forced extension. Endpoints
     are deterministic: at t=1 the mask draw u<1 always holds (u in [0,1));
     at t=0 u<0 never holds.
     """
@@ -195,10 +195,9 @@ def test_loss_denominator_is_per_token_not_per_masked():
     """Half-masked at t=0.5 (linear): loss = w(0.5)*logV*(4/8) = log V.
 
     Source: MDLM eq (8)/(10); Shi eq (4). The equations contain no division
-    by the realised masked count; dividing by it (the pre-FIX-1 opt-in form
-    and the pre-FIX-1 craftax form) would return 2*log V here, off by the
-    factor L/n_masked = 2. This is the regression test for ADJUDICATION
-    B-1's denominator finding.
+    by the realised masked count; dividing by it would
+    return 2*log V here, off by the factor L/n_masked = 2. This is the
+    regression test for the loss denominator.
     """
     logits, x0 = _uniform_logits_case()
     zt = x0.clone()
@@ -275,8 +274,8 @@ def test_conf_strategy_softmax_of_stored_psi():
 
     Source: ReMDM Sec 4.1 (Confidence-Based Schedule): eta_conf =
     exp(-psi_l)/sum exp(-psi_l'), with psi the decoding probability stored
-    when the token was last unmasked (FIX-3 corrected this repo to use the
-    stored value). Sum over committed positions = eta * sigma_max.
+    when the token was last unmasked. Sum over committed positions =
+    eta * sigma_max.
     """
     eta, sigma_max = 0.5, 0.8
     psi = torch.tensor([[0.9, 0.2, float("inf"), 0.5]])
@@ -350,7 +349,7 @@ def test_posterior_unmask_rate_first_step():
 
     Source: ReMDM Algorithm 1 approximate posterior, z_t = m branch.
     Statistical: 128*64 = 8192 Bernoulli(0.5) draws; sigma = sqrt(0.25/8192)
-    = 0.0055; bound = 4 sigma = 0.0221. The pre-FIX-3 MaskGIT count rule
+    = 0.0055; bound = 4 sigma = 0.0221. A MaskGIT count-based rule
     would deterministically unmask exactly ceil(L/2) per row and, at the
     old first step (k=1/K), only L/K tokens - both outside this bound.
     """
