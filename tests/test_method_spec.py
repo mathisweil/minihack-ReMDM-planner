@@ -1,8 +1,8 @@
 """Literature-anchored specification tests.
 
-Every expected value here is derived from a primary source in ../papers/
-(cited per test) or from a derivation written out in the docstring - never
-from the current output of this or the sibling repo. The craftax repo
+Every expected value here is derived from a primary source (cited
+per test; full references below) or from a derivation written out in
+the docstring - never from the current output of this or the sibling repo. The craftax repo
 carries the same assertions with the same inputs and tolerances wherever
 the mathematics is parameter-free and shared.
 
@@ -10,6 +10,20 @@ Tolerances: closed-form checks use atol=1e-6 (an order of magnitude above
 float32 round-off, which the parity probes measured at <4e-8 on these
 functions). Statistical checks state their sampling distribution and use a
 4-sigma bound with the derivation in the docstring.
+
+References:
+- MDLM: Sahoo et al., "Simple and Effective Masked Diffusion Language
+  Models", NeurIPS 2024. arXiv:2406.07524.
+- Shi: Shi et al., "Simplified and Generalized Masked Diffusion for
+  Discrete Data", NeurIPS 2024. arXiv:2406.04329.
+- ReMDM: Wang et al., "Remasking Discrete Diffusion Models with
+  Inference-Time Scaling", NeurIPS 2025. arXiv:2503.00307.
+- MaskGIT: Chang et al., "MaskGIT: Masked Generative Image
+  Transformer", CVPR 2022. arXiv:2202.04200.
+- Nichol & Dhariwal, "Improved Denoising Diffusion Probabilistic
+  Models", ICML 2021. arXiv:2102.09672.
+- Holtzman et al., "The Curious Case of Neural Text Degeneration",
+  ICLR 2020. arXiv:1904.09751.
 """
 
 from __future__ import annotations
