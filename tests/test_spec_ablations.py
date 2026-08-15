@@ -187,35 +187,46 @@ def test_baseline_loss_is_linear_in_the_advantages():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "traceability §8.5: make_loss_bc_wins passes advantages=None to "
-        "_core_loss (losses.py:458-467) and no caller pre-filters, so the "
-        "win mask never reaches the loss - bc_wins trains a uniform ELBO "
-        "on all windows"
-    ),
-)
-def test_bc_wins_loss_is_zero_on_an_all_losing_batch():
+def test_bc_wins_averages_uniformly_over_winning_windows():
     """Canonical bc_wins ('Uniform ELBO on win windows', win = return >
-    win_threshold, spec-ablations §2): a batch with no winning window
-    carries no training signal, so the loss must be 0. The win mask is
-    produced by the pipeline's own compute_advantages(wins_only=True).
+    win_threshold, spec-ablations §2; was defect §8.5): a batch with no
+    winning window carries no action-loss signal (0 with the auxiliary
+    goal loss weighted 0), and an all-winning batch reduces to the
+    plain uniform ELBO. Win masks come from the pipeline's own
+    compute_advantages(wins_only=True).
     """
     model = _FixedLogitsModel(_UNIFORM)
     cfg = _cfg()
     local, glob, x0 = _batch()
-    win_mask, _, _ = compute_advantages(
-        torch.tensor([0.0, 0.1, 0.2, 0.3]), 0.1, 5.0, wins_only=True,
-        win_thresh=0.5, use_running_stats=False, ema_decay=0.99,
-        running_mean=0.0, running_std=1.0,
-    )
-    assert win_mask.abs().sum() == 0
+
+    def mask(returns):
+        m, _, _ = compute_advantages(
+            torch.tensor(returns), 0.1, 5.0, wins_only=True, win_thresh=0.5,
+            use_running_stats=False, ema_decay=0.99,
+            running_mean=0.0, running_std=1.0,
+        )
+        return m
+
     torch.manual_seed(0)
-    loss = float(
-        make_loss_bc_wins(_ctx(cfg=cfg))(model, local, glob, x0, win_mask, cfg, "cpu")
+    lose = float(
+        make_loss_bc_wins(_ctx(cfg=cfg))(
+            model, local, glob, x0, mask([0.0, 0.1, 0.2, 0.3]), cfg, "cpu"
+        )
     )
-    assert loss == 0.0
+    assert lose == 0.0
+    torch.manual_seed(0)
+    all_wins = float(
+        make_loss_bc_wins(_ctx(cfg=cfg))(
+            model, local, glob, x0, mask([1.0, 2.0, 3.0, 4.0]), cfg, "cpu"
+        )
+    )
+    torch.manual_seed(0)
+    uniform = float(
+        make_loss_baseline(_ctx(cfg=cfg))(
+            model, local, glob, x0, torch.ones(B), cfg, "cpu"
+        )
+    )
+    assert all_wins == pytest.approx(uniform, abs=0.0)
 
 
 # ---------------------------------------------------------------------------

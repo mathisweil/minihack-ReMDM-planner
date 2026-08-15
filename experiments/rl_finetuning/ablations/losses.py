@@ -446,13 +446,21 @@ def make_loss_mixed_replay(ctx: LossContext) -> LossFn:
 
 
 def make_loss_bc_wins(ctx: LossContext) -> LossFn:
-    """Uniform ELBO ignoring advantages (BC on wins).
+    """Uniform ELBO over the winning windows only (BC on wins).
+
+    The training loop passes the binary win mask (return > win_threshold,
+    from ``compute_advantages(wins_only=True)``) as ``advantages``.
+    Rescaling the mask by ``B / n_wins`` turns ``_core_loss``'s batch
+    mean into a uniform mean over the winning windows; a batch with no
+    winning window contributes zero action loss (the auxiliary goal
+    loss is kept, as in every other ablation). ``advantages=None`` is
+    treated as all-wins (plain uniform BC).
 
     Args:
         ctx: Shared loss context.
 
     Returns:
-        ``LossFn`` with advantages zeroed out.
+        ``LossFn`` averaging uniformly over winning windows.
     """
 
     def loss_fn(
@@ -464,7 +472,16 @@ def make_loss_bc_wins(ctx: LossContext) -> LossFn:
         cfg: SimpleNamespace,
         device: torch.device,
     ) -> Tensor:
-        return _core_loss(model, local_obs, global_obs, x0, None, cfg, device)
+        b = x0.shape[0]
+        if advantages is None:
+            win_mask = torch.ones(b, device=x0.device)
+        else:
+            win_mask = (advantages > 0).float()
+        n_wins = win_mask.sum()
+        scale = (b / n_wins.clamp(min=1.0)) * (n_wins > 0).float()
+        return _core_loss(
+            model, local_obs, global_obs, x0, win_mask * scale, cfg, device
+        )
 
     return loss_fn
 
