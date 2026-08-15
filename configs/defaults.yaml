@@ -252,8 +252,11 @@ baselines_dt_eval_max_steps: 200
 
 # ── Output / W&B ─────────────────────────────────────────────────────
 # Separate W&B project for baselines (kept distinct from the main
-# remdm-minihack project so baseline runs don't pollute training
-# leaderboards). Set to null to fall back to wandb_project.
+# minihack-ReMDM-planner project so baseline runs don't pollute
+# training leaderboards). W&B creates the project on the first logged
+# run - it does not exist on the entity until baselines run with W&B
+# enabled (step-7 finding N2). Set to null to fall back to
+# wandb_project.
 baselines_wandb_project: minihack-ReMDM-baselines
 # Where per-seed checkpoints, SB3 logs, and aggregated results JSON
 # are written. Resolved relative to the project root unless absolute.

@@ -716,11 +716,9 @@ def main(argv: list[str] | None = None) -> None:
         else:
             resume_id = args.wandb_resume_id
             wandb_run = wandb.init(
-                project=(
-                    args.wandb_project
-                    or getattr(cfg, "wandb_project", None)
-                    or "remdm-minihack-ablations"
-                ),
+                # Config governs the project name (spec-config §6.5;
+                # the old "remdm-*" literal was a dead fallback).
+                project=(args.wandb_project or cfg.wandb_project),
                 name=run_id,
                 config=vars(cfg),
                 tags=["ablations"] + selected,
