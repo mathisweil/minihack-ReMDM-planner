@@ -1,4 +1,5 @@
 import logging
+import tempfile
 
 import torch
 
@@ -19,6 +20,12 @@ def run_smoke(cfg) -> None:
 
     device = cfg.device
     logger.info(f"Smoke test on {device}")
+
+    # Smoke runs are throwaway: keep checkpoints, config snapshots and
+    # eval JSONs out of the repository tree (step-7 finding N6 / PARITY
+    # "Smoke-mode side effects" - craftax smoke leaves no artefacts).
+    cfg.checkpoint_dir = tempfile.mkdtemp(prefix="remdm-smoke-")
+    logger.info(f"Smoke artefacts -> {cfg.checkpoint_dir}")
 
     # Collect a few oracle trajectories into the buffer
     buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)

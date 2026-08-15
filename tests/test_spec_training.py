@@ -260,17 +260,10 @@ def test_no_warm_start_disables_oracle_buffer_seeding(monkeypatch):
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "step-7 finding N6 / PARITY 'Smoke-mode side effects': --mode smoke "
-        "writes iterN.pth checkpoints (~168 MB) into the repo checkpoints/ "
-        "root; craftax smoke leaves no artefacts"
-    ),
-)
 def test_smoke_mode_leaves_no_artifacts_in_the_repo():
     """The documented smoke invocation must not persist artefacts into
-    the repository tree (parity with craftax smoke; step-7 N6).
+    the repository tree (parity with craftax smoke; was step-7 finding
+    N6: iterN.pth checkpoints landed in the repo checkpoints/ root).
 
     Runs `main.py --mode smoke` exactly as documented (no overrides)
     from the repo root and compares the checkpoints/ listing before and
