@@ -250,7 +250,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--device", type=str, default=None)
 
-    p.add_argument("--use-wandb", action="store_true", default=False)
+    p.add_argument(
+        "--use-wandb",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable W&B logging (overrides the config's use_wandb).",
+    )
     p.add_argument("--wandb-project", type=str, default=None)
     p.add_argument(
         "--wandb-resume-id",
@@ -705,9 +710,13 @@ def main(argv: list[str] | None = None) -> None:
     pretrained_score = _evaluate_pretrained(checkpoint_path, cfg, device)
     logger.info("Pretrained baseline ID win rate: %.4f", pretrained_score)
 
-    # W&B (optional dependency)
+    # W&B (optional dependency). The CLI flag overrides the config key
+    # when given; otherwise the config governs, as in the craftax twin.
+    use_wandb = args.use_wandb if args.use_wandb is not None else getattr(
+        cfg, "use_wandb", False
+    )
     wandb_run = None
-    if args.use_wandb:
+    if use_wandb:
         try:
             import wandb
         except ImportError:

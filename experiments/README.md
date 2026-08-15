@@ -340,7 +340,7 @@ with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--mer
 | `--analyze-only` | Skip training, regenerate analysis from existing results |
 | `--results-path PATH` | Explicit path to `results.json` (with `--analyze-only`) |
 | `--merge JSON [JSON ...]` | Merge multiple `results.json` files and regenerate analysis |
-| `--use-wandb` | Enable W&B logging |
+| `--use-wandb` / `--no-use-wandb` | Enable/disable W&B logging (overrides `use_wandb`, default `false`) |
 | `--wandb-project NAME` | W&B project name (default: `remdm-minihack-ablations`) |
 | `--wandb-resume-id ID` | W&B run ID for curve continuity |
 | `--max-iter N` | Override max training iterations |

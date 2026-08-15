@@ -135,8 +135,9 @@ reward_model_lr: 1.0e-3
 reward_model_train_steps: 50
 
 # -- Output / Logging --------------------------------------------------------
-# W&B logging is enabled by the --use-wandb CLI flag; this key is not read.
-use_wandb: true
+# W&B logging: this key governs; --use-wandb / --no-use-wandb overrides it.
+# Off by default so a bare run needs no W&B account (as in the craftax twin).
+use_wandb: false
 wandb_project: minihack-ReMDM-planner-ablations
 wandb_entity: myopic-planner
 
