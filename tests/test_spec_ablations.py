@@ -148,18 +148,18 @@ def test_compute_advantages_running_stats_branch_closed_form():
     0.1, 5.0) (spec-ablations §2 running_stats row).
 
     Derivation with ema_decay d=0.5, prior mean 0 / std 1, batch
-    [0,1,2,3]: new_mean = 0.75; this repo's batch std is the SAMPLE
-    std (torch default, ddof=1) sqrt(5/3) = 1.29099 (the craftax twin
-    uses the population std sqrt(1.25) - recorded as a step-8 parity
-    finding), so new_std = 0.5 + 0.5*1.29099 = 1.14550 and
-    adv_i = clip((w_i-0.75)/1.14550 + 1, 0.1, 5).
+    [0,1,2,3]: new_mean = 0.75; the batch std is the POPULATION std
+    sqrt(1.25) = 1.11803 (spec-ablations §2 step-9 amendment resolving
+    parity finding S8-7; same numbers as the craftax twin), so
+    new_std = 0.5 + 0.5*1.11803 = 1.05902 and
+    adv_i = clip((w_i-0.75)/1.05902 + 1, 0.1, 5).
     """
     adv, mean, std = compute_advantages(
         torch.tensor([0.0, 1.0, 2.0, 3.0]), 0.1, 5.0, wins_only=False,
         win_thresh=0.5, use_running_stats=True, ema_decay=0.5,
         running_mean=0.0, running_std=1.0,
     )
-    new_std = 0.5 * 1.0 + 0.5 * (math.sqrt(5 / 3) + 1e-8)
+    new_std = 0.5 * 1.0 + 0.5 * (math.sqrt(1.25) + 1e-8)
     expected = np.clip((np.array([0, 1, 2, 3.0]) - 0.75) / new_std + 1.0, 0.1, 5.0)
     assert np.allclose(adv.numpy(), expected, atol=1e-4)
     assert mean == pytest.approx(0.75, abs=1e-6)

@@ -317,7 +317,10 @@ def compute_advantages(
     """
     clipped = returns.clamp(min=0.0)
     batch_mean = clipped.mean().item()
-    batch_std = clipped.std().item() + 1e-8
+    # Population std (correction=0): batch statistics, matching the
+    # craftax twin's jnp.std (spec-ablations §2, step-9 amendment;
+    # step-8 parity finding S8-7 - torch's default is the sample std).
+    batch_std = clipped.std(correction=0).item() + 1e-8
 
     if wins_only:
         adv = (returns > win_thresh).float()
