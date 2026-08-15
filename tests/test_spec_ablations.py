@@ -440,6 +440,37 @@ def test_t_curriculum_anneals_high_noise_to_low_noise():
 
 
 # ---------------------------------------------------------------------------
+# reward_filtering / action_diversity (spec-ablations §2, step-9 seams)
+# ---------------------------------------------------------------------------
+
+
+def test_reward_filter_keeps_strictly_above_the_percentile():
+    """reward_filtering keeps windows with return STRICTLY above the
+    batch percentile (spec-ablations §2, step-9 amendment: same
+    boundary in both repos; was the PARITY '>= with ties keeps all'
+    divergence).
+
+    Derivation: returns 1..8, 75th percentile (linear interpolation) =
+    6.25 -> keep {7, 8}. All-equal returns: percentile == value, so a
+    strict > keeps nothing (the >= rule kept everything).
+    """
+    from experiments.rl_finetuning.ablations.training import reward_filter_keep
+
+    keep = reward_filter_keep(torch.arange(1.0, 9.0), 75)
+    assert keep.tolist() == [False] * 6 + [True, True]
+    assert reward_filter_keep(torch.full((5,), 2.0), 75).sum() == 0
+
+
+def test_action_diversity_discards_degenerate_plans():
+    """action_diversity keeps only windows with more than one distinct
+    action (spec-ablations §2)."""
+    from experiments.rl_finetuning.ablations.training import action_diversity_keep
+
+    x0 = torch.tensor([[1, 1, 1, 1], [1, 2, 1, 1], [0, 0, 0, 0]])
+    assert action_diversity_keep(x0).tolist() == [False, True, False]
+
+
+# ---------------------------------------------------------------------------
 # llrd (Sun 2019: eta_{k-1} = xi * eta_k, top-down from the head)
 # ---------------------------------------------------------------------------
 

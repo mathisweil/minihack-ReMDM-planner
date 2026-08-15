@@ -336,6 +336,39 @@ def compute_advantages(
     return adv, batch_mean, batch_std
 
 
+def action_diversity_keep(x0: Tensor) -> Tensor:
+    """Boolean keep-mask: True for windows with >1 distinct action.
+
+    spec-ablations §2 action_diversity: discard degenerate all-same-
+    action plans.
+
+    Args:
+        x0: ``[N, L]`` action windows.
+
+    Returns:
+        ``[N]`` boolean mask.
+    """
+    return (x0 != x0[:, :1]).any(dim=1)
+
+
+def reward_filter_keep(returns: Tensor, percentile: float) -> Tensor:
+    """Boolean keep-mask: True for returns strictly above the percentile.
+
+    spec-ablations §2 reward_filtering (step-9 amendment): keep windows
+    with return strictly above the batch percentile - with ties at the
+    quantile a >= rule kept the whole batch (PARITY boundary item).
+
+    Args:
+        returns: ``[N]`` window returns.
+        percentile: Percentile in [0, 100].
+
+    Returns:
+        ``[N]`` boolean mask.
+    """
+    thresh = torch.quantile(returns, percentile / 100.0)
+    return returns > thresh
+
+
 def _effective_batch_size(advantages: Tensor) -> float:
     """Effective batch size: (sum w)^2 / sum w^2.
 
@@ -970,7 +1003,7 @@ def run_ablation(
 
         # -- Action diversity filter --
         if spec.action_diversity_filter:
-            diverse = (x0 != x0[:, :1]).any(dim=1)
+            diverse = action_diversity_keep(x0)
             local_obs = local_obs[diverse]
             global_obs = global_obs[diverse]
             x0 = x0[diverse]
@@ -980,8 +1013,7 @@ def run_ablation(
 
         # -- Reward filtering --
         if spec.reward_filtering:
-            thresh = torch.quantile(returns, reward_filter_pct / 100.0)
-            keep = returns >= thresh
+            keep = reward_filter_keep(returns, reward_filter_pct)
             local_obs = local_obs[keep]
             global_obs = global_obs[keep]
             x0 = x0[keep]
