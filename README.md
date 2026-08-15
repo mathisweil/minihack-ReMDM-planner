@@ -6,12 +6,12 @@ The sibling repository [`craftax-ReMDM-planner`](../craftax-ReMDM-planner) imple
 
 ## Method
 
-The planner starts from a fully-masked action sequence and iteratively unmasks tokens over `K` denoising steps (MaskGIT-style confidence ordering), while ReMDM remasking lets committed tokens be re-predicted for plan refinement. Two independent training pipelines are compared head-to-head in the accompanying paper (under submission; citation to follow): **online DAgger** under a BFS oracle (primary) and **offline behavioural cloning** on pre-collected oracle datasets. See [Architecture](#architecture) and [Diffusion](#diffusion) for details.
+The planner starts from a fully-masked action sequence and iteratively unmasks tokens over `K` denoising steps via the ReMDM Algorithm 1 posterior (per-token Bernoulli unmasking), while ReMDM remasking lets committed tokens be re-predicted for plan refinement (a MaskGIT-style greedy decoder is used only for DAgger data collection). Two independent training pipelines are compared head-to-head in the accompanying paper (under submission; citation to follow): **online DAgger** under a BFS oracle (primary) and **offline behavioural cloning** on pre-collected oracle datasets. See [Architecture](#architecture) and [Diffusion](#diffusion) for details.
 
 ## Setup
 
 Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/). `nle` compiles from source on macOS.
-Linux GPU use needs NVIDIA driver >= 580 for CUDA 13, or >= 525 with `--extra cu126`.
+Linux GPU use needs NVIDIA driver >= 580 for CUDA 13, or >= 525 with `--extra cuda12`.
 
 ```bash
 # macOS (arm64)
@@ -264,13 +264,12 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 - **Loss:** continuous-time MDLM NELBO: per sample `w(t) * sum_masked(CE) / L` with `w(t) = -alpha'(t) / (1 - alpha(t))` clipped to `[0, 1000]`; optional `label_smoothing`.
 - **Greedy sampling:** used for DAgger collection. Same MaskGIT loop, argmax decoding, no temperature/top-K/remasking, `diffusion_steps_collect` steps.
 
-**Reverse sampling (ReMDM)**, over `K` steps (default 10):
+**Reverse sampling (ReMDM Algorithm 1)**, over `K` steps (default 10):
 
-1. Predict logits; apply temperature and top-K filtering.
-2. Sample predictions; compute per-token confidence.
-3. **MaskGIT unmask:** commit the `n_unmask` highest-confidence masked positions.
-4. **ReMDM remask:** stochastically re-mask committed positions for refinement.
-5. Final step: commit all remaining positions.
+1. Predict logits; apply temperature and top-p (nucleus) filtering; sample predictions and record each committed token's decode probability `psi`.
+2. **Unmask:** each masked position commits independently with the posterior probability `(alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)`.
+3. **ReMDM remask:** each committed position re-masks with probability `sigma` from the configured Section-4.1 schedule.
+4. Final step: any remaining masked positions are committed by a greedy cleanup pass.
 
 | Strategy | Formula | Description |
 |---|---|---|
@@ -315,10 +314,10 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 
 | Parameter | Default | Description |
 |---|---|---|
-| `total_timesteps` | 2,000,000 | Shared env-step budget |
-| `id_eval_every_timesteps` | 25,000 | ID eval cadence |
-| `ood_eval_every_timesteps` | 25,000 | OOD eval cadence |
-| `checkpoint_every_timesteps` | 125,000 | Checkpoint cadence |
+| `total_timesteps` | 5,650,000 | Shared env-step budget |
+| `id_eval_every_timesteps` | 470,000 | ID eval cadence |
+| `ood_eval_every_timesteps` | 470,000 | OOD eval cadence |
+| `checkpoint_every_timesteps` | 940,000 | Checkpoint cadence |
 
 - **Offline BC:** gradient steps = `total_timesteps // offline_batch_size`. The cosine LR `T_max` derives from the same quantity, so any run length decays to the 10% floor at its end.
 - **DAgger:** tracks cumulative `env.step()` calls (model + oracle) and halts at `total_timesteps`. `episodes_per_iteration` and `grad_steps_per_iteration` set the collect/train ratio and **must not** scale with the budget.
@@ -330,8 +329,8 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 |---|---|---|
 | `offline_lr` | 0.0003 | BC LR (cosine-decayed to 10%) |
 | `dagger_lr` | 0.00003 | DAgger LR (constant) |
-| `offline_batch_size` | 3584 | Offline BC batch size |
-| `dagger_batch_size` | 3584 | DAgger batch size |
+| `offline_batch_size` | 2048 | Offline BC batch size |
+| `dagger_batch_size` | 2048 | DAgger batch size |
 | `offline_grad_clip` | 1.0 | Gradient norm clip (offline) |
 | `dagger_grad_clip` | 1.0 | Gradient norm clip (DAgger) |
 | `weight_decay` | 0.0001 | AdamW weight decay |
@@ -352,13 +351,13 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 | `collect_output` | `data/dataset.pt` | Collected dataset path (per-run: `--data`) |
 | `eval_episodes_per_env` | 50 | Episodes per env at eval (per-run: `--episodes`) |
 | `checkpoint_eval_episodes` | 50 | Episodes per env at checkpoint eval |
-| `use_amp` | false | Mixed precision via `torch.amp` |
-| `torch_compile` | false | `torch.compile` the model |
+| `use_amp` | true | Mixed precision via `torch.amp` |
+| `torch_compile` | true | `torch.compile` the model |
 | `num_collection_workers` | 8 | Workers for DAgger collection |
 | `use_wandb` | true | Enable W&B logging |
-| `wandb_project` | `remdm-minihack` | W&B project |
+| `wandb_project` | `minihack-ReMDM-planner` | W&B project |
 | `wandb_resume_id` | null | W&B run ID for resumption |
-| `offline_log_every` | 10 | Log frequency (offline steps) |
+| `offline_log_every` | 50 | Log frequency (offline steps) |
 | `seed` | null | RNG seed (null = random; per-run: `--seed`) |
 
 ## DAgger training loop
@@ -496,8 +495,8 @@ uv run pytest -m slow    # slow entry points only (BC + PPO baselines), ~45s
 
 - **MDLM loss** returns `0.0` (not NaN) when no masked positions exist. NELBO-weighted per MDLM eq (10).
 - **PAD tokens** are never masked and are excluded from the loss.
-- **Sampling paths:** evaluation uses stochastic ReMDM (temperature, top-K, remasking, `diffusion_steps_eval`); DAgger collection uses greedy argmax (`diffusion_steps_collect`).
-- **`remdm_sample`** guarantees a fully committed output via a final-step commit and an assertion. A min-keep 10% safety net prevents degenerate all-masked states.
+- **Sampling paths:** evaluation uses stochastic ReMDM (temperature, top-p, remasking, `diffusion_steps_eval`); DAgger collection uses greedy argmax (`diffusion_steps_collect`).
+- **`remdm_sample`** guarantees a fully committed output via a final greedy cleanup of any remaining masked positions (same safety net as the craftax twin).
 - **EMA** updates after every gradient step, not per iteration. `DataCollector` syncs EMA weights before each rollout.
 - **Curriculum** starts from a 50/50 prior per environment and buckets the rolling win-rate: `[0, 0.15)` -> 0.2, `[0.15, 0.85)` -> 1.0, `[0.85, 1.0]` -> 0.1.
 - **Replay buffer** pins offline data at the front; only online samples are FIFO-evicted. Returns `None` when empty.

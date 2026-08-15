@@ -7,9 +7,10 @@
 # output path. Everything else -- total_timesteps, batch sizes, the
 # offline BC compute-match pins, AMP and torch.compile -- is inherited.
 #
-# This config drives BOTH the final DAgger run that produced
-# `checkpoint_final/online/final.pth` AND the compute-matched offline BC
-# baseline used for the paper comparison.
+# This config drives BOTH the final DAgger run behind the released
+# `checkpoints/online/Minihack-Online-Diffusion-DAgger-100M` checkpoint
+# AND the compute-matched offline BC baseline used for the paper
+# comparison.
 #
 #   --mode online    -> reproduces the iter600 DAgger checkpoint recipe
 #   --mode offline   -> trains a fair offline BC baseline against it
