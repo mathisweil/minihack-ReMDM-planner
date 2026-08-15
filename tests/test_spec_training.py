@@ -282,3 +282,20 @@ def test_smoke_mode_leaves_no_artifacts_in_the_repo():
 
         shutil.rmtree(entry, ignore_errors=True) if entry.is_dir() else entry.unlink()
     assert not new_entries, f"smoke wrote into the repo: {sorted(map(str, new_entries))}"
+
+
+# ---------------------------------------------------------------------------
+# Budget accounting (spec-training Amendment 6; step-9 seam)
+# ---------------------------------------------------------------------------
+
+
+def test_budget_charges_model_and_oracle_env_steps():
+    """total_timesteps is charged with BOTH the model rollout's and the
+    seed-matched oracle rollout's env.step() calls (spec-training
+    Amendment 6; PARITY 'Data/budget semantics': craftax charges
+    learner frames only - a recorded divergence, not a shared rule)."""
+    from src.planners.online import budget_increment
+
+    assert budget_increment(30, 70) == 100
+    assert budget_increment(0, 55) == 55
+    assert budget_increment(42, 0) == 42

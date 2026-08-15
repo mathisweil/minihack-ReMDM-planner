@@ -37,6 +37,17 @@ from src.planners.logging import (
 
 logger = logging.getLogger(__name__)
 
+
+def budget_increment(model_steps: int, oracle_steps: int) -> int:
+    """Env-step budget charge for one DAgger iteration.
+
+    Model AND oracle rollouts both consume real env.step() calls (the
+    oracle runs in its own env instance), so both count against
+    total_timesteps (spec-training Amendment 6; PARITY 'Data/budget
+    semantics' - craftax charges learner frames only).
+    """
+    return int(model_steps) + int(oracle_steps)
+
 # Order of the per-step metrics accumulated on device in `train`.
 _STEP_METRIC_KEYS = ("loss", "loss_diff", "loss_aux", "grad_norm")
 
@@ -177,13 +188,10 @@ class Trainer:
                 "oracle_steps": oracle_steps_iter,
             }
 
-            # This budget charges oracle env.step() calls; the craftax repo
-            # counts learner frames only.
-            # Advance the unified env-step budget. Both model and oracle
-            # rollouts consume real env.step() calls (the oracle rollout
-            # runs in its own env instance in collect_oracle_trajectory),
-            # so both contribute to the budget.
-            iter_env_steps = model_steps_iter + oracle_steps_iter
+            # Advance the unified env-step budget (see budget_increment:
+            # model and oracle steps both charge; craftax counts learner
+            # frames only - PARITY 'Data/budget semantics').
+            iter_env_steps = budget_increment(model_steps_iter, oracle_steps_iter)
             env_steps_total += iter_env_steps
 
             # 2. Gradient steps (EMA updated after each step)
