@@ -47,20 +47,6 @@ _RUN_KEYS = {"device"}
 # Keys used by earlier code versions that survive in released checkpoint
 # config snapshots (e.g. config_iter600.yaml on the HF Hub). Accepted so the
 # documented snapshot-evaluation workflow keeps working; nothing reads them.
-_LEGACY_SNAPSHOT_KEYS = {
-    "checkpoint_every",
-    "id_eval_every",
-    "ood_eval_every",
-    "max_iterations",
-    "offline_epochs",
-    # Nucleus sampling replaced top-k; snapshots from earlier runs
-    # still carry the key. It is accepted and unread.
-    "top_k",
-    # The NELBO weight is no longer optional; snapshots from earlier
-    # runs still carry the flag. Accepted, unread.
-    "use_importance_weighting",
-}
-
 
 def validate_keys(
     keys, allowed: set[str], source: str, valid_source: str = "configs/defaults.yaml"
@@ -185,7 +171,7 @@ def load_config(
         if config_path_resolved.resolve() != defaults_path.resolve():
             with open(config_path_resolved) as fh:
                 overrides = yaml.safe_load(fh) or {}
-            validate_keys(overrides, allowed | _LEGACY_SNAPSHOT_KEYS, str(config_path))
+            validate_keys(overrides, allowed, str(config_path))
             _deep_merge(cfg, overrides)
 
     validate_keys(cli_overrides, allowed, "--override")
