@@ -336,7 +336,7 @@ def compute_advantages(
     return adv, batch_mean, batch_std
 
 
-def action_diversity_keep(x0: Tensor) -> Tensor:
+def action_diversity_mask(x0: Tensor) -> Tensor:
     """Boolean keep-mask: True for windows with >1 distinct action.
 
     spec-ablations §2 action_diversity: discard degenerate all-same-
@@ -351,7 +351,7 @@ def action_diversity_keep(x0: Tensor) -> Tensor:
     return (x0 != x0[:, :1]).any(dim=1)
 
 
-def reward_filter_keep(returns: Tensor, percentile: float) -> Tensor:
+def reward_filter_mask(returns: Tensor, percentile: float) -> Tensor:
     """Boolean keep-mask: True for returns strictly above the percentile.
 
     spec-ablations §2 reward_filtering (step-9 amendment): keep windows
@@ -1003,7 +1003,7 @@ def run_ablation(
 
         # -- Action diversity filter --
         if spec.action_diversity_filter:
-            diverse = action_diversity_keep(x0)
+            diverse = action_diversity_mask(x0)
             local_obs = local_obs[diverse]
             global_obs = global_obs[diverse]
             x0 = x0[diverse]
@@ -1013,7 +1013,7 @@ def run_ablation(
 
         # -- Reward filtering --
         if spec.reward_filtering:
-            keep = reward_filter_keep(returns, reward_filter_pct)
+            keep = reward_filter_mask(returns, reward_filter_pct)
             local_obs = local_obs[keep]
             global_obs = global_obs[keep]
             x0 = x0[keep]

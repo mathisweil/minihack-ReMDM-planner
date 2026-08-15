@@ -454,20 +454,20 @@ def test_reward_filter_keeps_strictly_above_the_percentile():
     6.25 -> keep {7, 8}. All-equal returns: percentile == value, so a
     strict > keeps nothing (the >= rule kept everything).
     """
-    from experiments.rl_finetuning.ablations.training import reward_filter_keep
+    from experiments.rl_finetuning.ablations.training import reward_filter_mask
 
-    keep = reward_filter_keep(torch.arange(1.0, 9.0), 75)
+    keep = reward_filter_mask(torch.arange(1.0, 9.0), 75)
     assert keep.tolist() == [False] * 6 + [True, True]
-    assert reward_filter_keep(torch.full((5,), 2.0), 75).sum() == 0
+    assert reward_filter_mask(torch.full((5,), 2.0), 75).sum() == 0
 
 
 def test_action_diversity_discards_degenerate_plans():
     """action_diversity keeps only windows with more than one distinct
     action (spec-ablations §2)."""
-    from experiments.rl_finetuning.ablations.training import action_diversity_keep
+    from experiments.rl_finetuning.ablations.training import action_diversity_mask
 
     x0 = torch.tensor([[1, 1, 1, 1], [1, 2, 1, 1], [0, 0, 0, 0]])
-    assert action_diversity_keep(x0).tolist() == [False, True, False]
+    assert action_diversity_mask(x0).tolist() == [False, True, False]
 
 
 # ---------------------------------------------------------------------------
