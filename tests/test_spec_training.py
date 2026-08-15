@@ -231,18 +231,10 @@ def test_evaluator_seeds_are_fixed_and_run_seed_independent(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "traceability §8.9: --no-warm-start gates only checkpoint/W&B "
-        "resumption (online.py:744,779); the oracle warm-start seeding at "
-        "online.py:735-741 runs unconditionally, contradicting README:80,505"
-    ),
-)
 def test_no_warm_start_disables_oracle_buffer_seeding(monkeypatch):
     """run_dagger(no_warm_start=True) must not seed the buffer with
     oracle trajectories (README:505 defines DAgger warm-start as exactly
-    this seeding; the flag documents disabling it).
+    this seeding; was defect §8.9: the seeding ran unconditionally).
 
     The oracle collector is stubbed to count invocations (returning
     None, so no environments are needed) and Trainer.train is stubbed

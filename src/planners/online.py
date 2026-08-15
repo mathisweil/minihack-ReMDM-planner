@@ -731,13 +731,19 @@ def run_dagger(
         cfg.curriculum_preseed,
     )
 
-    # Seed buffer with some oracle data
-    for i, env_id in enumerate(cfg.id_envs):
-        for s in range(3):
-            traj = collect_oracle_trajectory(env_id, seed=i * 100 + s, cfg=cfg)
-            if traj is not None:
-                buffer.add(traj)
-    logger.info(f"Buffer seeded with {len(buffer)} windows")
+    # DAgger warm start: seed the buffer with 3 oracle trajectories per
+    # ID environment (README §DAgger); --no-warm-start disables exactly
+    # this seeding (was defect §8.9: the flag only gated checkpoint and
+    # W&B resumption while the seeding ran unconditionally).
+    if no_warm_start:
+        logger.info("Warm-start seeding disabled (--no-warm-start)")
+    else:
+        for i, env_id in enumerate(cfg.id_envs):
+            for s in range(3):
+                traj = collect_oracle_trajectory(env_id, seed=i * 100 + s, cfg=cfg)
+                if traj is not None:
+                    buffer.add(traj)
+        logger.info(f"Buffer seeded with {len(buffer)} windows")
 
     # If resuming, extract W&B run ID from checkpoint before Logger init
     # so the same W&B run is continued (curve continuity).
