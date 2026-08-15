@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.config import load_config
+from src.config import load_config, parse_overrides
 from src.planners.baselines import ALL_BASELINE_ALGOS, run_baselines
 from src.planners.logging import Logger
 from src.planners.offline import run_offline
@@ -34,18 +34,6 @@ WANDB_PREFIX = "wandb:"
 # =============================================================================
 # Utils
 # =============================================================================
-
-def _parse_overrides(pairs: list[str]) -> dict[str, str]:
-    overrides: dict[str, str] = {}
-    for item in pairs:
-        if "=" not in item:
-            raise ValueError(
-                f"--override expects KEY=VALUE, got '{item}'"
-            )
-        key, value = item.split("=", 1)
-        overrides[key] = value
-    return overrides
-
 
 def _set_seed(seed: int | None) -> int:
     if seed is None:
@@ -157,7 +145,7 @@ def build_config(args):
     if args.mode == "smoke" and config_path == "configs/defaults.yaml":
         config_path = "configs/smoke.yaml"
 
-    cfg = load_config(config_path, _parse_overrides(args.override))
+    cfg = load_config(config_path, parse_overrides(args.override))
 
     if args.seed is not None:
         cfg.seed = args.seed

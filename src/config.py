@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge *override* into *base* (mutates *base*).
 
     Args:
@@ -34,7 +34,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     """
     for key, value in override.items():
         if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            _deep_merge(base[key], value)
+            deep_merge(base[key], value)
         else:
             base[key] = value
     return base
@@ -70,7 +70,28 @@ def validate_keys(
         )
 
 
-def _cast_override(key: str, raw: str, current) -> object:
+def parse_overrides(pairs: list[str]) -> dict[str, str]:
+    """Split ``KEY=VALUE`` CLI strings into a dict.
+
+    Args:
+        pairs: Raw ``--override`` arguments.
+
+    Returns:
+        Mapping of key to raw (uncast) string value.
+
+    Raises:
+        ValueError: If an argument is not of the form ``KEY=VALUE``.
+    """
+    overrides: dict[str, str] = {}
+    for item in pairs:
+        if "=" not in item:
+            raise ValueError(f"--override expects KEY=VALUE, got '{item}'")
+        key, value = item.split("=", 1)
+        overrides[key] = value
+    return overrides
+
+
+def cast_override(key: str, raw: str, current) -> object:
     """Cast a CLI override string to the type of the current config value.
 
     Args:
@@ -172,12 +193,12 @@ def load_config(
             with open(config_path_resolved) as fh:
                 overrides = yaml.safe_load(fh) or {}
             validate_keys(overrides, allowed, str(config_path))
-            _deep_merge(cfg, overrides)
+            deep_merge(cfg, overrides)
 
     validate_keys(cli_overrides, allowed, "--override")
     for key, value in cli_overrides.items():
         if isinstance(value, str):
-            value = _cast_override(key, value, cfg.get(key))
+            value = cast_override(key, value, cfg.get(key))
         cfg[key] = value
 
     # Device selection
