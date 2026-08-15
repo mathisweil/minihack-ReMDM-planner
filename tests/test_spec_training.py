@@ -65,18 +65,10 @@ def test_curriculum_bucket_weights_interior():
         assert abs(counts[eid] / n - p) < 0.015, (eid, counts[eid] / n, p)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "step-8 finding: at win rate exactly 0.85 the code classifies the "
-        "env as MID (curriculum.py uses strict '>'), while the documented "
-        "buckets [0.15,0.85) / [0.85,1] put 0.85 in the low-weight bucket "
-        "(spec-training §1.7)"
-    ),
-)
 def test_curriculum_bucket_high_boundary_is_inclusive():
     """A win rate of exactly 0.85 belongs to the [0.85, 1] bucket
-    (weight 0.1), per the documented intervals.
+    (weight 0.1), per the documented intervals (was step-8 finding
+    S8-3: strict '>' put the boundary in the mid bucket).
 
     Derivation: envs at win rates 0.85 (17/20) and 0.50: documented
     weights [0.1, 1.0] give P(boundary) = 0.1/1.1 = 0.0909; the MID

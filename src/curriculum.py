@@ -85,7 +85,10 @@ class DynamicCurriculum:
             w = self.win_rate(eid)
             if w < self._LOW_THRESHOLD:
                 weights.append(self._WEIGHT_LOW)
-            elif w > self._HIGH_THRESHOLD:
+            elif w >= self._HIGH_THRESHOLD:
+                # [0.85, 1] is the documented low-weight bucket
+                # (README curriculum note; was step-8 finding S8-3:
+                # a strict '>' put exactly-0.85 in the mid bucket).
                 weights.append(self._WEIGHT_HIGH)
             else:
                 weights.append(self._WEIGHT_MID)
