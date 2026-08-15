@@ -233,13 +233,13 @@ Aligning QMUL later fails the test until it is moved to the poolable set.
 | | `normalized_adv` | Std-normalised advantages (GRPO-style) |
 | | `bc_wins` | Uniform ELBO on win windows (no advantage weighting) |
 | | `low_t` | ELBO restricted to low-t (fine-detail) regime |
-| **C: Architecture** | `frozen_backbone` | Only train the output head |
-| | `head_only` | Only train the final linear projection |
-| | `attention_only` | Only train attention weights (Q/K/V/O) |
-| | `ffn_only` | Only train FFN layers |
-| | `layer_ablation_top1` | Only train top-1 transformer block |
-| | `layer_ablation_top2` | Only train top-2 transformer blocks |
-| | `layer_ablation_top3` | Only train top-3 transformer blocks |
+| **C: Architecture** | `frozen_backbone` | Train the action head + token embeddings (backbone frozen) |
+| | `head_only` | Train only the final action projection |
+| | `attention_only` | Train only the attention projections (Q/K/V/O) |
+| | `ffn_only` | Train only the per-block FFN layers |
+| | `layer_ablation_top1` | Train only the top-1 transformer block + head |
+| | `layer_ablation_top2` | Train only the top-2 transformer blocks + head |
+| | `layer_ablation_top3` | Train only the top-3 transformer blocks + head |
 | **D: Data Quality** | `reward_filtering` | Top-75th-percentile return windows only |
 | | `running_stats` | EMA running mean/std for advantage normalisation |
 | | `action_diversity` | Discard degenerate (all-same-action) plans |

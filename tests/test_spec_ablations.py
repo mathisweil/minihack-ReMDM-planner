@@ -557,52 +557,40 @@ def _all_names() -> frozenset[str]:
     return frozenset(n for n, _ in make_model(_model_cfg()).named_parameters())
 
 
-def test_frozen_backbone_trains_only_the_output_head():
-    """Docs: 'Only train the output head' (spec-ablations §2). The
-    minihack implementation conforms (traceability §4)."""
-    assert _trainable_names("frozen_backbone") == {"head.weight", "head.bias"}
+def test_frozen_backbone_trains_the_head_and_token_embeddings():
+    """Canonical set (spec-ablations §2, step-9 amendment): the action
+    head plus the token-interface embeddings (action, timestep and
+    positional embeddings); the backbone (obs streams incl. goal head,
+    transformer stack, all norms) is frozen."""
+    expected = frozenset(
+        n
+        for n in _all_names()
+        if n.startswith(("action_emb.", "timestep_emb.", "pos_emb.", "head."))
+    )
+    assert _trainable_names("frozen_backbone") == expected
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "traceability §8.3: _head_only_opt reuses FROZEN_BACKBONE "
-        "(registry.py:119-124), making head_only an exact duplicate of "
-        "frozen_backbone - two ablation rows, one intervention"
-    ),
-)
 def test_head_only_is_a_distinct_intervention_from_frozen_backbone():
-    """The suite documents frozen_backbone ('output head') and
-    head_only ('final linear projection') as two probes; a probe suite
-    needs them to be distinct interventions (spec-ablations §2)."""
-    assert _trainable_names("head_only") != _trainable_names("frozen_backbone")
+    """head_only trains exactly the final action projection - a strict
+    subset of frozen_backbone's set (spec-ablations §2, step-9
+    amendment; was defect §8.3: exact duplicates)."""
+    head = _trainable_names("head_only")
+    assert head == {"head.weight", "head.bias"}
+    assert head < _trainable_names("frozen_backbone")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "step-8 finding: FROZEN_EXCEPT_ATTENTION omits norm1., so "
-        "attention_only also trains the pre-attention LayerNorms "
-        "(optimizers.py:190-206) - documented set is Q/K/V/O only"
-    ),
-)
 def test_attention_only_trains_only_the_attention_projections():
-    """Docs: 'Only train attention weights (Q/K/V/O)' (spec-ablations §2)."""
+    """Canonical set (spec-ablations §2, step-9 amendment): exactly the
+    attention projections Q/K/V/O; norms and head frozen (was step-8
+    finding S8-4: norm1 trainable)."""
     expected = frozenset(n for n in _all_names() if ".self_attn." in n)
     assert _trainable_names("attention_only") == expected
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "step-8 finding: FROZEN_EXCEPT_FFN omits norm2., so ffn_only also "
-        "trains the pre-FFN LayerNorms (optimizers.py:209-224) - "
-        "documented set is the FFN linears only"
-    ),
-)
 def test_ffn_only_trains_only_the_ffn_layers():
-    """Docs: 'Only train FFN layers' (spec-ablations §2). The FFN is
-    linear1/linear2 inside each encoder layer."""
+    """Canonical set (spec-ablations §2, step-9 amendment): exactly the
+    FFN linears in each encoder layer; norms and head frozen (was
+    step-8 finding S8-5: norm2 trainable)."""
     expected = frozenset(
         n for n in _all_names() if ".linear1." in n or ".linear2." in n
     )

@@ -44,6 +44,7 @@ from experiments.rl_finetuning.ablations.optimizers import (
     FROZEN_BACKBONE,
     FROZEN_EXCEPT_ATTENTION,
     FROZEN_EXCEPT_FFN,
+    FROZEN_EXCEPT_HEAD,
     make_optimizer_frozen,
     make_optimizer_llrd,
     make_optimizer_standard,
@@ -112,7 +113,7 @@ def _frozen_backbone_opt(
     cfg: SimpleNamespace,
     model: nn.Module,
 ) -> torch.optim.Optimizer:
-    """Freeze backbone, train only the action head."""
+    """Freeze the backbone; train the head + token embeddings."""
     return make_optimizer_frozen(cfg, model, FROZEN_BACKBONE)
 
 
@@ -120,8 +121,8 @@ def _head_only_opt(
     cfg: SimpleNamespace,
     model: nn.Module,
 ) -> torch.optim.Optimizer:
-    """Freeze everything except the action head."""
-    return make_optimizer_frozen(cfg, model, FROZEN_BACKBONE)
+    """Freeze everything except the final action projection."""
+    return make_optimizer_frozen(cfg, model, FROZEN_EXCEPT_HEAD)
 
 
 def _attention_only_opt(
@@ -327,7 +328,8 @@ REGISTRY: dict[str, AblationSpec] = {
         name="frozen_backbone",
         group="C",
         description=(
-            "Baseline ELBO with all params frozen except the final output head"
+            "Baseline ELBO training the action head and token embeddings "
+            "(backbone frozen)"
         ),
         hypothesis=(
             "If frozen backbone helps: deep gradient flow into backbone causes collapse"
@@ -372,7 +374,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "layer_ablation_top1": AblationSpec(
         name="layer_ablation_top1",
         group="C",
-        description=("Baseline ELBO updating only the top-1 transformer block"),
+        description=("Baseline ELBO updating only the top-1 transformer block + head"),
         hypothesis=(
             "Minimal unfrozen depth needed; collapse depth correlates "
             "with gradient flow depth"
@@ -383,7 +385,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "layer_ablation_top2": AblationSpec(
         name="layer_ablation_top2",
         group="C",
-        description=("Baseline ELBO updating only the top-2 transformer blocks"),
+        description=("Baseline ELBO updating only the top-2 transformer blocks + head"),
         hypothesis=(
             "Minimal unfrozen depth needed; collapse depth correlates "
             "with gradient flow depth"
@@ -394,7 +396,7 @@ REGISTRY: dict[str, AblationSpec] = {
     "layer_ablation_top3": AblationSpec(
         name="layer_ablation_top3",
         group="C",
-        description=("Baseline ELBO updating only the top-3 transformer blocks"),
+        description=("Baseline ELBO updating only the top-3 transformer blocks + head"),
         hypothesis=(
             "Minimal unfrozen depth needed; collapse depth correlates "
             "with gradient flow depth"

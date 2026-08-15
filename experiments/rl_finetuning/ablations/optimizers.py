@@ -170,8 +170,29 @@ def make_optimizer_frozen(
     )
 
 
-# Freeze everything except the action head
+# Group-C canonical trainable sets (spec-ablations §2, step-9 amendment):
+# frozen_backbone trains the action head + token-interface embeddings
+# (action, timestep and positional embeddings); the backbone (obs
+# streams incl. the goal head, transformer stack and all norms) is
+# frozen. head_only trains exactly the final action projection.
+# attention_only / ffn_only train exactly their sublayers - the
+# pre-sublayer LayerNorms are frozen (step-8 findings S8-4/S8-5).
+
+# frozen_backbone: freeze the backbone, keep head + token embeddings
 FROZEN_BACKBONE: list[str] = [
+    "embedding.",
+    "cnn.",
+    "global_embedding.",
+    "global_cnn.",
+    "global_pool.",
+    "global_proj.",
+    "global_gate",
+    "goal_head.",
+    "transformer.",
+]
+
+# head_only: freeze everything except the final action projection
+FROZEN_EXCEPT_HEAD: list[str] = [
     "embedding.",
     "cnn.",
     "global_embedding.",
@@ -186,7 +207,7 @@ FROZEN_BACKBONE: list[str] = [
     "transformer.",
 ]
 
-# Freeze everything except attention sublayers
+# Freeze everything except the attention projections (Q/K/V/O)
 FROZEN_EXCEPT_ATTENTION: list[str] = [
     "embedding.",
     "cnn.",
@@ -201,11 +222,12 @@ FROZEN_EXCEPT_ATTENTION: list[str] = [
     "pos_emb.",
     "linear1.",
     "linear2.",
+    "norm1.",
     "norm2.",
     "head.",
 ]
 
-# Freeze everything except FFN sublayers
+# Freeze everything except the FFN sublayers
 FROZEN_EXCEPT_FFN: list[str] = [
     "embedding.",
     "cnn.",
@@ -220,6 +242,7 @@ FROZEN_EXCEPT_FFN: list[str] = [
     "pos_emb.",
     "self_attn.",
     "norm1.",
+    "norm2.",
     "head.",
 ]
 
