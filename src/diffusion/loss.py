@@ -31,6 +31,7 @@ def mdlm_loss(
     schedule_deriv_fn: Callable[[Tensor], Tensor] | None = None,
     weight_clip: float = _MAX_WEIGHT,
     label_smoothing: float = 0.0,
+    reduction: str = "mean",
 ) -> Tensor:
     """Monte-Carlo estimate of the continuous-time MDLM NELBO.
 
@@ -38,6 +39,9 @@ def mdlm_loss(
     ``w(t) = -alpha'(t) / (1 - alpha_t)`` clipped at *weight_clip*, then
     the batch mean. This is the estimator stated by MDLM eq (10) and
     Shi et al. eq (4) under a constant per-token normalisation.
+    ``reduction="none"`` returns the per-sample ``[B]`` vector instead
+    of the batch mean (the ablation suite weighs samples by advantage,
+    exactly as the craftax twin's ``compute_loss`` does internally).
 
     Replaces a flat average
     over all masked tokens in the batch — the MaskGIT loss of Shi et al.
@@ -57,22 +61,27 @@ def mdlm_loss(
             *schedule_fn* via the registry when ``None``.
         weight_clip: Upper clamp for w(t) (default 1000).
         label_smoothing: Smoothing epsilon for cross-entropy.
+        reduction: ``"mean"`` (default, scalar) or ``"none"`` (``[B]``).
 
     Returns:
-        Scalar loss. Returns ``0.0`` when no masked positions exist.
+        Scalar loss, or the per-sample ``[B]`` vector under
+        ``reduction="none"``. Zero(s) when no masked positions exist.
     """
     if logits.ndim != 3 or x0.shape != zt.shape or x0.shape != logits.shape[:2]:
         raise ValueError(
             "mdlm_loss expects logits [B, L, V] with x0/zt [B, L]; got "
             f"{tuple(logits.shape)}, {tuple(x0.shape)}, {tuple(zt.shape)}"
         )
+    if reduction not in ("mean", "none"):
+        raise ValueError(f"Unknown reduction: {reduction!r}")
     B, L, V = logits.shape
 
     # Mask: compute loss only on masked, non-PAD positions
     is_masked = (zt == mask_token) & (x0 != pad_token)  # [B, L]
 
     if not is_masked.any():
-        return logits.new_tensor(0.0)
+        zero = logits.new_zeros(B)
+        return zero if reduction == "none" else zero.sum()
 
     # Per-position cross-entropy
     # Clamp targets to valid vocab range — out-of-range positions (PAD,
@@ -100,8 +109,8 @@ def mdlm_loss(
     w_t = torch.clamp(w_t, max=weight_clip)  # [B]
 
     # Constant per-token normalisation (1/L), NOT the realised masked count
-    per_sample = ce.sum(dim=1) / L  # [B]
-    return (w_t * per_sample).mean()
+    per_sample = w_t * ce.sum(dim=1) / L  # [B]
+    return per_sample if reduction == "none" else per_sample.mean()
 
 
 def auxiliary_goal_loss(

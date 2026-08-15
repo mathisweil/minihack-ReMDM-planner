@@ -12,7 +12,7 @@ Adapted from Craftax JAX implementation to MiniHack PyTorch.
 Key differences:
 - MiniHack model: (local_obs, global_obs, zt, t_discrete) -> {"actions", "goal_pred"}
 - t is sampled here, q_sample called here, model called here
-- Per-sample loss computed manually (src/diffusion/loss.mdlm_loss returns global avg)
+- Per-sample NELBO from src/diffusion/loss.mdlm_loss(reduction="none")
 - Auxiliary goal loss always preserved unless explicitly ablated
 """
 
@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from src.diffusion.forward import q_sample
-from src.diffusion.loss import auxiliary_goal_loss
+from src.diffusion.loss import auxiliary_goal_loss, mdlm_loss
 
 # Loss signature: (model, local_obs, global_obs, x0, advantages, cfg, device)
 #   -> scalar loss
@@ -52,40 +52,6 @@ class LossContext:
     ref_model: nn.Module | None
     schedule_fn: Callable[[Tensor], Tensor]
     cfg: SimpleNamespace
-
-
-def _per_sample_masked_ce(
-    logits: Tensor,
-    x0: Tensor,
-    zt: Tensor,
-    mask_token: int,
-    pad_token: int,
-) -> Tensor:
-    """Compute per-sample cross-entropy on masked, non-PAD positions.
-
-    Args:
-        logits: ``[B, H, V]`` model action logits.
-        x0: ``[B, H]`` clean action sequences.
-        zt: ``[B, H]`` noisy sequences.
-        mask_token: MASK token ID.
-        pad_token: PAD token ID.
-
-    Returns:
-        ``[B]`` per-sample mean cross-entropy on masked positions.
-    """
-    B, H, V = logits.shape
-    is_masked = (zt == mask_token) & (x0 != pad_token)  # [B, H]
-
-    safe_targets = x0.clamp(0, V - 1)  # [B, H]
-    ce = F.cross_entropy(
-        logits.reshape(-1, V),
-        safe_targets.reshape(-1),
-        reduction="none",
-    ).reshape(B, H)  # [B, H]
-
-    ce = ce * is_masked.float()  # [B, H]
-    n_masked_per = is_masked.float().sum(dim=1).clamp(min=1.0)  # [B]
-    return ce.sum(dim=1) / n_masked_per  # [B]
 
 
 def _forward_and_loss(
@@ -133,9 +99,22 @@ def _forward_and_loss(
     logits = out["actions"]  # [B, H, A]
     goal_pred = out["goal_pred"]  # [B, 2]
 
-    # Per-sample masked CE
-    per_sample = _per_sample_masked_ce(
-        logits, x0, zt, cfg.mask_token, cfg.pad_token
+    # Per-sample NELBO: w(t) * sum_masked(CE) / L, delegated to
+    # src.diffusion.loss.mdlm_loss exactly as the craftax suite
+    # delegates to compute_loss (spec-method §3.1/§3.4; was step-8
+    # finding S8-6: the suite dropped the NELBO weight and normalised
+    # by the realised masked count).
+    per_sample = mdlm_loss(
+        logits,
+        x0,
+        zt,
+        t,
+        cfg.mask_token,
+        cfg.pad_token,
+        schedule_fn,
+        weight_clip=getattr(cfg, "loss_weight_clip", 1000.0),
+        label_smoothing=getattr(cfg, "label_smoothing", 0.0),
+        reduction="none",
     )  # [B]
 
     # Auxiliary goal loss

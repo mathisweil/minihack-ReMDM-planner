@@ -627,16 +627,6 @@ def test_layer_ablation_trains_only_the_top_layers_and_head(top_n):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "step-8 finding: the minihack ablation suite's per-sample loss "
-        "(losses.py:_per_sample_masked_ce) omits the NELBO weight w(t) and "
-        "normalises by the realised masked count instead of 1/L, unlike "
-        "the documented return-weighted ELBO (spec-method §3.1/§3.4), the "
-        "craftax suite, and this repo's own src/diffusion/loss.mdlm_loss"
-    ),
-)
 def test_suite_loss_uses_the_nelbo_weight_and_per_token_normalisation():
     """The suite's per-sample loss must be the NELBO estimator
     w(t) * sum_masked(CE) / L (spec-method §3.1/§3.4; spec-ablations §2
@@ -646,8 +636,9 @@ def test_suite_loss_uses_the_nelbo_weight_and_per_token_normalisation():
     schedule, uniform logits, t ~ U(eps, 0.2) via the low_t factory,
     unit advantages: E[per-sample] = ln V * E_t[-alpha'(t)] =
     ln V * (1 - cos(0.1 pi))/0.2 = 0.244715 ln V. Statistical bound
-    0.03 ln V (~5 sigma, derivation in the craftax twin). The shipped
-    loss instead returns ~ln V * P(row has a mask), independent of t.
+    0.03 ln V (~5 sigma, derivation in the craftax twin; was step-8
+    finding S8-6: the suite dropped w(t) and normalised per masked
+    count).
     """
     b = 16384
     model = _FixedLogitsModel(_UNIFORM)
