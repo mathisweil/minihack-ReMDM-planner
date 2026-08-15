@@ -181,8 +181,6 @@ collect_output: "data/dataset.pt"
 # ── Checkpointing & Logging ──────────────────────────────────────────
 checkpoint_dir: checkpoints
 save_policy: true
-hub_run_id: null
-hub_repo_id: null
 use_wandb: true
 wandb_project: minihack-ReMDM-planner
 wandb_entity: myopic-planner

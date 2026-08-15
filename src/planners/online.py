@@ -620,18 +620,6 @@ class Trainer:
             logger.error("Checkpoint eval failed", exc_info=True)
             raise
 
-        # HuggingFace Hub upload (no-op if HF_TOKEN or hub_run_id not set)
-        try:
-            from scripts.hf_upload import maybe_upload_checkpoint
-
-            maybe_upload_checkpoint(
-                str(ckpt_dir),
-                getattr(self.cfg, "hub_run_id", None),
-                getattr(self.cfg, "hub_repo_id", None),
-            )
-        except Exception:
-            logger.error("HF Hub upload failed", exc_info=True)
-
         # W&B artifact upload
         self.log.log_checkpoint_artifact(
             checkpoint_path=str(path),
