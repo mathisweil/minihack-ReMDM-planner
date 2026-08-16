@@ -257,6 +257,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable W&B logging (overrides the config's use_wandb).",
     )
     p.add_argument("--wandb-project", type=str, default=None)
+    p.add_argument("--wandb-entity", type=str, default=None)
     p.add_argument(
         "--wandb-resume-id",
         type=str,
@@ -728,6 +729,7 @@ def main(argv: list[str] | None = None) -> None:
                 # Config governs the project name (spec-config §6.5;
                 # the old "remdm-*" literal was a dead fallback).
                 project=(args.wandb_project or cfg.wandb_project),
+                entity=(args.wandb_entity or getattr(cfg, "wandb_entity", None)),
                 name=run_id,
                 config=vars(cfg),
                 tags=["ablations"] + selected,

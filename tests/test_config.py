@@ -1,4 +1,5 @@
-"""Config layering: two-layer merge, key validation, delta-only presets."""
+"""Config layering: two-layer merge, key validation, delta-only presets,
+ablation poolability, W&B naming and publish-time checkpoint selection."""
 
 import importlib.util
 import sys
@@ -310,3 +311,114 @@ def test_not_poolable_divergence_is_recorded(ra, name):
         f"Recorded: {sorted(expected)}; actual: {sorted(actual)}. "
         "Update _NOT_POOLABLE, or move it to _POOLABLE if now aligned."
     )
+
+
+# ---------------------------------------------------------------------------
+# W&B naming (spec-config §6.5: the config keys govern; the "remdm-*"
+# literals were dead fallbacks)
+# ---------------------------------------------------------------------------
+
+
+def test_wandb_names_come_from_the_config_not_a_literal():
+    """Training and the ablation suite both take project and entity from
+    the config, and the shipped names are the canonical ones."""
+    cfg = load_config("configs/defaults.yaml")
+    assert cfg.wandb_project == "minihack-ReMDM-planner"
+
+    abl = yaml.safe_load((_ABL_CONFIGS / "ablations_default.yaml").read_text())
+    assert abl["wandb_project"] == "minihack-ReMDM-planner-ablations"
+    assert abl["wandb_entity"] == cfg.wandb_entity
+
+    # No "remdm-*" literal survives as a runtime default in either path.
+    for src in (
+        _ROOT / "src" / "planners" / "logging.py",
+        _ROOT / "experiments" / "rl_finetuning" / "run_ablations.py",
+    ):
+        assert "remdm-minihack" not in src.read_text(), src
+
+
+def test_suite_wandb_init_takes_project_and_entity_from_cli_or_config():
+    """The suite's wandb.init receives both names, CLI overriding config.
+
+    The entity was a documented ablation-config key that nothing read
+    (step-11 finding U2); this pins the wiring. Source-anchored because
+    the call sits inside main() behind checkpoint loading.
+    """
+    import inspect
+
+    ra = _load_run_ablations()
+    src = inspect.getsource(ra.main)
+
+    assert "project=(args.wandb_project or cfg.wandb_project)" in src
+    assert 'entity=(args.wandb_entity or getattr(cfg, "wandb_entity", None))' in src
+
+
+# ---------------------------------------------------------------------------
+# Publish-time best-of-N selection (spec-config §6.3/§6.4; the
+# checkpoint-selection mechanism PARITY records for this repo)
+# ---------------------------------------------------------------------------
+
+
+def _hf_upload():
+    spec = importlib.util.spec_from_file_location(
+        "hf_upload", _ROOT / "scripts" / "hf_upload.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_selection_records_the_dagger_candidate_set():
+    """A DAgger checkpoint publishes as best-of-N over periodic
+    iterations, naming the metric, the cadence and the eval protocol."""
+    hf = _hf_upload()
+    cfg = {
+        "checkpoint_every": 25,
+        "max_iterations": 600,
+        "checkpoint_eval_episodes": 20,
+        "id_envs": ["A", "B"],
+        "ood_envs": ["C"],
+    }
+    stats = {"counter": "dagger_iteration", "value": 600}
+
+    sel = hf.selection(cfg, stats, "id_winrate")
+
+    assert sel["policy"] == "best-of-N over periodic checkpoints"
+    assert sel["selected"] == {"dagger_iteration": 600}
+    assert sel["selection_metric"] == "id_winrate"
+    assert sel["candidates"] == {
+        "unit": "dagger_iterations",
+        "every": 25,
+        "configured_max": 600,
+    }
+    assert sel["eval_protocol"] == {
+        "episodes_per_env": 20,
+        "weights": "ema",
+        "id_envs": ["A", "B"],
+        "ood_envs": ["C"],
+    }
+
+
+def test_selection_switches_units_for_an_offline_checkpoint():
+    """An offline checkpoint is selected over gradient steps, with the
+    offline pins as the candidate set - not DAgger iterations."""
+    hf = _hf_upload()
+    cfg = {
+        "offline_checkpoint_every_grad_steps": 10_000,
+        "offline_total_grad_steps": 60_000,
+        "checkpoint_eval_episodes": 20,
+        "id_envs": ["A"],
+        "ood_envs": [],
+    }
+    stats = {"counter": "gradient_step", "value": 40_000}
+
+    sel = hf.selection(cfg, stats, None)
+
+    assert sel["selected"] == {"gradient_step": 40_000}
+    assert sel["selection_metric"] is None
+    assert sel["candidates"] == {
+        "unit": "gradient_steps",
+        "every": 10_000,
+        "configured_budget": 60_000,
+    }
+    assert sel["eval_protocol"]["weights"] == "ema"

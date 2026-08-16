@@ -343,7 +343,8 @@ with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--mer
 | `--results-path PATH` | Explicit path to `results.json` (with `--analyze-only`) |
 | `--merge JSON [JSON ...]` | Merge multiple `results.json` files and regenerate analysis |
 | `--use-wandb` / `--no-use-wandb` | Enable/disable W&B logging (overrides `use_wandb`, default `false`) |
-| `--wandb-project NAME` | W&B project name (default: `remdm-minihack-ablations`) |
+| `--wandb-project NAME` | W&B project (overrides `wandb_project`, default `minihack-ReMDM-planner-ablations`) |
+| `--wandb-entity NAME` | W&B entity (overrides `wandb_entity`) |
 | `--wandb-resume-id ID` | W&B run ID for curve continuity |
 | `--max-iter N` | Override max training iterations |
 | `--batch-size N` | Override batch size |
