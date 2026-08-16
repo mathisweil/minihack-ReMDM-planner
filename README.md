@@ -305,7 +305,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 | `eta` | 0.15 | Remasking strength |
 | `temperature` | 0.5 | Sampling temperature |
 | `top_p` | 0.9 | Nucleus threshold (ReMDM Sec 5) |
-| `replan_every` | 16 | Env steps before replanning |
+| `replan_every` | 16 | Env steps before replanning; the actions already executed in the current plan window are locked into the new plan (inpainting) |
 | `loss_weight_clip` | 1000.0 | NELBO weight clip bound |
 | `label_smoothing` | 0.0 | Cross-entropy label smoothing |
 | `physics_aware_sampling` | false | Penalise hazardous actions at inference |
@@ -363,7 +363,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 ## DAgger training loop
 
 1. **Curriculum sampling:** pick an environment weighted by difficulty (low win-rate sampled more).
-2. **Model rollout:** EMA model, greedy sampling, replanning every 16 steps, `episodes_per_iteration` episodes.
+2. **Model rollout:** EMA model, greedy sampling, replanning every 16 steps with the executed prefix locked, `episodes_per_iteration` episodes.
 3. **Oracle rollout:** BFS oracle on the **same seed**.
 4. **Efficiency filter:** add the oracle trajectory if the model failed or took >1.5x the oracle's steps.
 5. **Budget accounting:** `env_steps_total += model_steps + oracle_steps`; halt at `total_timesteps`.

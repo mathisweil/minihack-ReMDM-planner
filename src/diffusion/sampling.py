@@ -9,6 +9,7 @@ collection (a documented engineering choice).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import numpy as np
@@ -146,6 +147,8 @@ def remdm_sample(
     blind_global: bool = False,
     return_analytics: bool = False,
     num_steps: int | None = None,
+    history: Tensor | None = None,
+    hist_len: Tensor | None = None,
 ) -> Tensor | tuple[Tensor, list, list[float], list[int]]:
     """Generate action sequences via iterative ReMDM denoising.
 
@@ -168,6 +171,12 @@ def remdm_sample(
             ``(seq, path_per_step, tracking_confidence, tracking_masked)``.
         num_steps: Override number of denoising steps (default uses
             ``cfg.diffusion_steps_eval``).
+        history: ``[B, seq_len]`` already-executed actions to lock into
+            the plan's leading positions (planning as inpainting,
+            Diffuser Sec. 3.3). ``None`` plans from a fully masked
+            sequence.
+        hist_len: ``[B]`` number of leading positions to lock. Required
+            with ``history``.
 
     Returns:
         When ``return_analytics=False`` (default): fully committed action
@@ -206,6 +215,19 @@ def remdm_sample(
     # each token was last unmasked (+inf while masked), per ReMDM Sec 4.1.
     seq = torch.full((B, seq_len), mask_token, dtype=torch.long, device=device)
     psi = torch.full((B, seq_len), float("inf"), device=device)
+
+    # Historical prefix (Diffuser Sec. 3.3; spec-method §6.1/§6.2, SHARED):
+    # positions 0..hist_len-1 are observed, so they are fixed for the whole
+    # of denoising - never unmasked away, never remasked. The craftax twin
+    # is sample_plan_inpainting.
+    lock_mask: Tensor | None = None
+    if history is not None:
+        if hist_len is None:
+            raise ValueError("remdm_sample: history requires hist_len")
+        history = history.to(device)
+        pos = torch.arange(seq_len, device=device).unsqueeze(0)  # [1, L]
+        lock_mask = pos < hist_len.to(device).unsqueeze(1)  # [B, L]
+        seq = torch.where(lock_mask, history, seq)
 
     # ReMDM Algorithm 1 (Wang et al.). Masked tokens unmask via
     # independent Bernoulli draws from the approximate posterior;
@@ -264,6 +286,8 @@ def remdm_sample(
         )
         if not isinstance(sigma, Tensor):
             sigma = torch.full((B, seq_len), float(sigma), device=device)
+        if lock_mask is not None:
+            sigma = torch.where(lock_mask, torch.zeros_like(sigma), sigma)
 
         # Algorithm 1 posterior: masked tokens unmask w.p.
         # (alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)
@@ -280,6 +304,10 @@ def remdm_sample(
         seq = torch.where(do_remask, mask_token, seq)
         psi = torch.where(do_unmask, decode_prob, psi)
         psi = torch.where(do_remask, torch.full_like(psi, float("inf")), psi)
+
+        if lock_mask is not None:
+            seq = torch.where(lock_mask, history, seq)
+            psi = torch.where(lock_mask, torch.full_like(psi, float("inf")), psi)
 
         # Analytics tracking
         if return_analytics:
@@ -299,6 +327,8 @@ def remdm_sample(
         logits = out["actions"]
         logits[:, :, action_dim:] = float("-inf")
         seq = torch.where(still_masked, logits.argmax(dim=-1), seq)
+        if lock_mask is not None:
+            seq = torch.where(lock_mask, history, seq)
 
     if return_analytics:
         return seq, path_per_step, tracking_confidence, tracking_masked_count
@@ -314,6 +344,8 @@ def greedy_sample(
     device: torch.device | str,
     blind_global: bool = False,
     num_steps: int | None = None,
+    history: Tensor | None = None,
+    hist_len: Tensor | None = None,
 ) -> Tensor:
     """Greedy (argmax) MaskGIT sampling — no temperature, top-K, or remasking.
 
@@ -327,6 +359,9 @@ def greedy_sample(
         cfg: Config namespace.
         device: Torch device.
         blind_global: Zero out global map (local-only ablation).
+        history: ``[B, seq_len]`` already-executed actions to lock into
+            the plan's leading positions (see ``remdm_sample``).
+        hist_len: ``[B]`` number of leading positions to lock.
 
     Returns:
         Fully committed action sequence ``[B, seq_len]``, int64.
@@ -348,6 +383,17 @@ def greedy_sample(
         dtype=torch.long,
         device=device,
     )
+
+    # Observed prefix stays fixed for the whole of decoding, as in
+    # remdm_sample (Diffuser Sec. 3.3; spec-method §6.1/§6.2).
+    lock_mask: Tensor | None = None
+    if history is not None:
+        if hist_len is None:
+            raise ValueError("greedy_sample: history requires hist_len")
+        history = history.to(device)
+        pos = torch.arange(seq_len, device=device).unsqueeze(0)
+        lock_mask = pos < hist_len.to(device).unsqueeze(1)
+        seq = torch.where(lock_mask, history, seq)
 
     for k in range(1, K + 1):
         ratio = k / K
@@ -382,6 +428,8 @@ def greedy_sample(
         unmask_mask = unmask_mask & is_masked
 
         seq = torch.where(unmask_mask, preds, seq)
+        if lock_mask is not None:
+            seq = torch.where(lock_mask, history, seq)
 
         # No remasking in greedy mode
 
@@ -394,5 +442,90 @@ def greedy_sample(
         logits[:, :, action_dim:] = float("-inf")
         preds = logits.argmax(dim=-1)
         seq = torch.where(still_masked, preds, seq)
+        if lock_mask is not None:
+            seq = torch.where(lock_mask, history, seq)
 
     return seq
+
+@dataclass
+class LockedPrefix:
+    """Executed-action prefix for inpainted receding-horizon replanning.
+
+    A replan is conditioned on what the agent has actually done since
+    the current plan window opened: those positions are observed, so
+    they are locked for the whole of denoising rather than re-generated
+    (Diffuser Sec. 3.3; spec-method §6.1/§6.2, SHARED - the craftax
+    twin's ``sample_plan_inpainting`` + ``mpc_step`` do the same).
+    Author decision 2026-08-16.
+
+    A window closes once ``seq_len`` actions have been executed from
+    it; the next replan starts a fresh, fully masked window.
+
+    Args:
+        n:          Number of parallel episodes.
+        seq_len:    Plan length.
+        mask_token: MASK token id, used to fill unwritten positions.
+    """
+
+    n: int
+    seq_len: int
+    mask_token: int
+
+    def __post_init__(self) -> None:
+        self.history = np.full(
+            (self.n, self.seq_len), self.mask_token, dtype=np.int64
+        )
+        self.hist_len = np.zeros(self.n, dtype=np.int64)
+
+    def start_window(self, idx: np.ndarray | None = None) -> None:
+        """Open a fresh window for any row whose plan is used up.
+
+        Args:
+            idx: Rows about to replan; ``None`` means all rows.
+        """
+        rows = np.arange(self.n) if idx is None else np.asarray(idx)
+        full = rows[self.hist_len[rows] >= self.seq_len]
+        if full.size:
+            self.history[full] = self.mask_token
+            self.hist_len[full] = 0
+
+    def as_tensors(
+        self, idx: np.ndarray, device: torch.device | str
+    ) -> tuple[Tensor, Tensor]:
+        """Return ``(history, hist_len)`` for ``idx`` as device tensors.
+
+        Args:
+            idx:    Rows being replanned.
+            device: Torch device.
+        """
+        return (
+            torch.from_numpy(self.history[idx]).to(device),
+            torch.from_numpy(self.hist_len[idx]).to(device),
+        )
+
+    def record(self, i: int, action: int) -> None:
+        """Append an executed action to row ``i``'s prefix.
+
+        Args:
+            i:      Row index.
+            action: Action just executed.
+        """
+        self.history[i, self.hist_len[i]] = action
+        self.hist_len[i] += 1
+
+    def reset(self, i: int) -> None:
+        """Clear row ``i`` (episode boundary).
+
+        Args:
+            i: Row index.
+        """
+        self.history[i] = self.mask_token
+        self.hist_len[i] = 0
+
+    def is_full(self, i: int) -> bool:
+        """Whether row ``i``'s window has no unexecuted positions left.
+
+        Args:
+            i: Row index.
+        """
+        return bool(self.hist_len[i] >= self.seq_len)

@@ -21,7 +21,7 @@ import torch
 
 from src.buffer import ReplayBuffer
 from src.curriculum import DynamicCurriculum, efficiency_filter
-from src.diffusion.sampling import greedy_sample, remdm_sample
+from src.diffusion.sampling import LockedPrefix, greedy_sample, remdm_sample
 from src.envs.minihack_env import (
     acquire_env,
     borrow_env,
@@ -93,10 +93,15 @@ def run_model_episode(
         total_reward = 0.0
         plan: torch.Tensor | None = None
         step_in_plan = 0
+        # Replans are conditioned on the actions already executed in the
+        # current plan window (author decision 2026-08-16).
+        prefix = LockedPrefix(1, cfg.seq_len, cfg.mask_token)
 
         model.eval()
         for _step_idx in range(max_steps):
-            if plan is None or step_in_plan >= cfg.replan_every:
+            if plan is None or step_in_plan >= cfg.replan_every or prefix.is_full(0):
+                prefix.start_window()
+                hist_t, hist_len_t = prefix.as_tensors(np.array([0]), device)
                 local_t = (
                     torch.from_numpy(local[np.newaxis]).long().to(device)
                 )  # [1, 9, 9]
@@ -116,6 +121,8 @@ def run_model_episode(
                             False,
                         ),
                         blind_global=blind_global,
+                        history=hist_t,
+                        hist_len=hist_len_t,
                     )
                 else:
                     plan = greedy_sample(
@@ -130,12 +137,16 @@ def run_model_episode(
                             "diffusion_steps_collect",
                             cfg.diffusion_steps_eval,
                         ),
+                        history=hist_t,
+                        hist_len=hist_len_t,
                     )  # [1, seq_len]
                 step_in_plan = 0
 
-            action = plan[0, step_in_plan].item()
+            # The next unexecuted position is exactly the prefix length.
+            action = plan[0, int(prefix.hist_len[0])].item()
             action = max(0, min(action, cfg.action_dim - 1))
             actions_list.append(action)
+            prefix.record(0, action)
             step_in_plan += 1
 
             (local, glb), reward, terminated, truncated, info = env.step(
@@ -571,6 +582,9 @@ class DataCollector:
         plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
         step_in_plan = np.zeros(n, dtype=np.int32)
         need_replan = np.ones(n, dtype=bool)
+        # Locked executed-action prefix per episode (author decision
+        # 2026-08-16); see LockedPrefix.
+        prefix = LockedPrefix(n, cfg.seq_len, cfg.mask_token)
         done = np.zeros(n, dtype=bool)
         won = np.zeros(n, dtype=bool)
         total_reward = np.zeros(n, dtype=np.float64)
@@ -587,6 +601,8 @@ class DataCollector:
                 )[0]
                 if len(replan_idx) > 0:
                     t0 = time.perf_counter()
+                    prefix.start_window(replan_idx)
+                    hist_t, hist_len_t = prefix.as_tensors(replan_idx, device)
                     local_t = (
                         torch.from_numpy(
                             cur_local[replan_idx],
@@ -609,6 +625,8 @@ class DataCollector:
                             cfg,
                             device,
                             num_steps=K,
+                            history=hist_t,
+                            hist_len=hist_len_t,
                         )
                         .cpu()
                         .numpy()
@@ -626,16 +644,17 @@ class DataCollector:
                         continue
                     any_active = True
 
-                    action = int(plans[i, step_in_plan[i]])
+                    action = int(plans[i, prefix.hist_len[i]])
                     action = max(
                         0,
                         min(action, cfg.action_dim - 1),
                     )
                     act_buf[i, n_steps[i]] = action
+                    prefix.record(i, action)
                     step_in_plan[i] += 1
                     n_steps[i] += 1
 
-                    if step_in_plan[i] >= cfg.replan_every:
+                    if step_in_plan[i] >= cfg.replan_every or prefix.is_full(i):
                         need_replan[i] = True
 
                     obs, reward, term, trunc, info = envs[i].step(action)

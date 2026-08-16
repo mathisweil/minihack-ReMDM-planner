@@ -53,7 +53,7 @@ from experiments.rl_finetuning.diagnostics.representation import (
 from experiments.rl_finetuning.diagnostics.timestep import (
     compute_t_analysis,
 )
-from src.diffusion.sampling import remdm_sample
+from src.diffusion.sampling import LockedPrefix, remdm_sample
 from src.diffusion.schedules import get_schedule
 from src.envs.minihack_env import acquire_env, discard_env, release_env
 from src.models.denoiser import ModelEMA, make_model, try_compile
@@ -601,6 +601,9 @@ def _collect_training_data_gpu(
     plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
     step_in_plan = np.zeros(n, dtype=np.int32)
     need_replan = np.ones(n, dtype=bool)
+    # Locked executed-action prefix per episode (author decision
+    # 2026-08-16); see LockedPrefix.
+    prefix = LockedPrefix(n, cfg.seq_len, cfg.mask_token)
     done = np.zeros(n, dtype=bool)
     won = np.zeros(n, dtype=bool)
     total_reward = np.zeros(n, dtype=np.float64)
@@ -625,6 +628,8 @@ def _collect_training_data_gpu(
             # Batch replan on GPU (stochastic ReMDM)
             replan_idx = np.where(need_replan & ~done)[0]
             if len(replan_idx) > 0:
+                prefix.start_window(replan_idx)
+                hist_t, hist_len_t = prefix.as_tensors(replan_idx, device)
                 # The buffers are int16; cross PCIe as int16 and
                 # widen on the device rather than the other way round.
                 local_t = (
@@ -650,6 +655,8 @@ def _collect_training_data_gpu(
                         device,
                         physics_aware=physics_aware,
                         num_steps=K,
+                        history=hist_t,
+                        hist_len=hist_len_t,
                     )
                     .cpu()
                     .numpy()
@@ -665,13 +672,14 @@ def _collect_training_data_gpu(
                     continue
                 any_active = True
 
-                action = int(plans[i, step_in_plan[i]])
+                action = int(plans[i, prefix.hist_len[i]])
                 action = max(0, min(action, cfg.action_dim - 1))
                 act_buf[i, n_steps[i]] = action
+                prefix.record(i, action)
                 step_in_plan[i] += 1
                 n_steps[i] += 1
 
-                if step_in_plan[i] >= cfg.replan_every:
+                if step_in_plan[i] >= cfg.replan_every or prefix.is_full(i):
                     need_replan[i] = True
 
                 obs, reward, term, trunc, info = envs[i].step(action)

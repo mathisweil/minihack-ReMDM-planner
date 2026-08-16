@@ -29,6 +29,8 @@ References:
 from __future__ import annotations
 
 import math
+
+import numpy as np
 from types import SimpleNamespace
 
 import pytest
@@ -36,7 +38,12 @@ import torch
 
 from src.diffusion.forward import q_sample
 from src.diffusion.loss import mdlm_loss
-from src.diffusion.sampling import _compute_remask_prob, remdm_sample, top_p_filter
+from src.diffusion.sampling import (
+    _compute_remask_prob,
+    greedy_sample,
+    remdm_sample,
+    top_p_filter,
+)
 from src.diffusion.schedules import (
     cosine_schedule,
     cosine_schedule_deriv,
@@ -340,6 +347,84 @@ def test_carryover_committed_tokens_persist_when_sigma_zero():
         assert (later[committed] == earlier[committed]).all(), (
             "a committed token changed or was remasked despite sigma=0"
         )
+
+
+def test_locked_prefix_survives_the_full_chain():
+    """Conditioned positions are fixed for the whole of denoising.
+
+    Source: planning-as-inpainting (Diffuser Sec. 3.3: conditioned
+    values are fixed throughout denoising) on top of ReMDM Alg 1;
+    spec-method §6.1/§6.2 are SHARED, and the craftax twin's
+    sample_plan_inpainting is pinned by the same assertion. Author
+    decision 2026-08-16 brought this repo into line.
+
+    A conf-strategy chain with eta > 0 is the hard case: remasking is
+    live, so a prefix that is merely written once would be eroded.
+    """
+    torch.manual_seed(0)
+    cfg = _stub_cfg(seq_len=8, action_dim=5, mask_token=5,
+                    remask_strategy="conf", eta=0.5, diffusion_steps_eval=6)
+    model = _StubModel(cfg.seq_len, cfg.action_dim)
+    B = 3
+    local = torch.zeros(B, 9, 9, dtype=torch.long)
+    glob = torch.zeros(B, 21, 79, dtype=torch.long)
+
+    history = torch.arange(cfg.seq_len).remainder(cfg.action_dim).repeat(B, 1)
+    hist_len = torch.tensor([0, 3, cfg.seq_len])
+
+    seq = remdm_sample(
+        model, local, glob, cfg, "cpu", physics_aware=False,
+        history=history, hist_len=hist_len,
+    )
+
+    assert (seq != cfg.mask_token).all(), "output contains MASK tokens"
+    assert (seq[1, :3] == history[1, :3]).all(), "prefix was overwritten"
+    assert (seq[2] == history[2]).all(), "fully locked plan changed"
+
+
+def test_greedy_sampler_locks_the_prefix_too():
+    """The DAgger collection sampler honours the same lock, so the data
+    the model trains on comes from history-conditioned plans."""
+    torch.manual_seed(0)
+    cfg = _stub_cfg(seq_len=8, action_dim=5, mask_token=5, diffusion_steps_eval=4)
+    model = _StubModel(cfg.seq_len, cfg.action_dim)
+    local = torch.zeros(2, 9, 9, dtype=torch.long)
+    glob = torch.zeros(2, 21, 79, dtype=torch.long)
+
+    history = torch.arange(cfg.seq_len).remainder(cfg.action_dim).repeat(2, 1)
+    hist_len = torch.tensor([2, 5])
+
+    seq = greedy_sample(
+        model, local, glob, cfg, "cpu", history=history, hist_len=hist_len
+    )
+
+    assert (seq != cfg.mask_token).all()
+    assert (seq[0, :2] == history[0, :2]).all()
+    assert (seq[1, :5] == history[1, :5]).all()
+
+
+def test_locked_prefix_bookkeeping_rolls_the_window():
+    """LockedPrefix records executed actions and opens a fresh window
+    once the plan is used up - the receding-horizon half of the
+    contract."""
+    from src.diffusion.sampling import LockedPrefix
+
+    prefix = LockedPrefix(n=2, seq_len=4, mask_token=9)
+    assert prefix.hist_len.tolist() == [0, 0]
+
+    for step, action in enumerate((1, 2, 3, 4)):
+        assert not prefix.is_full(0), f"window full early at step {step}"
+        prefix.record(0, action)
+    assert prefix.is_full(0)
+    assert prefix.history[0].tolist() == [1, 2, 3, 4]
+
+    prefix.start_window(np.array([0, 1]))
+    assert prefix.hist_len.tolist() == [0, 0]
+    assert prefix.history[0].tolist() == [9, 9, 9, 9]
+    # Row 1 never filled, so its (empty) window is untouched.
+    prefix.record(1, 7)
+    prefix.start_window(np.array([1]))
+    assert prefix.hist_len[1] == 1, "a partial window must not be reset"
 
 
 def test_posterior_unmask_rate_first_step():

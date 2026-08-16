@@ -144,7 +144,7 @@ class Evaluator:
             ``"total_reward"`` keys.  Failed episodes report
             ``won=False``.
         """
-        from src.diffusion.sampling import remdm_sample
+        from src.diffusion.sampling import LockedPrefix, remdm_sample
         from src.envs.minihack_env import acquire_env, discard_env, release_env
 
         n = n_episodes
@@ -174,6 +174,9 @@ class Evaluator:
         plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
         step_in_plan = np.zeros(n, dtype=np.int32)
         need_replan = np.ones(n, dtype=bool)
+        # Locked executed-action prefix per episode (author decision
+        # 2026-08-16); see LockedPrefix.
+        prefix = LockedPrefix(n, cfg.seq_len, cfg.mask_token)
         done = failed.copy()
         won = np.zeros(n, dtype=bool)
         total_reward = np.zeros(n, dtype=np.float64)
@@ -184,6 +187,8 @@ class Evaluator:
                 # Batch replan for active envs that need it
                 replan_idx = np.where(need_replan & ~done)[0]
                 if len(replan_idx) > 0:
+                    prefix.start_window(replan_idx)
+                    hist_t, hist_len_t = prefix.as_tensors(replan_idx, device)
                     # The buffers are int16; cross PCIe as int16
                     # and widen on the device, as the collection and
                     # training paths now do.
@@ -214,6 +219,8 @@ class Evaluator:
                                 False,
                             ),
                             blind_global=blind_global,
+                            history=hist_t,
+                            hist_len=hist_len_t,
                         )
                         .cpu()
                         .numpy()
@@ -229,15 +236,16 @@ class Evaluator:
                         continue
                     any_active = True
 
-                    action = int(plans[i, step_in_plan[i]])
+                    action = int(plans[i, prefix.hist_len[i]])
                     action = max(
                         0,
                         min(action, cfg.action_dim - 1),
                     )
+                    prefix.record(i, action)
                     step_in_plan[i] += 1
                     n_steps[i] += 1
 
-                    if step_in_plan[i] >= cfg.replan_every:
+                    if step_in_plan[i] >= cfg.replan_every or prefix.is_full(i):
                         need_replan[i] = True
 
                     # Step failures raise instead of ending the
