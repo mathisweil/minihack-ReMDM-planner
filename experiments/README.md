@@ -333,7 +333,7 @@ with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--mer
 | `--ablations NAME [NAME ...]` | Run specific ablations by name |
 | `--list` | Print registered ablations and exit |
 | `--fast` | Smoke-test mode (50 iterations, 20 eval episodes) |
-| `--num-seeds N` | Number of seeds per ablation (default: 1) |
+| `--num-seeds N` | Number of seeds per ablation (overrides `num_seeds`, default 3) |
 | `--seed N` | Base random seed |
 | `--output-dir DIR` | Output directory (default: auto-timestamped) |
 | `--run-id ID` | Custom run ID for output directory naming |
