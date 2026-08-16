@@ -333,7 +333,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 | `dagger_batch_size` | 2048 | DAgger batch size |
 | `offline_grad_clip` | 1.0 | Gradient norm clip (offline) |
 | `dagger_grad_clip` | 1.0 | Gradient norm clip (DAgger) |
-| `weight_decay` | 0.0001 | AdamW weight decay |
+| `weight_decay` | 0.0 | AdamW weight decay (core training; the ablation suite keeps 1e-4) |
 | `grad_steps_per_iteration` | 100 | Gradient steps per DAgger iteration |
 | `episodes_per_iteration` | 30 | Episodes per DAgger iteration |
 | `aux_loss_weight` | 0.5 | Auxiliary goal loss weight |

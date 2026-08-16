@@ -57,7 +57,7 @@ _RECIPE_PINS = {
     "dagger_lr": 3e-5,
     "offline_lr": 3e-4,
     "offline_batch_size": 2048,
-    "weight_decay": 1e-4,
+    "weight_decay": 0.0,  # author decision 2026-08-16 (was 1e-4)
     "use_amp": True,
     "torch_compile": True,
     # offline silent pins (spec-config §3.1: 60000/5000/10000/1.5M)

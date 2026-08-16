@@ -148,7 +148,11 @@ offline_buffer_capacity: 1500000
 dagger_lr: 0.00003
 dagger_batch_size: 2048
 dagger_grad_clip: 1.0
-weight_decay: 0.0001
+# Author decision 2026-08-16: core training standardises on AdamW with
+# an explicit zero decay in both repos - no pinned source calls for
+# decoupled decay here, and the craftax twin trained without it. The
+# ablation suite keeps its own documented weight_decay (1e-4).
+weight_decay: 0.0
 buffer_capacity: 10000
 episodes_per_iteration: 30
 grad_steps_per_iteration: 100
