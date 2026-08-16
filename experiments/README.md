@@ -226,7 +226,7 @@ Aligning QMUL later fails the test until it is moved to the poolable set.
 | | `ewc` | Elastic Weight Consolidation (Fisher diagonal) |
 | | `llrd` | Layer-wise Learning Rate Decay |
 | | `lora` | Low-Rank Adaptation of attention projections |
-| | `mixed_replay` | Offline data mixed into online batches |
+| | `mixed_replay` | Self-replay: the run's own past online windows resampled into each batch |
 | | `trust_region_kl` | Hard KL trust region via quadratic barrier |
 | **B: Training Signal** | `t_curriculum` | Anneal t range high-to-low over training |
 | | `entropy_bonus` | Entropy regularisation for action diversity |
