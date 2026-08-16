@@ -232,7 +232,7 @@ Aligning QMUL later fails the test until it is moved to the poolable set.
 | | `entropy_bonus` | Entropy regularisation for action diversity |
 | | `gradient_surgery` | PCGrad: project conflicting RL/BC gradients |
 | | `advantage_clip` | PPO-style advantage clipping [1-eps, 1+eps] |
-| | `normalized_adv` | Std-normalised advantages (GRPO-style) |
+| | `normalized_adv` | Std-normalised advantages (per-minibatch) |
 | | `bc_wins` | Uniform ELBO on win windows (no advantage weighting) |
 | | `low_t` | ELBO restricted to low-t (fine-detail) regime |
 | **C: Architecture** | `frozen_backbone` | Train the action head + token embeddings (backbone frozen) |
