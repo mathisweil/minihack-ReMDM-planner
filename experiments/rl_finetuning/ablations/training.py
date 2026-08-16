@@ -387,18 +387,26 @@ def _extract_windows(
     episode: dict,
     seq_len: int,
     pad_token: int,
-) -> tuple[Tensor, Tensor, Tensor, float]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """Extract sliding windows from a single episode.
+
+    The return of a window is the sum of the rewards earned by exactly
+    the actions that window trains on (author decision 2026-08-16,
+    PARITY "Ablation-suite data source and return definition"), not the
+    episode total broadcast to every window: two windows from the same
+    episode that pass through different states must not be credited
+    alike. Padded positions contribute zero reward. The craftax twin
+    sums the same span.
 
     Args:
         episode: Dict from ``run_model_episode`` with ``"local"``,
-                 ``"global"``, ``"actions"``, ``"total_reward"`` keys.
+                 ``"global"``, ``"actions"``, ``"rewards"`` keys.
         seq_len: Window length (plan horizon).
         pad_token: PAD token ID for short episodes.
 
     Returns:
         Tuple of (local_obs ``[W,9,9]``, global_obs ``[W,21,79]``,
-        x0 ``[W,H]``, episode_return). The observation tensors keep the
+        x0 ``[W,H]``, returns ``[W]``). The observation tensors keep the
         episode buffer's dtype (int16 for glyph maps); callers widen to
         int64 on the device after the transfer.
     """
@@ -408,15 +416,17 @@ def _extract_windows(
     local_arr = torch.from_numpy(episode["local"])  # [T, 9, 9]
     global_arr = torch.from_numpy(episode["global"])  # [T, 21, 79]
     actions = torch.from_numpy(episode["actions"]).long()  # [T]
+    rewards = torch.from_numpy(
+        np.asarray(episode["rewards"], dtype=np.float32)
+    )  # [T]
     T = actions.shape[0]
-    ret = episode["total_reward"]
 
     if T == 0:
         return (
             torch.empty(0, 9, 9, dtype=local_arr.dtype),
             torch.empty(0, 21, 79, dtype=global_arr.dtype),
             torch.empty(0, seq_len, dtype=torch.long),
-            ret,
+            torch.empty(0, dtype=torch.float32),
         )
 
     # Pad if shorter than seq_len
@@ -428,6 +438,9 @@ def _extract_windows(
                 torch.full((pad_len,), pad_token, dtype=torch.long),
             ]
         )
+        # Padded steps earn nothing, so a padded window's return is the
+        # real episode's remainder rather than an inflated repeat.
+        rewards = torch.cat([rewards, torch.zeros(pad_len)])
         local_arr = torch.cat(
             [
                 local_arr,
@@ -446,8 +459,9 @@ def _extract_windows(
     local_out = local_arr[:n_windows]  # [W, 9, 9]
     global_out = global_arr[:n_windows]  # [W, 21, 79]
     x0_out = actions.unfold(0, seq_len, 1)  # [W, H]
+    returns_out = rewards.unfold(0, seq_len, 1).sum(dim=1)  # [W]
 
-    return local_out, global_out, x0_out, ret
+    return local_out, global_out, x0_out, returns_out
 
 
 def collect_training_data(
@@ -468,9 +482,9 @@ def collect_training_data(
         n_episodes: Number of episodes to collect.
 
     Returns:
-        Tuple of (local_obs, global_obs, x0, returns) batched over
-        all windows. Returns is per-window (all windows from same
-        episode share the episode return).
+        Tuple of (local_obs, global_obs, x0, returns) batched over all
+        windows. Each return is the reward sum over that window's own
+        actions (author decision 2026-08-16).
     """
     if str(device).startswith("cuda") and n_episodes > 1:
         return _collect_training_data_gpu(model, cfg, device, n_episodes)
@@ -509,7 +523,7 @@ def _collect_training_data_seq(
             device,
             stochastic=True,
         )
-        lo, go, x0, ret = _extract_windows(
+        lo, go, x0, rets = _extract_windows(
             ep,
             cfg.seq_len,
             cfg.pad_token,
@@ -519,7 +533,7 @@ def _collect_training_data_seq(
         all_local.append(lo)
         all_global.append(go)
         all_x0.append(x0)
-        all_returns.append(torch.full((lo.shape[0],), ret))
+        all_returns.append(rets)
 
     if not all_local:
         empty = torch.empty(0)
@@ -581,6 +595,7 @@ def _collect_training_data_gpu(
         dtype=np.int16,
     )
     act_buf = np.zeros((n, max_steps), dtype=np.int64)
+    rew_buf = np.zeros((n, max_steps), dtype=np.float32)
 
     # Per-episode state
     plans = np.zeros((n, cfg.seq_len), dtype=np.int64)
@@ -661,6 +676,7 @@ def _collect_training_data_gpu(
 
                 obs, reward, term, trunc, info = envs[i].step(action)
                 local, glb = obs
+                rew_buf[i, n_steps[i] - 1] = reward
                 total_reward[i] += reward
                 cur_local[i] = local
                 cur_global[i] = glb
@@ -696,9 +712,10 @@ def _collect_training_data_gpu(
             "local": obs_local[i, :T],
             "global": obs_global[i, :T],
             "actions": act_buf[i, :T],
+            "rewards": rew_buf[i, :T],
             "total_reward": float(total_reward[i]),
         }
-        lo, go, x0, ret = _extract_windows(
+        lo, go, x0, rets = _extract_windows(
             ep,
             cfg.seq_len,
             cfg.pad_token,
@@ -708,7 +725,7 @@ def _collect_training_data_gpu(
         all_local.append(lo)
         all_global.append(go)
         all_x0.append(x0)
-        all_returns.append(torch.full((lo.shape[0],), ret))
+        all_returns.append(rets)
 
     if not all_local:
         empty = torch.empty(0)

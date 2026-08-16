@@ -43,6 +43,7 @@ def _episode(n_steps: int, seed: int = 0) -> dict:
         "local": rng.integers(0, GLYPH_MAX, (n_steps, 9, 9), dtype=np.int16),
         "global": rng.integers(0, GLYPH_MAX, (n_steps, 21, 79), dtype=np.int16),
         "actions": rng.integers(0, 12, (n_steps,), dtype=np.int64),
+        "rewards": rng.random(n_steps).astype(np.float32),
         "total_reward": 1.25,
     }
 
@@ -52,13 +53,17 @@ def _episode(n_steps: int, seed: int = 0) -> dict:
 
 def test_extract_windows_keeps_the_buffer_dtype():
     """Windows leave ``_extract_windows`` as int16, not int64."""
-    lo, go, x0, ret = _extract_windows(_episode(40), seq_len=8, pad_token=13)
+    ep = _episode(40)
+    lo, go, x0, rets = _extract_windows(ep, seq_len=8, pad_token=13)
 
     assert lo.dtype == torch.int16
     assert go.dtype == torch.int16
     # Actions index the model's action embedding directly and stay int64.
     assert x0.dtype == torch.int64
-    assert ret == 1.25
+    # One return per window, each the reward sum over that window's own
+    # actions (author decision 2026-08-16).
+    assert rets.shape == (x0.shape[0],)
+    assert rets[0].item() == pytest.approx(float(ep["rewards"][:8].sum()), rel=1e-6)
 
 
 def test_device_side_widening_equals_the_host_side_cast():

@@ -76,8 +76,8 @@ def run_model_episode(
 
     Returns:
         Dict with ``"local"`` ``[T,9,9]``, ``"global"`` ``[T,21,79]``,
-        ``"actions"`` ``[T]``, ``"won"`` bool, ``"steps"`` int,
-        ``"total_reward"`` float, ``"seed"`` int.
+        ``"actions"`` ``[T]``, ``"rewards"`` ``[T]``, ``"won"`` bool,
+        ``"steps"`` int, ``"total_reward"`` float, ``"seed"`` int.
     """
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
@@ -88,6 +88,7 @@ def run_model_episode(
         locals_list = [local]
         globals_list = [glb]
         actions_list: list[int] = []
+        rewards_list: list[float] = []
         won = False
         total_reward = 0.0
         plan: torch.Tensor | None = None
@@ -141,6 +142,7 @@ def run_model_episode(
                 action,
             )
             total_reward += reward
+            rewards_list.append(float(reward))
             locals_list.append(local)
             globals_list.append(glb)
 
@@ -158,6 +160,10 @@ def run_model_episode(
         "local": locals_arr,
         "global": globals_arr,
         "actions": actions_arr,
+        # Per-step rewards, so a consumer can define a per-window return
+        # over exactly the actions a window trains on (author decision
+        # 2026-08-16). "total_reward" stays the episode sum.
+        "rewards": np.array(rewards_list, dtype=np.float32),
         "won": won,
         "steps": len(actions_list),
         "total_reward": total_reward,

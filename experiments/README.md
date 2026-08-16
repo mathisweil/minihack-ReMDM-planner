@@ -13,6 +13,8 @@ and answer the question: *which intervention prevents RL fine-tuning collapse?*
 Diagnoses why RL fine-tuning of the diffusion model collapses and which interventions fix it.
 Implements **25 ablations**: a baseline plus four groups (A: Regularisation, B: Training Signal, C: Architecture, D: Data Quality), with a comprehensive diagnostic and analysis pipeline.
 
+**Training data is on-policy, and returns are per window.** Each iteration rolls the *current* model out under its EMA weights and trains on the resulting windows; a window's return is the reward sum over exactly the actions it trains on, not the episode total broadcast to every window. Author decision 2026-08-16; the craftax twin uses the same definition, so scores are comparable across repos.
+
 ### Directory structure
 
 ```

@@ -92,7 +92,7 @@ def _collect_oracle_data(
             device,
             stochastic=True,
         )
-        lo, go, x0, ret = _extract_windows(
+        lo, go, x0, rets = _extract_windows(
             ep,
             cfg.seq_len,
             cfg.pad_token,
@@ -102,7 +102,7 @@ def _collect_oracle_data(
         all_local.append(lo)
         all_global.append(go)
         all_x0.append(x0)
-        all_returns.append(torch.full((lo.shape[0],), ret, dtype=torch.float32))
+        all_returns.append(rets.to(torch.float32))
 
     if not all_local:
         empty_lo = torch.empty(0, 9, 9, dtype=torch.long, device=device)
@@ -233,17 +233,13 @@ def run_mixing_point(
             device,
             stochastic=True,
         )
-        lo, go, x0, ret = _extract_windows(
+        lo, go, x0, rets = _extract_windows(
             ep,
             cfg.seq_len,
             cfg.pad_token,
         )
         if lo.shape[0] > 0:
-            returns_t = torch.full(
-                (lo.shape[0],),
-                ret,
-                dtype=torch.float32,
-            )
+            returns_t = rets.to(torch.float32)
             buf.push(
                 lo.to(device),
                 go.to(device),

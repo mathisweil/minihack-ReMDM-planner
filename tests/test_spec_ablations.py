@@ -444,6 +444,59 @@ def test_t_curriculum_anneals_high_noise_to_low_noise():
 # ---------------------------------------------------------------------------
 
 
+def test_window_returns_are_per_window_not_per_episode():
+    """A window's return is the reward sum over exactly the actions it
+    trains on (author decision 2026-08-16, PARITY "Ablation-suite data
+    source and return definition"), not the episode total broadcast to
+    every window - two windows through different states must not be
+    credited alike. The craftax twin sums the same span.
+
+    Derivation: rewards 0..9, seq_len 4 -> window w sums
+    w + (w+1) + (w+2) + (w+3) = 4w + 6, i.e. 6, 10, 14, ... The
+    episode total is 45, which no window equals.
+    """
+    import numpy as np
+
+    from experiments.rl_finetuning.ablations.training import _extract_windows
+
+    T, seq_len = 10, 4
+    ep = {
+        "local": np.zeros((T, 9, 9), dtype=np.int16),
+        "global": np.zeros((T, 21, 79), dtype=np.int16),
+        "actions": np.arange(T, dtype=np.int64),
+        "rewards": np.arange(T, dtype=np.float32),
+        "total_reward": float(np.arange(T).sum()),
+    }
+
+    _, _, x0, rets = _extract_windows(ep, seq_len=seq_len, pad_token=13)
+
+    assert rets.shape == (T - seq_len + 1,) == (x0.shape[0],)
+    expected = [4 * w + 6 for w in range(T - seq_len + 1)]
+    assert rets.tolist() == pytest.approx(expected)
+    assert 45.0 not in rets.tolist(), "episode total leaked into a window"
+
+
+def test_padded_window_return_excludes_the_padding():
+    """Padded steps earn nothing, so a short episode's single window
+    scores the real rewards only."""
+    import numpy as np
+
+    from experiments.rl_finetuning.ablations.training import _extract_windows
+
+    ep = {
+        "local": np.zeros((3, 9, 9), dtype=np.int16),
+        "global": np.zeros((3, 21, 79), dtype=np.int16),
+        "actions": np.arange(3, dtype=np.int64),
+        "rewards": np.array([1.0, 2.0, 3.0], dtype=np.float32),
+        "total_reward": 6.0,
+    }
+
+    _, _, x0, rets = _extract_windows(ep, seq_len=8, pad_token=13)
+
+    assert x0.shape == (1, 8)
+    assert rets.tolist() == pytest.approx([6.0])
+
+
 def test_reward_filter_keeps_strictly_above_the_percentile():
     """reward_filtering keeps windows with return STRICTLY above the
     batch percentile (spec-ablations §2, step-9 amendment: same
