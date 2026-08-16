@@ -6,7 +6,7 @@
 # inherited automatically.  Only keys that differ or are new live here.
 #
 # This is the BASE of the ablations config chain.  Machine-specific configs
-# (final_ablations_qmul.yaml, final_ablations_ucl.yaml, ...) declare
+# (ablations_final_qmul.yaml, ablations_final_ucl.yaml, ...) declare
 # `extends: ablations_default.yaml` and carry ONLY the keys they change, so
 # every key below is the single source of truth unless a machine config
 # deliberately overrides it.  Merge order is:

@@ -37,8 +37,8 @@ rl_finetuning/
 └── configs/
     ├── ablations_default.yaml   # Base: all ablation hyperparameters
     ├── ablations_fast.yaml      # Smoke-test overlay (50 iterations)
-    ├── final_ablations_qmul.yaml  # QMUL H200 overrides only
-    └── final_ablations_ucl.yaml   # UCL 3090 Ti overrides only (reference)
+    ├── ablations_final_qmul.yaml  # QMUL H200 overrides only
+    └── ablations_final_ucl.yaml   # UCL 3090 Ti overrides only (reference)
 ```
 
 ### Config layering
@@ -61,7 +61,7 @@ configs/defaults.yaml         # architecture, env IDs, token IDs
 Machine configs carry only the keys they change:
 
 ```yaml
-# final_ablations_ucl.yaml
+# ablations_final_ucl.yaml
 batch_size: 4608
 cka_batch_size: 128
 ```
@@ -117,7 +117,7 @@ python experiments/rl_finetuning/run_ablations.py \
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint path/to/dagger_checkpoint.pth \
-    --ablations-config experiments/rl_finetuning/configs/final_ablations_ucl.yaml \
+    --ablations-config experiments/rl_finetuning/configs/ablations_final_ucl.yaml \
     --all \
     --use-wandb
 ```
@@ -194,9 +194,9 @@ be used with `--analyze-only` for further filtering or re-plotting.
 averages seeds without checking where they came from, so pooling two machine
 configs is sound only when they train the same model and measure it the same
 way. All published MiniHack ablation results were produced on the **UCL 3090
-Ti** (`final_ablations_ucl.yaml`), which is the reference config.
+Ti** (`ablations_final_ucl.yaml`), which is the reference config.
 
-`final_ablations_qmul.yaml` is **not poolable** with it. It diverges on four
+`ablations_final_qmul.yaml` is **not poolable** with it. It diverges on four
 keys that change the result, not just the wall-clock:
 
 | Key | UCL | QMUL | Effect |
@@ -210,7 +210,7 @@ Differences in diagnostic cadence (`eval_every`, `cka_every`, `cka_batch_size`,
 `per_layer_every`, `repr_drift_every`, `grad_align_every`, `t_analysis_every`)
 are wall-clock only and do not affect poolability.
 
-`tests/test_config.py` enforces this: every `final_ablations_*.yaml` must be
+`tests/test_config.py` enforces this: every `ablations_final_*.yaml` must be
 declared poolable or not, configs declared poolable must match the reference on
 the result-affecting keys, and the recorded QMUL divergence must stay accurate.
 Aligning QMUL later fails the test until it is moved to the poolable set.

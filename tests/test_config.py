@@ -107,7 +107,7 @@ def test_shipped_ablation_configs_validate(ra):
     allowed = set(yaml.safe_load((_CONFIGS / "defaults.yaml").read_text())) | set(
         yaml.safe_load(_ABL_DEFAULT.read_text())
     )
-    for name in ("final_ablations_qmul.yaml", "final_ablations_ucl.yaml"):
+    for name in ("ablations_final_qmul.yaml", "ablations_final_ucl.yaml"):
         ra._load_ablation_config(str(_ABL_CONFIGS / name), allowed=allowed)
 
 
@@ -231,7 +231,7 @@ def test_preset_pins_offline_overrides_to_null(preset):
 # which is therefore the reference.
 # --------------------------------------------------------------------------
 
-_REFERENCE_CONFIG = "final_ablations_ucl.yaml"
+_REFERENCE_CONFIG = "ablations_final_ucl.yaml"
 
 #: Keys that change the trained model or the score it is measured with.
 _RESULT_AFFECTING = frozenset(
@@ -255,7 +255,7 @@ _POOLABLE = {_REFERENCE_CONFIG}
 #: Configs that must NOT be merged with the reference, mapped to the
 #: result-affecting keys on which they are known to diverge.
 _NOT_POOLABLE = {
-    "final_ablations_qmul.yaml": frozenset(
+    "ablations_final_qmul.yaml": frozenset(
         {
             "batch_size",  # 512 vs 4608: ~9x per-update SNR
             "episodes_per_iter",  # 20 vs 30: 10k vs 15k total episodes
@@ -267,7 +267,7 @@ _NOT_POOLABLE = {
 
 
 def _machine_configs() -> list[str]:
-    return sorted(p.name for p in _ABL_CONFIGS.glob("final_ablations_*.yaml"))
+    return sorted(p.name for p in _ABL_CONFIGS.glob("ablations_final_*.yaml"))
 
 
 def _divergence(ra, name: str) -> set[str]:
