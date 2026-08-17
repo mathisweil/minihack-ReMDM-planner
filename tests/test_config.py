@@ -368,17 +368,28 @@ def _hf_upload():
     return mod
 
 
+def _shipped_defaults() -> dict:
+    """The shipped `configs/defaults.yaml` as a published snapshot would be.
+
+    `selection()` is called on a checkpoint's own config snapshot, which is a
+    scrub of a config of exactly this shape. Feeding the shipped file rather
+    than a hand-built dict is the point: the previous version of these tests
+    supplied the keys the function happened to look for, so both were green
+    while every released DAgger `selection.json` recorded nulls.
+    """
+    return yaml.safe_load((_CONFIGS / "defaults.yaml").read_text())
+
+
 def test_selection_records_the_dagger_candidate_set():
     """A DAgger checkpoint publishes as best-of-N over periodic
-    iterations, naming the metric, the cadence and the eval protocol."""
+    checkpoints, naming the metric, the cadence and the eval protocol.
+
+    The cadence and budget are env-step denominated because that is the
+    cadence DAgger checkpoints on; the selected point is its own iteration
+    counter.
+    """
     hf = _hf_upload()
-    cfg = {
-        "checkpoint_every": 25,
-        "max_iterations": 600,
-        "checkpoint_eval_episodes": 20,
-        "id_envs": ["A", "B"],
-        "ood_envs": ["C"],
-    }
+    cfg = _shipped_defaults()
     stats = {"counter": "dagger_iteration", "value": 600}
 
     sel = hf.selection(cfg, stats, "id_winrate")
@@ -387,29 +398,25 @@ def test_selection_records_the_dagger_candidate_set():
     assert sel["selected"] == {"dagger_iteration": 600}
     assert sel["selection_metric"] == "id_winrate"
     assert sel["candidates"] == {
-        "unit": "dagger_iterations",
-        "every": 25,
-        "configured_max": 600,
+        "unit": "env_steps",
+        "every": cfg["checkpoint_every_timesteps"],
+        "configured_max": cfg["total_timesteps"],
     }
+    assert sel["candidates"]["every"] is not None
+    assert sel["candidates"]["configured_max"] is not None
     assert sel["eval_protocol"] == {
-        "episodes_per_env": 20,
+        "episodes_per_env": cfg["checkpoint_eval_episodes"],
         "weights": "ema",
-        "id_envs": ["A", "B"],
-        "ood_envs": ["C"],
+        "id_envs": cfg["id_envs"],
+        "ood_envs": cfg["ood_envs"],
     }
 
 
 def test_selection_switches_units_for_an_offline_checkpoint():
     """An offline checkpoint is selected over gradient steps, with the
-    offline pins as the candidate set - not DAgger iterations."""
+    offline pins as the candidate set - not the env-step cadence."""
     hf = _hf_upload()
-    cfg = {
-        "offline_checkpoint_every_grad_steps": 10_000,
-        "offline_total_grad_steps": 60_000,
-        "checkpoint_eval_episodes": 20,
-        "id_envs": ["A"],
-        "ood_envs": [],
-    }
+    cfg = _shipped_defaults()
     stats = {"counter": "gradient_step", "value": 40_000}
 
     sel = hf.selection(cfg, stats, None)
@@ -418,7 +425,31 @@ def test_selection_switches_units_for_an_offline_checkpoint():
     assert sel["selection_metric"] is None
     assert sel["candidates"] == {
         "unit": "gradient_steps",
-        "every": 10_000,
-        "configured_budget": 60_000,
+        "every": cfg["offline_checkpoint_every_grad_steps"],
+        "configured_budget": cfg["offline_total_grad_steps"],
     }
     assert sel["eval_protocol"]["weights"] == "ema"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "checkpoint_every_timesteps",
+        "total_timesteps",
+        "checkpoint_eval_episodes",
+        "id_envs",
+        "ood_envs",
+    ],
+)
+def test_selection_rejects_a_snapshot_missing_a_key_it_records(missing):
+    """An absent key fails the upload instead of publishing a null.
+
+    This is the guard the released artefacts lacked: the two renamed keys
+    read as `None` and shipped as `"every": null, "configured_max": null`.
+    """
+    hf = _hf_upload()
+    cfg = _shipped_defaults()
+    del cfg[missing]
+
+    with pytest.raises(KeyError, match=missing):
+        hf.selection(cfg, {"counter": "dagger_iteration", "value": 600}, None)

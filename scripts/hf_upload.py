@@ -169,19 +169,39 @@ def export_weights(pth: Path, out: Path) -> dict:
     }
 
 
+def required(cfg: dict, key: str) -> object:
+    """Read a key the published record depends on, or fail the upload.
+
+    ``.get()`` here published a null instead: every DAgger `selection.json`
+    released before this guard recorded `"every": null` because the two keys
+    read had been renamed out of the config, while the model card claims each
+    file records the budget it came from. A declared-but-null value is still
+    accepted -- the four `offline_*` keys are nullable by design.
+    """
+    if key not in cfg:
+        raise KeyError(
+            f"{key} is absent from the checkpoint's config snapshot, so "
+            f"selection.json cannot record the candidate set it came from"
+        )
+    return cfg[key]
+
+
 def selection(cfg: dict, stats: dict, metric: str | None) -> dict:
     """Record the best-of-N selection a published checkpoint came from."""
     if stats["counter"] == "gradient_step":
         candidates = {
             "unit": "gradient_steps",
-            "every": cfg.get("offline_checkpoint_every_grad_steps"),
-            "configured_budget": cfg.get("offline_total_grad_steps"),
+            "every": required(cfg, "offline_checkpoint_every_grad_steps"),
+            "configured_budget": required(cfg, "offline_total_grad_steps"),
         }
     else:
+        # DAgger checkpoints on an env-step cadence (`online.py` compares
+        # against `env_steps_total`) but names its files by iteration, so the
+        # candidate set is denominated in env steps and `selected` is not.
         candidates = {
-            "unit": "dagger_iterations",
-            "every": cfg.get("checkpoint_every"),
-            "configured_max": cfg.get("max_iterations"),
+            "unit": "env_steps",
+            "every": required(cfg, "checkpoint_every_timesteps"),
+            "configured_max": required(cfg, "total_timesteps"),
         }
     return {
         "policy": "best-of-N over periodic checkpoints",
@@ -189,10 +209,10 @@ def selection(cfg: dict, stats: dict, metric: str | None) -> dict:
         "selection_metric": metric,
         "candidates": candidates,
         "eval_protocol": {
-            "episodes_per_env": cfg.get("checkpoint_eval_episodes"),
+            "episodes_per_env": required(cfg, "checkpoint_eval_episodes"),
             "weights": "ema",
-            "id_envs": cfg.get("id_envs"),
-            "ood_envs": cfg.get("ood_envs"),
+            "id_envs": required(cfg, "id_envs"),
+            "ood_envs": required(cfg, "ood_envs"),
         },
     }
 
