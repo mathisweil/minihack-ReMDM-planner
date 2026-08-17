@@ -65,7 +65,8 @@ def mdlm_loss(
 
     Returns:
         Scalar loss, or the per-sample ``[B]`` vector under
-        ``reduction="none"``. Zero(s) when no masked positions exist.
+        ``reduction="none"``. Zero(s) when no masked positions exist, and
+        differentiable in ``logits`` even then — see the mask comment below.
     """
     if logits.ndim != 3 or x0.shape != zt.shape or x0.shape != logits.shape[:2]:
         raise ValueError(
@@ -76,12 +77,21 @@ def mdlm_loss(
         raise ValueError(f"Unknown reduction: {reduction!r}")
     B, L, V = logits.shape
 
-    # Mask: compute loss only on masked, non-PAD positions
+    # Mask: compute loss only on masked, non-PAD positions.
+    #
+    # An all-False mask is a legitimate draw, not an error: at a t where
+    # alpha(t) is near 1 nothing gets masked. It is handled by the arithmetic
+    # below rather than by an early return, because the value is not the only
+    # thing that matters — the result has to stay differentiable in `logits`.
+    # `ce * is_masked.float()` gives exactly zero while keeping `logits` in
+    # the graph; a freshly allocated zero tensor gives the same number with
+    # no graph, and any caller that back-propagates it raises "element 0 of
+    # tensors does not require grad and does not have a grad_fn". That is
+    # reachable whenever the caller's other loss terms cannot carry the graph
+    # either, which is the case for every ablation that freezes the goal
+    # head's input path. The craftax twin has always computed this zero
+    # arithmetically.
     is_masked = (zt == mask_token) & (x0 != pad_token)  # [B, L]
-
-    if not is_masked.any():
-        zero = logits.new_zeros(B)
-        return zero if reduction == "none" else zero.sum()
 
     # Per-position cross-entropy
     # Clamp targets to valid vocab range — out-of-range positions (PAD,
@@ -110,7 +120,12 @@ def mdlm_loss(
 
     # Constant per-token normalisation (1/L), NOT the realised masked count
     per_sample = w_t * ce.sum(dim=1) / L  # [B]
-    return per_sample if reduction == "none" else per_sample.mean()
+    if reduction == "none":
+        return per_sample
+    # `sum / max(B, 1)`, not `mean`: identical for every non-empty batch, and
+    # zero rather than NaN for an empty one, which the removed early return
+    # also happened to cover.
+    return per_sample.sum() / max(B, 1)
 
 
 def auxiliary_goal_loss(
@@ -127,7 +142,8 @@ def auxiliary_goal_loss(
 
     Returns:
         Scalar MSE loss over samples where the staircase is visible.
-        Returns ``0.0`` when no staircase is visible in the batch.
+        Zero when no staircase is visible in the batch, differentiable in
+        *goal_pred* whenever *goal_pred* itself is.
     """
     targets = find_staircase_from_glyphs(global_obs)  # [B, 2]
     targets = targets.to(goal_pred.device, dtype=goal_pred.dtype)
@@ -135,7 +151,12 @@ def auxiliary_goal_loss(
     # Only supervise where staircase is visible
     valid = targets[:, 0] != pad_value  # [B]
     if not valid.any():
-        return goal_pred.new_tensor(0.0)
+        # A zero that keeps `goal_pred` in the graph, for the same reason as
+        # the mask comment in `mdlm_loss`: the caller adds this term to the
+        # ELBO term and back-propagates the sum, so a detached constant here
+        # silently drops this term from the graph. Multiplying by the empty
+        # valid mask is exactly zero and costs one elementwise pass.
+        return (goal_pred * valid.unsqueeze(1)).sum()
 
     diff = (goal_pred[valid] - targets[valid]) ** 2  # [N, 2]
     return diff.mean()

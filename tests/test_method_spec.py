@@ -251,6 +251,91 @@ def test_loss_excludes_pad_and_empty_mask_is_zero():
     assert clean.item() == 0.0
 
 
+@pytest.mark.parametrize("reduction", ["none", "mean"])
+def test_the_empty_mask_loss_is_zero_and_still_differentiable(reduction):
+    """An all-unmasked draw contributes zero *and* stays in the graph.
+
+    An empty mask is a legitimate draw, not an error: at a t where alpha(t)
+    is near 1 nothing gets masked. The value has to be zero, and the result
+    has to remain differentiable in ``logits``, because the caller adds this
+    term to others and back-propagates the sum. Returning a freshly
+    allocated zero gave the right number with no ``grad_fn``, and
+    ``backward()`` then raised "element 0 of tensors does not require grad
+    and does not have a grad_fn" for every ablation whose other loss terms
+    could not carry the graph either.
+
+    The gradient must also be exactly zero: an empty mask means no
+    supervision, so the iteration is a no-op, not an arbitrary update.
+    """
+    logits, x0 = _uniform_logits_case()
+    logits = logits.clone().requires_grad_(True)
+    t = torch.full((x0.shape[0],), 0.5)
+
+    loss = mdlm_loss(
+        logits, x0, x0.clone(), t, 12, 13, linear_schedule, reduction=reduction
+    )
+
+    assert float(loss.sum()) == 0.0
+    assert loss.grad_fn is not None, "empty-mask loss detached from the graph"
+    loss.sum().backward()
+    assert logits.grad is not None
+    assert bool((logits.grad == 0).all())
+
+
+@pytest.mark.parametrize("reduction", ["none", "mean"])
+def test_an_empty_batch_is_zero_rather_than_nan(reduction):
+    """A zero-length batch reduces to zero, not to a NaN mean.
+
+    ``mean`` over an empty tensor is NaN; the removed early return happened
+    to cover this, so the reduction is ``sum / max(B, 1)``, which is
+    identical to ``mean`` for every non-empty batch (asserted below).
+    """
+    logits = torch.zeros(0, 8, 12, requires_grad=True)
+    empty = torch.zeros(0, 8, dtype=torch.long)
+
+    loss = mdlm_loss(
+        logits, empty, empty, torch.zeros(0), 12, 13, linear_schedule,
+        reduction=reduction,
+    )
+
+    assert bool(torch.isfinite(loss).all())
+    assert float(loss.sum()) == 0.0
+
+
+def test_the_batch_reduction_is_exactly_the_per_sample_mean():
+    """`sum / max(B, 1)` must be bit-identical to `mean` when B > 0."""
+    logits, x0 = _uniform_logits_case()
+    zt = x0.clone()
+    zt[:, ::2] = 12
+    t = torch.full((x0.shape[0],), 0.5)
+    args = (logits, x0, zt, t, 12, 13, linear_schedule)
+
+    per_sample = mdlm_loss(*args, reduction="none")
+    scalar = mdlm_loss(*args, reduction="mean")
+
+    assert torch.equal(scalar, per_sample.mean())
+
+
+def test_the_auxiliary_goal_loss_is_a_differentiable_zero_when_unsupervised():
+    """No visible staircase contributes zero, in the graph.
+
+    Same contract as the empty mask above, and the same defect: this term is
+    summed with the ELBO term before `backward()`, so a detached constant
+    silently drops it from the graph.
+    """
+    from src.diffusion.loss import auxiliary_goal_loss
+
+    goal_pred = torch.randn(4, 2, requires_grad=True)
+    no_staircase = torch.zeros(4, 21, 79, dtype=torch.long)
+
+    loss = auxiliary_goal_loss(goal_pred, no_staircase)
+
+    assert float(loss) == 0.0
+    assert loss.grad_fn is not None, "empty-supervision aux loss detached"
+    loss.backward()
+    assert bool((goal_pred.grad == 0).all())
+
+
 # ---------------------------------------------------------------------------
 # Reverse step: remasking schedules and the sigma bound
 # ---------------------------------------------------------------------------

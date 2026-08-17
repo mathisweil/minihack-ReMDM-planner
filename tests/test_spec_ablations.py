@@ -817,7 +817,12 @@ def prod_cfg() -> SimpleNamespace:
     merged: dict = {}
     for path in _CONFIG_CHAIN:
         merged.update(yaml.safe_load(path.read_text()))
-    return SimpleNamespace(**merged)
+    cfg = SimpleNamespace(**merged)
+    # `run_ablation` stamps the resolved schedule onto the namespace before
+    # the first loss call; the leading underscore marks it as injected at run
+    # time rather than declared in a config.
+    cfg._schedule_fn = get_schedule(cfg.noise_schedule)
+    return cfg
 
 
 def _prod_deltas(cfg: SimpleNamespace, name: str) -> dict[str, float]:
@@ -908,6 +913,80 @@ def test_the_non_freezing_optimisers_freeze_nothing(name, prod_cfg):
         f"{name} froze {sorted(set(deltas) - _moved(deltas))}"
     )
     assert min(deltas.values()) >= prod_cfg.lr / 10
+
+
+# ---------------------------------------------------------------------------
+# Every arm must be able to back-propagate a degenerate batch
+# ---------------------------------------------------------------------------
+
+
+def _empty_mask_core_loss(cfg: SimpleNamespace, name: str):
+    """`_core_loss` on a batch where the noising step masks nothing.
+
+    `t_min = t_max = 1e-9` puts alpha(t) at ~1, so `q_sample` leaves every
+    position unmasked and the ELBO term takes its degenerate path. The
+    observation carries no staircase glyph, so the auxiliary term takes its
+    degenerate path at the same time -- the combination that detached the
+    whole loss.
+    """
+    from experiments.rl_finetuning.ablations.losses import _core_loss
+
+    model = make_model(cfg)
+    spec = registry.REGISTRY[name]
+    if spec.use_lora:
+        apply_lora_to_model(
+            model, getattr(cfg, "lora_rank", 8), getattr(cfg, "lora_alpha", 16.0)
+        )
+    else:
+        spec.optimizer_factory(cfg, model)
+
+    batch = 4
+    return model, _core_loss(
+        model,
+        torch.zeros(batch, 9, 9, dtype=torch.long),
+        torch.zeros(batch, 21, 79, dtype=torch.long),
+        torch.randint(0, cfg.action_dim, (batch, cfg.seq_len)),
+        torch.ones(batch),
+        cfg,
+        torch.device("cpu"),
+        t_min=1e-9,
+        t_max=1e-9,
+    )
+
+
+@pytest.mark.parametrize(
+    "name", (*_FREEZING_ABLATIONS, *_NON_FREEZING_ABLATIONS)
+)
+def test_every_arm_can_back_propagate_a_degenerate_batch(name, prod_cfg):
+    """No arm may crash on a batch that supervises nothing.
+
+    Six group-C arms plus `lora` failed a `--fast` run with
+    `RuntimeError: element 0 of tensors does not require grad and does not
+    have a grad_fn` -- at the training step and at two diagnostics, all of
+    which back-propagate `_core_loss`.
+
+    The cause was structural, not per-ablation. Any arm that freezes the
+    goal head's input path has a permanently detached auxiliary term, so the
+    loss's graph rests entirely on the ELBO term; when that term also took
+    its empty-mask early return the sum had no graph at all. `baseline_rl`
+    never hit it because its auxiliary term is trainable, and
+    `layer_ablation_top3` shares the defect and merely never drew an empty
+    mask in fifty iterations.
+
+    Both degenerate branches now compute their zero arithmetically, so the
+    loss is exactly zero, differentiable, and yields a zero gradient: the
+    iteration is a no-op rather than an exception.
+    """
+    model, loss = _empty_mask_core_loss(prod_cfg, name)
+
+    assert loss.grad_fn is not None, f"{name}: degenerate loss left the graph"
+    loss.backward()
+
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    assert trainable, f"{name} has nothing trainable"
+    assert all(
+        p.grad is None or bool((p.grad == 0).all()) for p in trainable
+    ), f"{name}: an unsupervised batch produced a non-zero gradient"
 
 
 # ---------------------------------------------------------------------------
