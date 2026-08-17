@@ -212,6 +212,8 @@ uv run hf download mathisweil/remdm-minihack-checkpoints \
 
 Each checkpoint directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config_<step>.yaml` (config snapshot) and `selection.json`. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading.
 
+Historical note: the released DAgger `selection.json` records `"every": null, "configured_max": null` and `"unit": "dagger_iterations"`. It was published by a version of `selection()` that read two config keys which had been renamed out of the config, so the values came back empty. It is **historical and noncanonical** and stays as published (author decision 2026-08-17); the checkpoint's own `config_<step>.yaml` carries the real cadence and budget, so nothing is lost. A publish from the current code records the candidate set in env steps — `"every": 940000, "configured_max": 5650000` for the shipped recipe — and raises rather than writing a null for any key it cannot read.
+
 ### Publishing to the Hub
 
 `scripts/hf_upload.py` rediscovers and uploads three things, each keeping its repo-relative path: `checkpoints/` (adding a `model.safetensors` EMA export and `selection.json` per directory), every `experiments/rl_finetuning/outputs/<run>/` holding a `results.json` (with `diagnosis.md`, `tables/`, `figures/`), and the eval JSONs in `results/inference/`. It drops W&B and hub config keys, shortens absolute paths and regenerates the model card.

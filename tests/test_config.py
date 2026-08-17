@@ -3,6 +3,7 @@ ablation poolability, W&B naming and publish-time checkpoint selection."""
 
 import ast
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -484,6 +485,68 @@ _NOT_FROM_A_CONFIG_FILE = frozenset(
         "env_name",
     }
 )
+
+
+_HF_ONLINE = (
+    _ROOT / "checkpoints" / "hf" / "checkpoints" / "online"
+    / "Minihack-Online-Diffusion-DAgger-100M"
+)
+_needs_artefact = pytest.mark.skipif(
+    not (_HF_ONLINE / "selection.json").exists(),
+    reason="released HF checkpoints not downloaded to checkpoints/hf/",
+)
+
+
+@_needs_artefact
+def test_the_released_dagger_selection_is_the_documented_historical_exception():
+    """The released DAgger `selection.json` keeps its null candidate set.
+
+    It was written by a `selection()` that read `checkpoint_every` and
+    `max_iterations` after both had been renamed out of the config, so
+    `.get()` returned None. Author decision 2026-08-17: the artefact stays
+    as published and is historical/noncanonical -- the checkpoint's own
+    config snapshot carries the real cadence and budget, so nothing is
+    lost, and rewriting a released file is not worth the churn.
+
+    This fails if the artefact is silently re-published, or if the README's
+    historical note stops explaining it. A re-publish is fine -- it just has
+    to retire the note and this test together, exactly as the craftax N3
+    rename did.
+    """
+    released = json.loads((_HF_ONLINE / "selection.json").read_text())
+
+    assert released["candidates"] == {
+        "unit": "dagger_iterations",
+        "every": None,
+        "configured_max": None,
+    }
+
+    note = (_ROOT / "README.md").read_text()
+    assert "Historical note" in note
+    assert '"every": null' in note and "940000" in note
+
+
+@_needs_artefact
+def test_a_publish_from_the_current_code_records_the_real_candidate_set():
+    """The same snapshot, run through the current `selection()`.
+
+    The published nulls were never a data loss: the released
+    `config.yaml` declares both canonical keys, so the corrected reader
+    recovers the cadence and budget from the artefact itself. This pins
+    that a re-publish would fix the record rather than repeat it.
+    """
+    hf = _hf_upload()
+    cfg = hf.scrub(yaml.safe_load((_HF_ONLINE / "config.yaml").read_text()))
+
+    sel = hf.selection(cfg, {"counter": "dagger_iteration", "value": 563}, None)
+
+    assert sel["candidates"] == {
+        "unit": "env_steps",
+        "every": cfg["checkpoint_every_timesteps"],
+        "configured_max": cfg["total_timesteps"],
+    }
+    assert sel["candidates"]["every"] is not None
+    assert sel["candidates"]["configured_max"] is not None
 
 
 # ---------------------------------------------------------------------------
