@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import logging
 import math
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
+import yaml
 from torch import nn
 
 from experiments.rl_finetuning.ablations import registry
@@ -44,6 +46,7 @@ from experiments.rl_finetuning.ablations.optimizers import (
     gradient_surgery,
     make_optimizer_frozen,
     make_optimizer_llrd,
+    make_optimizer_lora,
 )
 from experiments.rl_finetuning.ablations.training import (
     RewardModel,
@@ -771,6 +774,140 @@ def test_a_frozen_fragment_list_matching_everything_is_an_error():
 
     with pytest.raises(ValueError, match="no trainable parameter"):
         make_optimizer_frozen(cfg, model, [""])
+
+
+# ---------------------------------------------------------------------------
+# The freeze family at the PRODUCTION architecture
+# ---------------------------------------------------------------------------
+# Every ablation whose optimiser trains a strict subset of the parameters.
+_FREEZING_ABLATIONS = (
+    "frozen_backbone",
+    "head_only",
+    "attention_only",
+    "ffn_only",
+    "layer_ablation_top1",
+    "layer_ablation_top2",
+    "layer_ablation_top3",
+    "lora",
+)
+# The other two partitioning optimisers, asked the opposite question: LLRD
+# splits the parameters by depth and baseline_rl not at all, so neither may
+# freeze anything. Same mechanism, inverted expectation.
+_NON_FREEZING_ABLATIONS = ("llrd", "baseline_rl")
+
+_ROOT = Path(__file__).resolve().parents[1]
+_CONFIG_CHAIN = (
+    _ROOT / "configs" / "defaults.yaml",
+    _ROOT / "experiments" / "rl_finetuning" / "configs" / "ablations_default.yaml",
+)
+
+
+@pytest.fixture(scope="module")
+def prod_cfg() -> SimpleNamespace:
+    """The config the suite actually trains under.
+
+    The shipped chain, in the suite's own merge order: ``configs/defaults.yaml``
+    then ``ablations_default.yaml``. At the pins that is 72 tensors and
+    5,241,935 parameters, ``n_layer=4`` and ``n_embd=256``.
+
+    The `_model_cfg` arch the tests above use is 2 layers and 32 channels, so
+    it cannot reach `layer_ablation_top3` at all and exercises a four-times
+    shallower block stack than the selectors run against in production.
+    """
+    merged: dict = {}
+    for path in _CONFIG_CHAIN:
+        merged.update(yaml.safe_load(path.read_text()))
+    return SimpleNamespace(**merged)
+
+
+def _prod_deltas(cfg: SimpleNamespace, name: str) -> dict[str, float]:
+    """Per-tensor ``max|parameter delta|`` after one step of *name*'s optimiser.
+
+    Built the way ``run_ablation`` builds it, LoRA branch included, on a fresh
+    model each call because both `make_optimizer_frozen` and
+    `apply_lora_to_model` mutate the model in place. A non-zero gradient is
+    placed on EVERY tensor, the nominally frozen ones included, so a mechanism
+    that only omits tensors from the optimiser's parameter list is measured on
+    what it actually does rather than on what it declares.
+    """
+    model = make_model(cfg)
+    spec = registry.REGISTRY[name]
+    if spec.use_lora:
+        lora_params = apply_lora_to_model(
+            model,
+            getattr(cfg, "lora_rank", 8),
+            getattr(cfg, "lora_alpha", 16.0),
+        )
+        optimizer = make_optimizer_lora(cfg, lora_params)
+    else:
+        optimizer = spec.optimizer_factory(cfg, model)
+
+    before = {n: p.detach().clone() for n, p in model.named_parameters()}
+    for param in model.parameters():
+        param.grad = torch.full_like(param, 0.5)
+    optimizer.step()
+
+    return {
+        n: (p.detach() - before[n]).abs().max().item()
+        for n, p in model.named_parameters()
+    }
+
+
+def _moved(deltas: dict[str, float]) -> frozenset[str]:
+    return frozenset(name for name, d in deltas.items() if d != 0.0)
+
+
+@pytest.mark.parametrize("name", _FREEZING_ABLATIONS)
+def test_frozen_tensors_move_exactly_zero_at_the_production_architecture(
+    name, prod_cfg
+):
+    """Every tensor either moves a full optimiser step or does not move at all.
+
+    This is the standing guard for the freeze-bug family. The craftax twin's
+    `optax.masked` handed every "frozen" parameter its raw clipped gradient;
+    this repo substitutes `requires_grad = False` plus exclusion from the
+    optimiser's parameter list, and that substitution is what is measured
+    here -- on the applied parameter delta, under a gradient written onto
+    every tensor including the frozen ones, so neither a stale `.grad` nor
+    AdamW's decoupled weight decay can pass unseen.
+
+    Two properties, both needed:
+
+    - no leakage: a tensor's delta is exactly 0.0 or at least a tenth of the
+      learning rate. A partial freeze or a weight-decay leak lands between
+      those and fails here, where an order-of-magnitude tolerance would let
+      it through.
+    - the partition is real: at least one tensor frozen and at least one
+      trained. `make_optimizer_frozen` raises on the second, so this asserts
+      the arms themselves stay on the right side of that guard.
+    """
+    deltas = _prod_deltas(prod_cfg, name)
+    moved = _moved(deltas)
+    floor = prod_cfg.lr / 10
+
+    leaking = {n: d for n, d in deltas.items() if 0.0 < d < floor}
+    assert not leaking, f"{name}: tensors moved by less than a full step: {leaking}"
+    assert moved, f"{name} trained nothing"
+    assert moved < frozenset(deltas), f"{name} froze nothing"
+
+
+@pytest.mark.parametrize("name", _NON_FREEZING_ABLATIONS)
+def test_the_non_freezing_optimisers_freeze_nothing(name, prod_cfg):
+    """LLRD and baseline_rl must reach every tensor.
+
+    LLRD is swept for the same defect class from the opposite side: it builds
+    its parameter groups by depth label, so a tensor whose name matches no
+    group would be dropped from the optimiser entirely rather than merely
+    slowed. Its slowest group is ``lr * llrd_decay ** (n_layer + 1)``,
+    comfortably above the leakage floor, so "slow" and "frozen" stay
+    distinguishable.
+    """
+    deltas = _prod_deltas(prod_cfg, name)
+
+    assert _moved(deltas) == frozenset(deltas), (
+        f"{name} froze {sorted(set(deltas) - _moved(deltas))}"
+    )
+    assert min(deltas.values()) >= prod_cfg.lr / 10
 
 
 # ---------------------------------------------------------------------------
