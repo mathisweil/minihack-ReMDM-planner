@@ -247,6 +247,17 @@ Aligning QMUL later fails the test until it is moved to the poolable set.
 | | `action_diversity` | Discard degenerate (all-same-action) plans |
 | | `reward_model` | MLP reward model soft-weighting of advantages |
 
+Group C freezes parameters exactly: under an adversarial gradient on every
+tensor, each frozen tensor of each arm measures a parameter delta of exactly
+0.0 (`tests/test_spec_ablations.py`, at the production architecture). The
+weights the suite *evaluates* are the EMA shadow, and a shadow drifts even
+when its parameter does not, because `decay * x + (1 - decay) * x` is not
+exactly `x` in float32 — 45 of 72 tensors by up to 4.6e-05 over 500 updates
+at decay 0.999. So a group-C arm's frozen parameters are bit-exact in the
+trained weights and approximate to that magnitude in the evaluated ones. The
+drift is far below the resolution of any reported win rate and is left as it
+is; see `ModelEMA` in `src/models/denoiser.py`.
+
 ### Output structure
 
 ```

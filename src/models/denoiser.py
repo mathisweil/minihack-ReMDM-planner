@@ -348,6 +348,24 @@ class ModelEMA:
     Maintains a shadow copy of parameters updated as
     ``theta_ema <- decay * theta_ema + (1 - decay) * theta``.
 
+    A parameter that never moves still moves its shadow. The update then
+    computes ``decay * x + (1 - decay) * x``, which is not exactly ``x`` in
+    float32. Measured on the shipped ablation architecture with the model
+    held static for 500 updates at decay 0.999: 45 of 72 shadow tensors
+    drift, the largest by 4.6e-05 on ``embedding.weight`` and most by around
+    1e-07.
+
+    This matters only for the group-C ablations, which are the only runs that
+    freeze parameters. Their frozen tensors are exactly frozen -- every one
+    measures a parameter delta of exactly 0.0 -- but the suite evaluates the
+    EMA weights (``ablations/training.py`` applies them before each eval), so
+    "frozen" is exact for the trained weights and approximate to the above
+    magnitude for the evaluated ones. Left as it is: the drift is orders of
+    magnitude below the resolution of any reported score, and excluding
+    non-trainable tensors from the update would change the evaluated weights
+    of every group-C run, which is a result-affecting change to take
+    deliberately rather than a cleanup.
+
     Args:
         model: Source model.
         decay: EMA decay factor (default 0.999).
