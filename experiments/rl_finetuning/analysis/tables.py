@@ -20,6 +20,87 @@ from experiments.rl_finetuning.ablations.training import AblationHistory
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Verdict rule (shared with the sibling repo, character for character)
+# ---------------------------------------------------------------------------
+
+# Both repos label against `baseline_rl`: a verdict answers "did this
+# intervention beat the plain RL run", which is the question the suite asks.
+# The pretrained score is reported alongside as its own delta column, so
+# nothing is lost by not labelling against it.
+#
+# The thresholds are FRACTIONS of the metric's own magnitude, not absolute
+# constants. Craftax scores an episode-weighted mean return of magnitude ~10
+# and minihack a mean per-env-ID win rate in [0, 1], so one absolute
+# +0.05/-0.10 pair was two different claims: at the recorded craftax scores
+# every arm read IMPROVEMENT, `lora` included at -1.911 against `baseline_rl`.
+# The fractions keep the original rule's asymmetry - the bar to call an
+# improvement is half the drop needed to call a collapse.
+IMPROVEMENT_FRACTION = 0.05
+COLLAPSE_FRACTION = 0.10
+
+# The scale is the larger of the two reference scores in absolute value. Both
+# are on the metric's own scale by construction, and taking the larger keeps
+# the threshold from vanishing when one reference sits near zero. At a
+# minihack scale of exactly 1.0 the rule reproduces the absolute +0.05/-0.10
+# it replaces.
+_MIN_METRIC_SCALE = 1e-9
+
+
+def metric_scale(baseline_rl_score: float, pretrained_score: float) -> float:
+    """Magnitude the verdict thresholds are taken as a fraction of.
+
+    Args:
+        baseline_rl_score: The `baseline_rl` arm's final score.
+        pretrained_score:  The pretrained model's score.
+
+    Returns:
+        The larger reference score in absolute value.
+    """
+    return max(abs(float(baseline_rl_score)), abs(float(pretrained_score)))
+
+
+def verdict(
+    score: float,
+    baseline_rl_score: float,
+    pretrained_score: float,
+) -> str:
+    """Label one ablation's final score against `baseline_rl`.
+
+    Args:
+        score:             The ablation's final score.
+        baseline_rl_score: The `baseline_rl` arm's final score.
+        pretrained_score:  The pretrained model's score.
+
+    Returns:
+        ``"IMPROVEMENT"``, ``"COLLAPSE"`` or ``"NEUTRAL"``. Scores with no
+        reference scale to measure against are ``"NEUTRAL"``: no label is
+        defensible there.
+    """
+    scale = metric_scale(baseline_rl_score, pretrained_score)
+    if scale < _MIN_METRIC_SCALE:
+        return "NEUTRAL"
+    delta = float(score) - float(baseline_rl_score)
+    if delta > IMPROVEMENT_FRACTION * scale:
+        return "IMPROVEMENT"
+    if delta < -COLLAPSE_FRACTION * scale:
+        return "COLLAPSE"
+    return "NEUTRAL"
+
+
+def baseline_rl_score_of(results: dict[str, dict], pretrained_score: float) -> float:
+    """The `baseline_rl` arm's score, falling back to the pretrained score.
+
+    Args:
+        results:          ``{name: {"score": float, ...}}``.
+        pretrained_score: Used when the suite ran without `baseline_rl`.
+
+    Returns:
+        The reference score every verdict is taken against.
+    """
+    return results.get("baseline_rl", {}).get("score", pretrained_score)
+
+
 def _df_to_latex(
     df: pl.DataFrame,
     caption: str = "",
@@ -135,6 +216,9 @@ def make_main_results_table(
 ) -> pl.DataFrame:
     """Main results: Method | Group | Score | Delta Pretrained | Delta Baseline | Verdict.
 
+    The Verdict column follows :func:`verdict`: labelled against
+    `baseline_rl`, thresholds scaled to the metric.
+
     Args:
         results: ``{name: {"score": float, ...}}``.
         pretrained_score: Pretrained eval score.
@@ -142,7 +226,7 @@ def make_main_results_table(
     Returns:
         Polars DataFrame sorted by score descending.
     """
-    baseline_score = results.get("baseline_rl", {}).get("score", pretrained_score)
+    baseline_score = baseline_rl_score_of(results, pretrained_score)
 
     rows: list[dict] = []
     for name, res in results.items():
@@ -151,13 +235,7 @@ def make_main_results_table(
         group = spec.group if spec else "?"
         delta_pre = score - pretrained_score
         delta_bl = score - baseline_score
-
-        if delta_bl > 0.05:
-            verdict = "IMPROVEMENT"
-        elif delta_bl < -0.1:
-            verdict = "COLLAPSE"
-        else:
-            verdict = "NEUTRAL"
+        label = verdict(score, baseline_score, pretrained_score)
 
         rows.append(
             {
@@ -169,7 +247,7 @@ def make_main_results_table(
                 ),  # popstd over seeds
                 "Delta_Pretrained": round(delta_pre, 4),
                 "Delta_Baseline": round(delta_bl, 4),
-                "Verdict": verdict,
+                "Verdict": label,
             }
         )
 
@@ -423,8 +501,8 @@ def make_hypothesis_verdict_table(
 ) -> pl.DataFrame:
     """Map each ablation to its hypothesis and render a verdict.
 
-    Verdict thresholds match ``make_main_results_table``:
-    IMPROVEMENT (delta > +0.05), COLLAPSE (delta < -0.1), else NEUTRAL.
+    The Verdict column follows :func:`verdict`, the same rule as
+    :func:`make_main_results_table`.
 
     Args:
         results: Ablation results dict.
@@ -433,10 +511,7 @@ def make_hypothesis_verdict_table(
     Returns:
         DataFrame with Method, Group, Score, Verdict, Hypothesis.
     """
-    baseline_score = results.get("baseline_rl", {}).get(
-        "score",
-        pretrained_score,
-    )
+    baseline_score = baseline_rl_score_of(results, pretrained_score)
 
     rows: list[dict] = []
     for name, res in sorted(results.items()):
@@ -445,13 +520,7 @@ def make_hypothesis_verdict_table(
             continue
         score = res["score"]
         delta_bl = score - baseline_score
-
-        if delta_bl > 0.05:
-            verdict = "IMPROVEMENT"
-        elif delta_bl < -0.1:
-            verdict = "COLLAPSE"
-        else:
-            verdict = "NEUTRAL"
+        label = verdict(score, baseline_score, pretrained_score)
 
         rows.append(
             {
@@ -459,7 +528,7 @@ def make_hypothesis_verdict_table(
                 "Group": spec.group,
                 "Score": round(score, 4),
                 "Delta_Baseline": round(delta_bl, 4),
-                "Verdict": verdict,
+                "Verdict": label,
                 "Hypothesis": spec.hypothesis,
             }
         )

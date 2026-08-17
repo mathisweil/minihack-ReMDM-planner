@@ -27,6 +27,10 @@ from experiments.rl_finetuning.ablations.registry import (  # noqa: E402
 from experiments.rl_finetuning.ablations.training import (  # noqa: E402
     AblationHistory,
 )
+from experiments.rl_finetuning.analysis.tables import (  # noqa: E402
+    baseline_rl_score_of,
+    verdict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,10 +237,7 @@ def generate_diagnosis_report(
     lines.append("| Ablation | Group | Score | Delta vs Pretrained |")
     lines.append("|---|---|---|---|")
 
-    baseline_score = results.get("baseline_rl", {}).get(
-        "score",
-        pretrained_score,
-    )
+    baseline_score = baseline_rl_score_of(results, pretrained_score)
     for name in sorted(results.keys()):
         res = results[name]
         spec = REGISTRY.get(name)
@@ -253,15 +254,10 @@ def generate_diagnosis_report(
     for name in sorted(results.keys()):
         res = results[name]
         delta_bl = res["score"] - baseline_score
-        if delta_bl > 0.05:
-            verdict = "IMPROVEMENT"
-        elif delta_bl < -0.1:
-            verdict = "COLLAPSE"
-        else:
-            verdict = "NEUTRAL"
+        label = verdict(res["score"], baseline_score, pretrained_score)
         sign = "+" if delta_bl >= 0 else ""
         lines.append(
-            f"| {name} | {res['score']:.4f} | {sign}{delta_bl:.4f} | {verdict} |"
+            f"| {name} | {res['score']:.4f} | {sign}{delta_bl:.4f} | {label} |"
         )
 
     lines.append("")
@@ -276,12 +272,14 @@ def generate_diagnosis_report(
     # Check if ALL RL ablations collapse
     rl_ablation_names = [n for n in results if n != "baseline_rl"]
     all_collapse = bool(rl_ablation_names) and all(
-        results[n]["score"] < pretrained_score - 0.1 for n in rl_ablation_names
+        verdict(results[n]["score"], baseline_score, pretrained_score) == "COLLAPSE"
+        for n in rl_ablation_names
     )
 
     if all_collapse:
         lines.append(
-            "**ALL RL ablations collapse** (all ID win rates > 10% below pretrained)."
+            "**ALL RL ablations collapse** (every arm more than 10% of the "
+            "metric scale below `baseline_rl`)."
         )
         lines.append(
             "Infrastructure is likely fine -- self-generated data "
@@ -291,7 +289,10 @@ def generate_diagnosis_report(
         )
     elif rl_ablation_names:
         n_collapse = sum(
-            1 for n in rl_ablation_names if results[n]["score"] < pretrained_score - 0.1
+            1
+            for n in rl_ablation_names
+            if verdict(results[n]["score"], baseline_score, pretrained_score)
+            == "COLLAPSE"
         )
         lines.append(
             f"Mixed results: {n_collapse}/{len(rl_ablation_names)} "
