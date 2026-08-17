@@ -522,6 +522,7 @@ def run_mixing_experiment(
     batch_size: int = 32,
     eval_every: int = 100,
     eval_episodes: int = 10,
+    oracle_episodes: int = 50,
 ) -> dict:
     """Run the full data quality mixing experiment.
 
@@ -541,6 +542,8 @@ def run_mixing_experiment(
         batch_size: Training batch size.
         eval_every: Iterations between evaluations.
         eval_episodes: Episodes per evaluation environment.
+        oracle_episodes: Episodes in the collected oracle dataset,
+            floored at 10.
 
     Returns:
         Results dict with keys ``"oracle_fractions"``,
@@ -592,10 +595,7 @@ def run_mixing_experiment(
     logger.info("100%% oracle baseline ID win rate: %.4f", known_100)
 
     # Collect oracle dataset from pretrained rollouts
-    n_oracle_episodes = max(
-        getattr(cfg, "mixing_oracle_episodes", 50),
-        10,
-    )
+    n_oracle_episodes = max(oracle_episodes, 10)
     logger.info(
         "Collecting oracle dataset (%d episodes)...",
         n_oracle_episodes,
