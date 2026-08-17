@@ -1086,7 +1086,7 @@ def run_ablation(
         advantages = advantages[perm]
         returns_perm = returns[perm]
 
-        # -- Mixed replay: splice offline data --
+        # -- Mixed replay: splice in the run's own past online windows --
         if replay_buf is not None and replay_buf.size > 0:
             n_offline = max(1, int(batch_size * replay_ratio))
             n_online = min(batch_size - n_offline, n)
