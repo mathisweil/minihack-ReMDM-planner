@@ -41,6 +41,7 @@ from experiments.rl_finetuning.ablations.losses import (
 from experiments.rl_finetuning.ablations.optimizers import (
     apply_lora_to_model,
     gradient_surgery,
+    make_optimizer_frozen,
     make_optimizer_llrd,
 )
 from experiments.rl_finetuning.ablations.training import (
@@ -704,6 +705,23 @@ def test_layer_ablation_trains_only_the_top_layers_and_head(top_n):
         n for n in _all_names() if any(n.startswith(k) for k in kept)
     ) | {"head.weight", "head.bias"}
     assert _trainable_names(f"layer_ablation_top{top_n}") == expected
+
+
+def test_a_frozen_fragment_list_matching_everything_is_an_error():
+    """An all-frozen partition raises instead of silently training nothing.
+
+    `make_optimizer_frozen` returned `AdamW([dummy], lr=0.0)` on an empty
+    trainable set, with no warning and no counter, so a fragment list that
+    matched every parameter would have reported a completed run whose
+    weights never moved (F-4). Not reachable from the shipped registry --
+    every group-C arm keeps between 2 and 26 tensors trainable -- which is
+    why the branch needs a guard rather than a caller.
+    """
+    cfg = _model_cfg()
+    model = make_model(cfg)
+
+    with pytest.raises(ValueError, match="no trainable parameter"):
+        make_optimizer_frozen(cfg, model, [""])
 
 
 # ---------------------------------------------------------------------------

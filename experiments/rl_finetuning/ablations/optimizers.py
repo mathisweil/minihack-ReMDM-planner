@@ -149,6 +149,9 @@ def make_optimizer_frozen(
 
     Returns:
         AdamW for trainable parameters only.
+
+    Raises:
+        ValueError: If the fragments leave nothing trainable.
     """
     trainable: list[nn.Parameter] = []
     for name, param in model.named_parameters():
@@ -159,8 +162,11 @@ def make_optimizer_frozen(
             trainable.append(param)
 
     if not trainable:
-        dummy = torch.zeros(1, requires_grad=True)
-        return torch.optim.AdamW([dummy], lr=0.0)
+        raise ValueError(
+            "no trainable parameter survives the frozen fragments "
+            f"{sorted(frozen_fragments)}: every parameter of "
+            f"{type(model).__name__} matches one of them"
+        )
 
     return torch.optim.AdamW(
         trainable,
