@@ -10,6 +10,11 @@ minihack-only).
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -18,6 +23,8 @@ from src.planners.baselines import (
     _build_sb3_model,
     _DecisionTransformer,
     _make_sb3_env_fn,
+    quiet_multiprocessing_tempdir_teardown,
+    run_baselines,
 )
 from tests.conftest import TINY_ENV, requires_minihack
 
@@ -110,3 +117,98 @@ def test_sb3_baselines_construct_and_predict(algo, tiny_cfg, tmp_path):
         assert 0 <= int(np.asarray(action).ravel()[0]) < n_actions
     finally:
         venv.close()
+
+
+# ---------------------------------------------------------------------------
+# `--mode baselines` teardown noise (step-11 finding U4)
+# ---------------------------------------------------------------------------
+
+# Creates multiprocessing's own temp dir, registers its exit-time rmtree, then
+# makes that rmtree fail the way a shared filesystem makes it fail. The chmod
+# stands in for NFS leaving `.nfsXXXX` behind: both make the removal raise an
+# OSError that is not FileNotFoundError, which is exactly what the finalizer
+# re-raises and `_run_finalizers` prints.
+_TEARDOWN_CHILD = """
+import os, pathlib, sys, multiprocessing.util as mpu
+if os.environ["QUIET"] == "1":
+    sys.path.insert(0, {root!r})
+    from src.planners.baselines import quiet_multiprocessing_tempdir_teardown
+    quiet_multiprocessing_tempdir_teardown()
+tempdir = pathlib.Path(mpu.get_temp_dir())
+(tempdir / "held").write_text("x")
+os.chmod(tempdir, 0o500)
+print(tempdir)
+"""
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("quiet", ["0", "1"])
+def test_the_baselines_teardown_prints_no_traceback(quiet, tmp_path):
+    """A temp dir multiprocessing cannot remove is silent, not a traceback.
+
+    `--mode baselines` runs SubprocVecEnv, so multiprocessing creates a
+    `pymp-*` directory and registers an exit-time rmtree of it. That rmtree
+    tolerates FileNotFoundError and re-raises everything else, so on the
+    shared filesystem the run ended with a traceback on stderr -- exit code
+    0, every artefact written, nothing the reader can act on (U4).
+
+    Both directions are asserted: without the call the traceback is there,
+    with it the traceback is gone. Neither changes the exit code, and neither
+    removes the directory, because the point is the reporting rather than the
+    removal.
+    """
+    root = str(Path(__file__).resolve().parents[1])
+    child = tmp_path / "child.py"
+    child.write_text(_TEARDOWN_CHILD.format(root=root))
+
+    result = subprocess.run(
+        [sys.executable, str(child)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "QUIET": quiet, "TMPDIR": str(tmp_path)},
+        timeout=120,
+        check=False,
+    )
+    leftover = Path(result.stdout.strip())
+    leftover.chmod(0o700)  # so tmp_path teardown can remove it
+
+    assert result.returncode == 0
+    assert ("Traceback" in result.stderr) == (quiet == "0"), result.stderr
+
+
+def test_the_teardown_guard_is_idempotent_and_tolerates_any_removal_error():
+    """Installing twice wraps once, and the wrapper swallows the error.
+
+    Called from `run_baselines`, which may run several algorithms and seeds
+    in one process; wrapping a wrapper each time would nest indefinitely.
+    """
+    import multiprocessing.util as mp_util
+
+    original = mp_util._remove_temp_dir
+    try:
+        quiet_multiprocessing_tempdir_teardown()
+        installed = mp_util._remove_temp_dir
+        quiet_multiprocessing_tempdir_teardown()
+        assert mp_util._remove_temp_dir is installed
+        assert installed is not original
+
+        def _always_fails(path, **kwargs):
+            raise OSError(39, "Directory not empty", path)
+
+        installed(_always_fails, "/nonexistent/pymp-test")
+    finally:
+        mp_util._remove_temp_dir = original
+
+
+def test_run_baselines_installs_the_teardown_guard_before_any_subprocess():
+    """Source-anchored: multiprocessing captures the callback when it first
+    creates its temp dir, so a guard installed after the first SubprocVecEnv
+    is ignored. `run_baselines` must call it before doing anything else that
+    can spawn."""
+    import inspect
+
+    src = inspect.getsource(run_baselines)
+    assert "quiet_multiprocessing_tempdir_teardown()" in src
+    assert src.index("quiet_multiprocessing_tempdir_teardown()") < src.index(
+        "_resolve_output_dir"
+    )

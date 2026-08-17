@@ -450,6 +450,50 @@ class _PrefixedEvalCallback(EvalCallback):
         return cont
 
 
+def quiet_multiprocessing_tempdir_teardown() -> None:
+    """Stop multiprocessing printing a traceback it cannot act on at exit.
+
+    ``SubprocVecEnv`` makes multiprocessing create a ``pymp-*`` directory
+    under ``TMPDIR`` and register a finalizer that ``shutil.rmtree``s it at
+    interpreter exit. That finalizer tolerates ``FileNotFoundError`` and
+    re-raises everything else, and on a shared filesystem an
+    unlinked-but-still-open file survives as ``.nfsXXXX`` until its last
+    handle closes, so the rmtree raises ``OSError: Directory not empty``.
+    ``multiprocessing.util._run_finalizers`` catches that and prints the
+    traceback, which is why ``--mode baselines`` ends with a traceback on
+    stderr, exit code 0 and every artefact written.
+
+    This widens the finalizer's tolerance to any removal error. Nothing is
+    left behind that was not already: the directory is inside the process's
+    own temp root, and the leftover ``.nfsXXXX`` entries are reaped by the
+    filesystem once the last handle closes.
+
+    Must run before the first ``SubprocVecEnv``: multiprocessing captures the
+    callback when it creates the directory, so a later patch is ignored.
+    Idempotent, and a no-op if a future Python drops the private hook.
+    """
+    import multiprocessing.util as mp_util
+
+    original = getattr(mp_util, "_remove_temp_dir", None)
+    if original is None or getattr(original, "_remdm_tolerant", False):
+        return
+
+    def tolerant_remove_temp_dir(rmtree, tempdir):
+        # `**kwargs` swallows the `onerror`/`onexc` handler the caller
+        # supplies, whose whole job is to re-raise; `ignore_errors` replaces
+        # it and takes precedence in `shutil.rmtree` regardless.
+        def quiet_rmtree(path, **kwargs):
+            rmtree(path, ignore_errors=True)
+
+        try:
+            original(quiet_rmtree, tempdir)
+        except OSError as exc:  # pragma: no cover - filesystem dependent
+            logger.debug("Left multiprocessing temp dir %s: %s", tempdir, exc)
+
+    tolerant_remove_temp_dir._remdm_tolerant = True
+    mp_util._remove_temp_dir = tolerant_remove_temp_dir
+
+
 def _make_sb3_env_fn(env_id: str, cfg: SimpleNamespace, log_dir: str):
     """Return a picklable thunk that builds one wrapped+monitored env."""
 
@@ -1159,6 +1203,9 @@ def run_baselines(
 
     if algo not in ALL_BASELINE_ALGOS:
         raise ValueError(f"Unknown algo {algo!r}. Choose one of {ALL_BASELINE_ALGOS}.")
+
+    # Before the first SubprocVecEnv, or the finalizer is already registered.
+    quiet_multiprocessing_tempdir_teardown()
 
     if seeds is None:
         seeds = [cfg.seed if cfg.seed is not None else 0]
