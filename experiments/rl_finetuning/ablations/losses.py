@@ -631,7 +631,10 @@ def make_loss_advantage_clip(ctx: LossContext) -> LossFn:
 
 
 def make_loss_normalized_adv(ctx: LossContext) -> LossFn:
-    """Return-weighted ELBO with group-normalised advantages (GRPO-style).
+    """Return-weighted ELBO with std-normalised advantages.
+
+    Normalises advantages as (A - mean(A)) / (std(A) + eps) over the batch,
+    unlike the simpler mean-normalisation used in the baseline.
 
     Args:
         ctx: Shared loss context.
