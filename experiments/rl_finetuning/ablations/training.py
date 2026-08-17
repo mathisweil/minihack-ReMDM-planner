@@ -369,6 +369,29 @@ def reward_filter_mask(returns: Tensor, percentile: float) -> Tensor:
     return returns > thresh
 
 
+def warn_if_reward_filter_kept_nothing(keep: Tensor, percentile: float) -> None:
+    """Warn when the reward filter kept no window.
+
+    A batch whose returns all tie leaves nothing strictly above the
+    percentile, so the keep-mask is all-False and the iteration is dropped
+    with no trace of why -- the sibling "no data collected" branch logs, this
+    one did not. The strict boundary itself is the specified one and is
+    unchanged; only its degenerate case becomes visible.
+
+    Args:
+        keep:       ``[N]`` keep-mask from :func:`reward_filter_mask`.
+        percentile: The percentile that produced it, named in the message.
+    """
+    if not bool(keep.any()):
+        logger.warning(
+            "Reward filter kept 0 of %d windows at p%g: the returns tie at "
+            "or below the threshold, so this iteration has no data to train "
+            "on and is skipped.",
+            keep.shape[0],
+            percentile,
+        )
+
+
 def _effective_batch_size(advantages: Tensor) -> float:
     """Effective batch size: (sum w)^2 / sum w^2.
 
@@ -1039,6 +1062,7 @@ def run_ablation(
         # -- Reward filtering --
         if spec.reward_filtering:
             keep = reward_filter_mask(returns, reward_filter_pct)
+            warn_if_reward_filter_kept_nothing(keep, reward_filter_pct)
             local_obs = local_obs[keep]
             global_obs = global_obs[keep]
             x0 = x0[keep]
