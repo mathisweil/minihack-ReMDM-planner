@@ -911,6 +911,107 @@ def test_the_non_freezing_optimisers_freeze_nothing(name, prod_cfg):
 
 
 # ---------------------------------------------------------------------------
+# Group C: trainable sets at the PRODUCTION architecture
+# ---------------------------------------------------------------------------
+# The block stack the expectations below are derived for. The `_model_cfg`
+# arch the tests above assert has two layers, so `layer_ablation_top3` is the
+# one registry entry no test could reach.
+_PROD_N_LAYER = 4
+_PROD_HEAD = frozenset({"head.weight", "head.bias"})
+
+
+def _prod_names(cfg: SimpleNamespace) -> frozenset[str]:
+    return frozenset(n for n, _ in make_model(cfg).named_parameters())
+
+
+def _prod_trainable_names(cfg: SimpleNamespace, name: str) -> frozenset[str]:
+    return frozenset(
+        tensor
+        for tensor, delta in _prod_deltas(cfg, name).items()
+        if delta != 0.0
+    )
+
+
+def test_the_production_layout_is_the_one_the_group_c_expectations_assume(prod_cfg):
+    """Pin the architecture the expectations below are derived for.
+
+    Without this a config change would surface as an unreadable set
+    mismatch in every group-C case at once, rather than as one failure
+    saying the layout moved and the derivations need redoing.
+    """
+    assert prod_cfg.n_layer == _PROD_N_LAYER
+    assert len(_prod_names(prod_cfg)) == 72
+
+
+def test_frozen_backbone_at_production_trains_the_head_and_token_embeddings(
+    prod_cfg,
+):
+    """Canonical set (spec-ablations §2, step-9 amendment): the action head
+    plus the token-interface embeddings (action, timestep and positional);
+    the backbone -- both obs streams including the goal head, the four
+    encoder layers and every norm -- is frozen."""
+    expected = frozenset(
+        n
+        for n in _prod_names(prod_cfg)
+        if n.startswith(("action_emb.", "timestep_emb.", "pos_emb.", "head."))
+    )
+    assert _prod_trainable_names(prod_cfg, "frozen_backbone") == expected
+
+
+def test_head_only_at_production_trains_only_the_final_projection(prod_cfg):
+    """Canonical set: exactly the final action projection, a strict subset
+    of frozen_backbone's set (was defect §8.3: the two were duplicates)."""
+    trainable = _prod_trainable_names(prod_cfg, "head_only")
+    assert trainable == _PROD_HEAD
+    assert trainable < _prod_trainable_names(prod_cfg, "frozen_backbone")
+
+
+def test_attention_only_at_production_trains_only_the_attention_projections(
+    prod_cfg,
+):
+    """Canonical set: exactly the attention projections across all four
+    layers; the pre-attention LayerNorms are frozen (was step-8 finding
+    S8-4: norm1 trainable)."""
+    expected = frozenset(n for n in _prod_names(prod_cfg) if ".self_attn." in n)
+    assert len(expected) == 4 * _PROD_N_LAYER
+    assert _prod_trainable_names(prod_cfg, "attention_only") == expected
+
+
+def test_ffn_only_at_production_trains_only_the_ffn_layers(prod_cfg):
+    """Canonical set: exactly the FFN linears in each of the four encoder
+    layers; the pre-FFN LayerNorms are frozen (was step-8 finding S8-5:
+    norm2 trainable)."""
+    expected = frozenset(
+        n for n in _prod_names(prod_cfg) if ".linear1." in n or ".linear2." in n
+    )
+    assert len(expected) == 4 * _PROD_N_LAYER
+    assert _prod_trainable_names(prod_cfg, "ffn_only") == expected
+
+
+@pytest.mark.parametrize("top_n", [1, 2, 3])
+def test_layer_ablation_at_production_trains_only_the_top_layers_and_head(
+    top_n, prod_cfg
+):
+    """Canonical set: every parameter of the top-n encoder layers plus the
+    head (spec-ablations §2).
+
+    With n_layer=4 the top-1 set is transformer.layers.3 plus the head,
+    top-2 adds layer 2 and top-3 layer 1. The top-3 arm is unreachable at
+    the two-layer test arch, so this is its only coverage.
+    """
+    kept = {
+        f"transformer.layers.{i}."
+        for i in range(_PROD_N_LAYER - top_n, _PROD_N_LAYER)
+    }
+    expected = frozenset(
+        n for n in _prod_names(prod_cfg) if any(n.startswith(k) for k in kept)
+    ) | _PROD_HEAD
+    assert (
+        _prod_trainable_names(prod_cfg, f"layer_ablation_top{top_n}") == expected
+    )
+
+
+# ---------------------------------------------------------------------------
 # Suite loss estimator (cross-repo twin; NELBO per spec-method §3.1/§3.4)
 # ---------------------------------------------------------------------------
 
