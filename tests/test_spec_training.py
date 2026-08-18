@@ -258,6 +258,18 @@ def test_no_warm_start_disables_oracle_buffer_seeding(monkeypatch):
         "no_warm_start=True"
     )
 
+    # Both directions, or the assertion above is satisfied by deleting the
+    # seeding entirely (sweep S11-5: with only the negative direction
+    # asserted, `if no_warm_start:` -> `if True:` left the suite green).
+    # README §DAgger fixes the count: 3 oracle trajectories per ID env.
+    calls["n"] = 0
+    cfg.checkpoint_dir = tempfile.mkdtemp(prefix="remdm-ws-test-")
+    online.run_dagger(cfg, None, False)
+    assert calls["n"] == 3 * len(cfg.id_envs), (
+        f"warm-start seeding ran {calls['n']} oracle collections, expected "
+        f"3 per ID environment = {3 * len(cfg.id_envs)}"
+    )
+
 
 @pytest.mark.slow
 def test_smoke_mode_leaves_no_artifacts_in_the_repo():
