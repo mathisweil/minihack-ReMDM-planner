@@ -152,7 +152,7 @@ def _score_hypothesis(
 
     return {
         "hypothesis": hyp_name,
-        "evidence_score": round(evidence, 3),
+        "evidence_score": evidence,
         "n_supporting": n_supporting,
         "n_tested": n_tested,
         "description": hyp_info["description"],

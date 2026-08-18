@@ -318,6 +318,36 @@ def test_the_hypothesis_evidence_sets_are_the_pinned_shared_ones():
     assert actual == _EXPECTED_EVIDENCE_SETS
 
 
+def test_the_evidence_score_is_the_raw_quotient_in_both_repos():
+    """`evidence_score` is the unrounded fraction; rounding is for display.
+
+    minihack returned `round(evidence, 3)` and craftax the raw quotient, so
+    the same inputs gave 0.3330 and 0.3333 under one field name. Every
+    consumer already formats at the point of use -- `:.0%` in the report
+    tables and `int(score * 5)` for the star rating -- so rounding inside the
+    scorer bought nothing and cost cross-repo agreement.
+    """
+    results = {
+        "baseline_rl": {"score": 10.0},
+        "kl_penalty": {"score": 10.5},
+        "ewc": {"score": 10.5},
+        "llrd": {"score": 9.0},
+        "lora": {"score": 9.0},
+        "frozen_backbone": {"score": 9.0},
+        "head_only": {"score": 9.0},
+    }
+    scored = _score_hypothesis(
+        "Catastrophic Forgetting",
+        _HYPOTHESIS_GROUPS["Catastrophic Forgetting"],
+        results,
+        8.0,
+    )
+
+    assert scored["n_supporting"] == 2
+    assert scored["n_tested"] == 6
+    assert scored["evidence_score"] == 2 / 6
+
+
 def test_an_unregistered_supporting_arm_is_an_error():
     """A typo'd or retired arm name must not be scored as a smaller sample.
 
