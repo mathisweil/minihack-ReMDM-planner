@@ -316,21 +316,38 @@ def test_the_batch_reduction_is_exactly_the_per_sample_mean():
     assert torch.equal(scalar, per_sample.mean())
 
 
-def test_the_auxiliary_goal_loss_is_a_differentiable_zero_when_unsupervised():
-    """No visible staircase contributes zero, in the graph.
+@pytest.mark.parametrize(
+    "poison", [None, float("nan"), float("inf"), float("-inf")]
+)
+def test_the_auxiliary_goal_loss_is_a_differentiable_zero_when_unsupervised(poison):
+    """No visible staircase contributes zero, in the graph, for any prediction.
 
-    Same contract as the empty mask above, and the same defect: this term is
-    summed with the ELBO term before `backward()`, so a detached constant
-    silently drops it from the graph.
+    Three properties, all of them needed. The value must be exactly 0.0,
+    because this term is summed with the ELBO term before `backward()` and
+    anything else moves the whole loss. It must keep `grad_fn`: a freshly
+    allocated zero has the right number and no graph, and `backward()` then
+    raises for every arm whose other terms cannot carry the graph either --
+    the defect `0cfc632` fixed. And the gradient must be zero, because no
+    supervision means a no-op iteration, not an arbitrary update.
+
+    The `poison` cases are the regression for the NaN this branch returned
+    between `0cfc632` and its repair. It computed its zero as
+    `goal_pred * valid.unsqueeze(1)`, and `nan * False` is `nan`, so a
+    non-finite prediction gave NaN rather than zero -- while the supervised
+    branch, on the same input, excluded exactly those rows. Both branches now
+    select the same way.
     """
     from src.diffusion.loss import auxiliary_goal_loss
 
-    goal_pred = torch.randn(4, 2, requires_grad=True)
+    goal_pred = torch.randn(4, 2)
+    if poison is not None:
+        goal_pred[0, 0] = poison
+    goal_pred = goal_pred.clone().requires_grad_(True)
     no_staircase = torch.zeros(4, 21, 79, dtype=torch.long)
 
     loss = auxiliary_goal_loss(goal_pred, no_staircase)
 
-    assert float(loss) == 0.0
+    assert float(loss) == 0.0, f"non-finite goal_pred leaked: {float(loss)}"
     assert loss.grad_fn is not None, "empty-supervision aux loss detached"
     loss.backward()
     assert bool((goal_pred.grad == 0).all())

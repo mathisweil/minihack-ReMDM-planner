@@ -142,8 +142,9 @@ def auxiliary_goal_loss(
 
     Returns:
         Scalar MSE loss over samples where the staircase is visible.
-        Zero when no staircase is visible in the batch, differentiable in
-        *goal_pred* whenever *goal_pred* itself is.
+        Exactly zero when no staircase is visible in the batch, whatever
+        *goal_pred* holds, and differentiable in *goal_pred* whenever
+        *goal_pred* itself is.
     """
     targets = find_staircase_from_glyphs(global_obs)  # [B, 2]
     targets = targets.to(goal_pred.device, dtype=goal_pred.dtype)
@@ -151,12 +152,20 @@ def auxiliary_goal_loss(
     # Only supervise where staircase is visible
     valid = targets[:, 0] != pad_value  # [B]
     if not valid.any():
-        # A zero that keeps `goal_pred` in the graph, for the same reason as
-        # the mask comment in `mdlm_loss`: the caller adds this term to the
-        # ELBO term and back-propagates the sum, so a detached constant here
-        # silently drops this term from the graph. Multiplying by the empty
-        # valid mask is exactly zero and costs one elementwise pass.
-        return (goal_pred * valid.unsqueeze(1)).sum()
+        # An empty selection: exactly 0.0, in the graph, zero gradient.
+        #
+        # Three constraints meet here. The caller adds this term to the ELBO
+        # term and back-propagates the sum, so a detached constant silently
+        # drops this term from the graph -- that was `goal_pred.new_tensor(0.0)`,
+        # removed in `0cfc632` because it left every arm with a frozen goal
+        # head unable to back-propagate at all. Its replacement multiplied by
+        # the empty `valid` mask, which keeps the graph but returns NaN for a
+        # non-finite `goal_pred`, since `nan * False` is `nan` -- while the
+        # supervised branch below excludes exactly those rows. Indexing the
+        # same way that branch does satisfies all three: `goal_pred[valid]` is
+        # empty, so the sum is exactly zero whatever `goal_pred` holds, and it
+        # is still a function of `goal_pred`, so the graph survives.
+        return goal_pred[valid].sum()
 
     diff = (goal_pred[valid] - targets[valid]) ** 2  # [N, 2]
     return diff.mean()
