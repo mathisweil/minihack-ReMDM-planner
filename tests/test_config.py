@@ -655,6 +655,21 @@ _NOT_CONFIG_ATTRS = frozenset(
 )
 
 
+def _is_config_ref(node: ast.AST) -> bool:
+    """Is *node* a reference to a merged config?
+
+    Two shapes reach one and both are production: a bare name (``cfg.KEY``)
+    and an attribute chain ending in a config name (``self.cfg.KEY``,
+    ``ctx.cfg.KEY``). Matching only the first made the scan blind to a fifth
+    of the ablation recipe's readers (sweep S0-3, gate F-7).
+    """
+    if isinstance(node, ast.Name):
+        return node.id in _CONFIG_NAMES
+    if isinstance(node, ast.Attribute):
+        return node.attr in _CONFIG_NAMES
+    return False
+
+
 class _ConfigKeyScanner(ast.NodeVisitor):
     """Collect every config key a module reads, with its call site."""
 
@@ -670,8 +685,7 @@ class _ConfigKeyScanner(ast.NodeVisitor):
         if (
             isinstance(node.func, ast.Attribute)
             and node.func.attr == "get"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id in _CONFIG_NAMES
+            and _is_config_ref(node.func.value)
             and node.args
             and isinstance(node.args[0], ast.Constant)
             and isinstance(node.args[0].value, str)
@@ -681,8 +695,7 @@ class _ConfigKeyScanner(ast.NodeVisitor):
             isinstance(node.func, ast.Name)
             and node.func.id == "getattr"
             and len(node.args) >= 2
-            and isinstance(node.args[0], ast.Name)
-            and node.args[0].id in _CONFIG_NAMES
+            and _is_config_ref(node.args[0])
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)
         ):
@@ -691,8 +704,7 @@ class _ConfigKeyScanner(ast.NodeVisitor):
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
         if (
-            isinstance(node.value, ast.Name)
-            and node.value.id in _CONFIG_NAMES
+            _is_config_ref(node.value)
             and isinstance(node.slice, ast.Constant)
             and isinstance(node.slice.value, str)
         ):
@@ -701,8 +713,7 @@ class _ConfigKeyScanner(ast.NodeVisitor):
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if (
-            isinstance(node.value, ast.Name)
-            and node.value.id in _CONFIG_NAMES
+            _is_config_ref(node.value)
             and node.attr not in _NOT_CONFIG_ATTRS
         ):
             self._record(node.attr, node)
@@ -763,3 +774,155 @@ def test_the_reachability_scan_reaches_the_code_it_claims_to_cover():
     assert len(_NOT_FROM_A_CONFIG_FILE) <= len(read) // 4
     stale = sorted(_NOT_FROM_A_CONFIG_FILE - set(read))
     assert not stale, f"exemptions for keys nothing reads any more: {stale}"
+
+
+# ---------------------------------------------------------------------------
+# Ablation descriptions (sweep S0-2)
+#
+# `AblationSpec.description` is what `--list` prints and what every run logs,
+# and nothing read it: reverting either the F-2 or the F-3 description fix
+# left the whole suite green. The table below is the shared canon, character
+# for character with the sibling repo -- which is also what caught two
+# typographic divergences between them (`baseline_rl`'s dash and
+# `kl_penalty`'s "vs"), aligned to ASCII in the same commit.
+#
+# It is deliberately NOT compared with the `experiments/README.md` table:
+# those cells are short labels in a different register ("Soft KL constraint
+# vs pretrained") and the registry carries the mechanism sentence. 24 of 25
+# differ by design; only `mixed_replay` coincides, because F-2 fixed it by
+# copying the README wording.
+# ---------------------------------------------------------------------------
+
+_EXPECTED_DESCRIPTIONS = {
+    "action_diversity": (
+        "Baseline ELBO with degenerate (all-same-action) plans discarded"
+    ),
+    "advantage_clip": (
+        "Baseline ELBO with PPO-style advantage clipping to [1-eps, 1+eps]"
+    ),
+    "attention_only": (
+        "Baseline ELBO updating only attention weights (Q/K/V/O); FFN frozen"
+    ),
+    "baseline_rl": (
+        "Return-weighted ELBO -- no modifications"
+    ),
+    "bc_wins": (
+        "Uniform ELBO on win windows only (no advantage weighting)"
+    ),
+    "entropy_bonus": (
+        "Baseline ELBO minus entropy bonus (encourages action diversity)"
+    ),
+    "ewc": (
+        "ELBO + Elastic Weight Consolidation (Fisher diagonal regularisation)"
+    ),
+    "ffn_only": (
+        "Baseline ELBO updating only FFN layers; attention frozen"
+    ),
+    "frozen_backbone": (
+        "Baseline ELBO training the action head and token embeddings (backbone frozen)"
+    ),
+    "gradient_surgery": (
+        "PCGrad: RL gradient projected to remove conflict with BC gradient"
+    ),
+    "head_only": (
+        "Baseline ELBO updating only the final linear projection"
+    ),
+    "kl_penalty": (
+        "Return-weighted ELBO + soft KL penalty vs pretrained"
+    ),
+    "layer_ablation_top1": (
+        "Baseline ELBO updating only the top-1 transformer block + head"
+    ),
+    "layer_ablation_top2": (
+        "Baseline ELBO updating only the top-2 transformer blocks + head"
+    ),
+    "layer_ablation_top3": (
+        "Baseline ELBO updating only the top-3 transformer blocks + head"
+    ),
+    "llrd": (
+        "Baseline ELBO with Layer-wise Learning Rate Decay"
+    ),
+    "lora": (
+        "Baseline ELBO with LoRA adaptation (rank-r attention projections only)"
+    ),
+    "low_t": (
+        "Return-weighted ELBO restricted to low-t (fine-detail) regime"
+    ),
+    "mixed_replay": (
+        "Self-replay: the run's own past online windows resampled into each batch"
+    ),
+    "normalized_adv": (
+        "Baseline ELBO with (A - mean) / (std + eps) advantage normalisation"
+    ),
+    "reward_filtering": (
+        "Baseline ELBO trained only on top-75th-percentile return windows"
+    ),
+    "reward_model": (
+        "Baseline ELBO with advantages re-weighted by a learned MLP reward model"
+    ),
+    "running_stats": (
+        "Baseline ELBO with EMA running mean/std for advantage normalisation"
+    ),
+    "t_curriculum": (
+        "ELBO with t range annealed from high-t to low-t over training"
+    ),
+    "trust_region_kl": (
+        "Baseline ELBO + hard KL trust region via quadratic barrier"
+    ),
+}
+
+
+def test_every_registered_ablation_has_its_pinned_description():
+    """Character for character, and the same table in the sibling repo."""
+    from experiments.rl_finetuning.ablations.registry import REGISTRY
+
+    assert set(REGISTRY) == set(_EXPECTED_DESCRIPTIONS), (
+        f"registry/table mismatch: only in registry "
+        f"{sorted(set(REGISTRY) - set(_EXPECTED_DESCRIPTIONS))}, only in "
+        f"table {sorted(set(_EXPECTED_DESCRIPTIONS) - set(REGISTRY))}"
+    )
+    wrong = {
+        name: (spec.description, _EXPECTED_DESCRIPTIONS[name])
+        for name, spec in REGISTRY.items()
+        if spec.description != _EXPECTED_DESCRIPTIONS[name]
+    }
+    assert not wrong, f"description drift: {wrong}"
+
+
+def test_every_ablation_names_a_hypothesis_and_is_listed_in_the_readme():
+    """The two other strings a run surfaces. The README check is by name
+    only, for the register reason in the comment above."""
+    from experiments.rl_finetuning.ablations.registry import REGISTRY
+
+    readme = (_ROOT / "experiments" / "README.md").read_text()
+    for name, spec in sorted(REGISTRY.items()):
+        assert spec.hypothesis.strip(), f"{name} has no hypothesis"
+        assert f"`{name}`" in readme, f"{name} is in no README table"
+
+
+def test_the_reachability_scan_sees_config_reads_through_an_attribute():
+    """`self.cfg.KEY` and `ctx.cfg.KEY` are production shapes; the scanner
+    matched only a bare `cfg.KEY` and was blind to both (sweep S0-3, gate
+    F-7). All four access forms are covered, and an unrelated attribute
+    chain must still be ignored."""
+    scanner = _ConfigKeyScanner()
+    scanner.path = "<synthetic>"
+    scanner.visit(
+        ast.parse(
+            "cfg.plain_name\n"
+            "self.cfg.via_self\n"
+            "ctx.cfg.via_ctx\n"
+            "self.cfg.get('via_self_get', 0)\n"
+            "self.cfg['via_self_subscript']\n"
+            "getattr(self.cfg, 'via_self_getattr', 0)\n"
+            "unrelated.attr.not_a_config\n"
+        )
+    )
+    assert set(scanner.keys) == {
+        "plain_name",
+        "via_self",
+        "via_ctx",
+        "via_self_get",
+        "via_self_subscript",
+        "via_self_getattr",
+    }
