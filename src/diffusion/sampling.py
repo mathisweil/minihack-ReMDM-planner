@@ -253,6 +253,17 @@ def remdm_sample(
         # Mask invalid action tokens (indices >= action_dim)
         logits[:, :, action_dim:] = float("-inf")
 
+        # psi, the confidence the `conf` remask strategy orders by, is the
+        # model's own probability for the token it commits — read off the raw
+        # posterior, before temperature and nucleus filtering, matching the
+        # craftax twin (`sampling.py:185-186`). Taking it after filtering
+        # makes psi a property of the decoding settings rather than of the
+        # model: whenever the nucleus collapses to a single token psi is
+        # exactly 1.0 however uncertain the model really is, so those
+        # positions are never remasked. The sampling distribution below is
+        # untouched.
+        raw_probs = F.softmax(logits, dim=-1)  # [B, seq_len, vocab]
+
         logits = logits / cfg.temperature
 
         # Nucleus filtering
@@ -261,7 +272,7 @@ def remdm_sample(
         probs = F.softmax(logits, dim=-1)  # [B, seq_len, action_dim]
         preds = Categorical(probs=probs).sample()  # [B, seq_len]
 
-        decode_prob = probs.gather(-1, preds.unsqueeze(-1)).squeeze(-1)  # [B, seq_len]
+        decode_prob = raw_probs.gather(-1, preds.unsqueeze(-1)).squeeze(-1)  # [B, L]
 
         # Physics softener (unsourced engineering, default off):
         # demote hazardous cardinal actions to decode_prob=0.001 so the

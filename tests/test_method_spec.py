@@ -617,3 +617,83 @@ def test_top_p_filter_known_distribution():
     assert kept_05.tolist() == [[True, False, False, False]]
     # p >= 1 disables filtering
     assert top_p_filter(logits, 1.0).isfinite().all()
+
+
+def test_psi_is_the_raw_posterior_not_the_filtered_one():
+    """psi is the model's probability for the token it commits, taken from
+    the raw posterior, before temperature and nucleus filtering.
+
+    Source: ReMDM Sec 4.1 defines psi as the decoding probability of the
+    token at the step it was unmasked — a property of the model, not of the
+    decoding settings. Read after `top_p_filter`, it is renormalised over the
+    nucleus, so whenever the nucleus collapses to one token psi is exactly
+    1.0 however uncertain the model is, and `sigma_conf` then never remasks
+    that position. The craftax twin takes the raw quantity
+    (`src/diffusion/sampling.py`, `probs = jax.nn.softmax(logits)`); this is
+    the shared canon, decided 2026-08-18.
+
+    Derivation: logits [4.0, 2.0, -6.0] at temperature 0.5 give [8, 4, -12];
+    softmax of that puts 0.9820 on index 0, so the top_p=0.9 exclusive-cumsum
+    nucleus keeps index 0 alone and its filtered probability is exactly 1.0.
+    The raw softmax of [4, 2, -6] is e^4/(e^4 + e^2 + e^-6) =
+    54.5982/61.9895 = 0.8808. psi must be 0.8808, not 1.0.
+    """
+    from src.diffusion.sampling import top_p_filter
+
+    logits = torch.tensor([[[4.0, 2.0, -6.0]]])
+    temperature, top_p = 0.5, 0.9
+
+    filtered = torch.softmax(top_p_filter(logits / temperature, top_p), dim=-1)
+    raw = torch.softmax(logits, dim=-1)
+    chosen = torch.zeros(1, 1, dtype=torch.long)
+
+    assert filtered[0, 0, 0].item() == 1.0, "the nucleus did not collapse"
+    expected = math.exp(4.0) / (math.exp(4.0) + math.exp(2.0) + math.exp(-6.0))
+    assert abs(raw[0, 0, 0].item() - expected) < ATOL
+    assert abs(expected - 0.8808) < 1e-4
+
+    psi = raw.gather(-1, chosen.unsqueeze(-1)).squeeze(-1)
+    assert abs(psi.item() - expected) < ATOL
+    assert psi.item() < 1.0
+
+    # And the production sampler agrees: run one step and read the psi it
+    # stored, against a stub whose logits are the ones above.
+    from types import SimpleNamespace
+
+    from src.diffusion.sampling import remdm_sample
+
+    class _Peaked(torch.nn.Module):
+        def forward(self, local_obs, global_obs, seq, t_discrete):
+            b, length = seq.shape
+            row = torch.tensor([4.0, 2.0, -6.0])
+            return {
+                "actions": row.view(1, 1, 3).expand(b, length, 3).clone(),
+                "goal_pred": torch.zeros(b, 2),
+            }
+
+    cfg = SimpleNamespace(
+        seq_len=4,
+        mask_token=3,
+        action_dim=3,
+        diffusion_steps_eval=2,
+        temperature=temperature,
+        top_p=top_p,
+        eta=0.15,
+        remask_strategy="conf",
+        noise_schedule="linear",
+        num_diffusion_steps=10,
+    )
+    torch.manual_seed(0)
+    seq, _, confidences, _ = remdm_sample(
+        _Peaked(),
+        torch.zeros(1, 9, 9, dtype=torch.long),
+        torch.zeros(1, 21, 79, dtype=torch.long),
+        cfg,
+        "cpu",
+        physics_aware=False,
+        return_analytics=True,
+    )
+    assert confidences, "the sampler recorded no confidences"
+    assert all(c < 1.0 for c in confidences), (
+        f"psi saturated at 1.0 on a collapsed nucleus: {confidences}"
+    )
