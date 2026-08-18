@@ -641,3 +641,31 @@ def test_offline_builds_one_eval_model_per_eval_point(tiny_cfg, tiny_trajectory)
     # And both blocks were handed the very same model object.
     for (_, id_obj), (_, ood_obj) in zip(id_calls, ood_calls, strict=True):
         assert id_obj == ood_obj
+
+
+def test_building_either_model_warns_about_nothing(tiny_cfg):
+    """No warning may originate in this repo's own source (sweep S11-7).
+
+    `LocalDiffusionPlanner` left `nn.TransformerEncoder` at its default
+    `enable_nested_tensor=True` while its encoder layer sets
+    `norm_first=True`, which makes the nested-tensor path unavailable, so
+    PyTorch warned on every construction. It was the only repo-origin warning
+    in either suite. Filtering it would have hidden the next one; the keyword
+    is passed instead, as the dual-stream sibling always has.
+    """
+    import warnings
+    from pathlib import Path
+
+    from src.models.denoiser import (
+        LocalDiffusionPlanner,
+        LocalDiffusionPlannerWithGlobal,
+    )
+
+    root = str(Path(__file__).resolve().parents[1] / "src")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        LocalDiffusionPlannerWithGlobal(tiny_cfg)
+        LocalDiffusionPlanner(tiny_cfg)
+
+    ours = [w for w in caught if str(w.filename).startswith(root)]
+    assert not ours, [f"{w.filename}:{w.lineno} {w.message}" for w in ours]

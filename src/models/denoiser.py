@@ -229,6 +229,13 @@ class LocalDiffusionPlanner(nn.Module):
         self.transformer = nn.TransformerEncoder(
             encoder_layer,
             num_layers=cfg.n_layer,
+            # `norm_first=True` makes the nested-tensor fast path
+            # unavailable, so leaving the default `True` here only bought a
+            # UserWarning on every construction of this model -- the one
+            # repo-origin warning in either suite. The dual-stream sibling
+            # above has always passed it. No behaviour changes: PyTorch was
+            # already not taking that path.
+            enable_nested_tensor=False,
         )
         self.head = nn.Linear(n_embd, action_dim)
 
