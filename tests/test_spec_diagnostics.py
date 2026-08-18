@@ -13,16 +13,19 @@ from __future__ import annotations
 
 import json
 import math
+import re
 
 import numpy as np
 import pytest
 import torch
 
+from experiments.rl_finetuning.ablations.registry import REGISTRY
 from experiments.rl_finetuning.ablations.training import _effective_batch_size
 from experiments.rl_finetuning.analysis.action_distribution import (
     compute_js,
     compute_kl,
 )
+from experiments.rl_finetuning.analysis.report import _HYPOTHESIS_GROUPS
 from experiments.rl_finetuning.analysis.tables import (
     baseline_rl_score_of,
     metric_scale,
@@ -224,3 +227,89 @@ def test_the_reference_arm_falls_back_to_the_pretrained_score():
     pretrained score stands in and every delta is measured from it."""
     assert baseline_rl_score_of({"baseline_rl": {"score": 0.7}}, 0.5) == 0.7
     assert baseline_rl_score_of({"kl_penalty": {"score": 0.6}}, 0.5) == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis attribution: the evidence set and the recommendation must agree
+# (shared with the sibling repo, character for character; S7-9, decided
+# 2026-08-18)
+# ---------------------------------------------------------------------------
+
+# The six groups and their evidence sets, pinned to the same literal in both
+# repos. `analysis/report.py` carried no test at all until now, and the two
+# dicts drifting apart would put different numbers under one heading in a
+# cross-repo table. Update both files together or not at all.
+_EXPECTED_EVIDENCE_SETS = {
+    "Catastrophic Forgetting": [
+        "ewc", "frozen_backbone", "head_only", "kl_penalty", "llrd", "lora",
+    ],
+    "Gradient Conflict": ["gradient_surgery", "kl_penalty", "low_t"],
+    "Signal Sparsity": [
+        "bc_wins", "reward_filtering", "reward_model", "running_stats",
+    ],
+    "Distributional Shift": ["action_diversity", "mixed_replay"],
+    "Mode Collapse": ["advantage_clip", "entropy_bonus", "normalized_adv"],
+    "t-Bias": ["low_t", "t_curriculum"],
+}
+
+
+def _named_in(text: str, arm: str) -> bool:
+    """Does *text* name *arm* by its registry name, in prose?
+
+    Registry keys are snake_case and the recommendations write them as prose,
+    so the separator is relaxed to space, underscore or hyphen: `low_t`
+    appears as "low-t" and `entropy_bonus` as "entropy bonus". The word
+    bounds are what keep this honest -- a bare substring test would find
+    `ewc` inside any word containing those letters, and matching on the
+    relaxed separator alone would miss the hyphenated forms entirely.
+    """
+    pattern = r"\b" + r"[ _\-]".join(re.escape(part) for part in arm.split("_")) + r"\b"
+    return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+def test_every_arm_a_recommendation_names_is_in_its_own_evidence_set():
+    """A hypothesis may not recommend an intervention whose ablation it
+    excludes from the evidence that scores it.
+
+    `Catastrophic Forgetting` recommended LoRA -- "or use LoRA to restrict
+    the parameter update space" -- while omitting the `lora` arm from its
+    `supporting_ablations`, in both repos identically. Not cosmetic:
+    `_score_hypothesis` computes `evidence_score = n_supporting /
+    max(n_tested, 1)` over that list, so the omission changes the ranking
+    `diagnosis.md` and the hypothesis-verdict tables print. Author decision
+    2026-08-18: drift, not scoping.
+
+    Only recommendations that name a registered arm are constrained. That
+    eight of the 25 arms are cited by no hypothesis at all is a separate,
+    deliberately open question and is not asserted here.
+    """
+    offenders = {
+        name: sorted(
+            arm
+            for arm in REGISTRY
+            if _named_in(info["recommendation"], arm)
+            and arm not in info["supporting_ablations"]
+        )
+        for name, info in _HYPOTHESIS_GROUPS.items()
+    }
+    offenders = {name: arms for name, arms in offenders.items() if arms}
+
+    assert not offenders, (
+        "hypotheses recommending an intervention whose arm they leave out of "
+        f"their own evidence set: {offenders}"
+    )
+
+
+def test_the_hypothesis_evidence_sets_are_the_pinned_shared_ones():
+    """The groups and their membership are identical across the two repos.
+
+    Nothing else pins `_HYPOTHESIS_GROUPS`, and it is the input to every
+    number in `diagnosis.md`'s hypothesis ranking, so silent drift here is
+    invisible until two repos disagree in one table.
+    """
+    actual = {
+        name: sorted(info["supporting_ablations"])
+        for name, info in _HYPOTHESIS_GROUPS.items()
+    }
+
+    assert actual == _EXPECTED_EVIDENCE_SETS

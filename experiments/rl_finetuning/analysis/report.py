@@ -42,6 +42,7 @@ _HYPOTHESIS_GROUPS: dict[str, dict] = {
             "kl_penalty",
             "ewc",
             "llrd",
+            "lora",
             "frozen_backbone",
             "head_only",
         ],
