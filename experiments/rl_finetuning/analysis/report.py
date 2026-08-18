@@ -124,6 +124,16 @@ def _score_hypothesis(
     Returns:
         Scoring dict with evidence_score, n_supporting, n_tested.
     """
+    unknown = [
+        arm for arm in hyp_info["supporting_ablations"] if arm not in REGISTRY
+    ]
+    if unknown:
+        raise KeyError(
+            f"hypothesis {hyp_name!r} lists supporting ablations that are not "
+            f"registered: {sorted(unknown)}. Registered arms: "
+            f"{sorted(REGISTRY)}"
+        )
+
     baseline_score = results.get("baseline_rl", {}).get(
         "score",
         pretrained_score,

@@ -25,7 +25,10 @@ from experiments.rl_finetuning.analysis.action_distribution import (
     compute_js,
     compute_kl,
 )
-from experiments.rl_finetuning.analysis.report import _HYPOTHESIS_GROUPS
+from experiments.rl_finetuning.analysis.report import (
+    _HYPOTHESIS_GROUPS,
+    _score_hypothesis,
+)
 from experiments.rl_finetuning.analysis.tables import (
     baseline_rl_score_of,
     metric_scale,
@@ -313,3 +316,18 @@ def test_the_hypothesis_evidence_sets_are_the_pinned_shared_ones():
     }
 
     assert actual == _EXPECTED_EVIDENCE_SETS
+
+
+def test_an_unregistered_supporting_arm_is_an_error():
+    """A typo'd or retired arm name must not be scored as a smaller sample.
+
+    `_score_hypothesis` skips arms absent from `results`, which is correct for
+    a run that did not include them -- and indistinguishable from a name that
+    can never appear. Left unguarded, renaming an arm silently lowers
+    `n_tested` and moves every evidence score that cites it.
+    """
+    broken = dict(_HYPOTHESIS_GROUPS["Catastrophic Forgetting"])
+    broken["supporting_ablations"] = ["ewc", "not_an_ablation"]
+
+    with pytest.raises(KeyError, match="not_an_ablation"):
+        _score_hypothesis("Catastrophic Forgetting", broken, {}, 0.0)
