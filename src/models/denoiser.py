@@ -428,12 +428,31 @@ class ModelEMA:
     def load_state_dict(self, sd: dict[str, Tensor]) -> None:
         """Restore shadow parameters from *sd*.
 
+        Strict, like ``nn.Module.load_state_dict``: keys *sd* omits and keys
+        the shadow does not have are both errors. The shadow is what
+        evaluation runs on (``apply_to``), so a truncated or foreign dict
+        would otherwise leave freshly-initialised EMA weights in place,
+        score them, and report the numbers as a result.
+
         Args:
             sd: State dict from a prior ``state_dict()`` call.
+
+        Raises:
+            RuntimeError: If *sd* omits a shadow key or carries an extra one.
         """
+        missing = sorted(set(self._shadow) - set(sd))
+        unexpected = sorted(set(sd) - set(self._shadow))
+        if missing or unexpected:
+            detail = ""
+            if missing:
+                detail += f"\n\tMissing key(s) in state_dict: {', '.join(missing)}."
+            if unexpected:
+                detail += (
+                    f"\n\tUnexpected key(s) in state_dict: {', '.join(unexpected)}."
+                )
+            raise RuntimeError(f"Error(s) in loading state_dict for ModelEMA:{detail}")
         for k, v in sd.items():
-            if k in self._shadow:
-                self._shadow[k].copy_(v)
+            self._shadow[k].copy_(v)
 
     def parameters(self):
         """Iterate over shadow parameter tensors.

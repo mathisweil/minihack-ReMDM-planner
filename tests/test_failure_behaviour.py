@@ -220,3 +220,70 @@ def test_resume_refuses_corrupt_rng_state(tiny_cfg, tmp_path):
     )
     resume_from, env_steps = trainer.load_checkpoint(str(intact))
     assert resume_from == 4 and env_steps == 100
+
+
+def test_ema_restore_is_strict(tiny_cfg):
+    """The EMA shadow is what evaluation runs on, so a restore that does not
+    cover it raises instead of leaving freshly-initialised weights in place.
+
+    Before this guard, `load_state_dict` iterated the incoming dict and kept
+    only the keys the shadow already had: an empty dict and a dict of foreign
+    keys were both accepted, changing nothing, and a truncated dict restored
+    the part it named and left the rest fresh.
+    """
+    from src.models.denoiser import ModelEMA, make_model
+
+    model = make_model(tiny_cfg)
+    ema = ModelEMA(model, decay=0.5)
+    full = ema.state_dict()
+    assert full, "the fixture model has no parameters to restore"
+
+    with pytest.raises(RuntimeError, match="Missing key"):
+        ema.load_state_dict({})
+
+    with pytest.raises(RuntimeError, match="Unexpected key"):
+        ema.load_state_dict({**full, "not.a.real.parameter": next(iter(full.values()))})
+
+    dropped = sorted(full)[0]
+    truncated = {k: v for k, v in full.items() if k != dropped}
+    with pytest.raises(RuntimeError, match=dropped.replace(".", r"\.")):
+        ema.load_state_dict(truncated)
+
+    # The success path is untouched: a full round trip restores every tensor.
+    import torch
+
+    ema.load_state_dict(full)
+    restored = ema.state_dict()
+    assert set(restored) == set(full)
+    assert all(torch.equal(restored[k], full[k]) for k in full)
+
+
+def test_inference_refuses_a_checkpoint_with_a_truncated_ema(tiny_cfg, tmp_path):
+    """End to end: `--mode inference` scores EMA weights by default, so a
+    checkpoint whose ema_state_dict is incomplete fails rather than reporting
+    numbers produced by partly-initialised weights."""
+    import torch
+
+    from src.models.denoiser import ModelEMA, make_model
+    from src.planners.inference import run_inference
+
+    model = make_model(tiny_cfg)
+    ema = ModelEMA(model, decay=0.5)
+    ema_sd = ema.state_dict()
+    truncated = dict(list(ema_sd.items())[:-1])
+
+    path = tmp_path / "truncated_ema.pth"
+    torch.save(
+        {"model_state_dict": model.state_dict(), "ema_state_dict": truncated},
+        path,
+    )
+
+    with pytest.raises(RuntimeError, match="Missing key"):
+        run_inference(
+            tiny_cfg,
+            str(path),
+            env_ids=["MiniHack-Room-5x5-v0"],
+            episodes=1,
+            output_path=None,
+            use_ema=True,
+        )
