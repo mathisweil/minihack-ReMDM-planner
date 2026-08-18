@@ -372,6 +372,86 @@ def _results_from_json(
     return results, pretrained_score, config
 
 
+# ---------------------------------------------------------------------------
+# cross-machine poolability of ablation runs
+#
+# ``--merge`` concatenates per-seed scores of the same ablation across results
+# files and recomputes mean/std over the union, so pooling two runs is only
+# sound when they agree on everything that changes the trained model or the
+# score it is measured with.  The set below is the production declaration of
+# "everything"; ``tests/test_config.py`` imports it to classify the shipped
+# machine configs, and ``_merge_result_files`` enforces it on the configs the
+# results files actually recorded.
+# ---------------------------------------------------------------------------
+
+#: Keys that change the trained model or the score it is measured with.
+_RESULT_AFFECTING = frozenset(
+    {
+        "max_iter",
+        "batch_size",
+        "episodes_per_iter",
+        "grad_steps_per_iter",
+        "lr",
+        "weight_decay",
+        "max_grad_norm",
+        "diffusion_steps_collect",
+        "use_amp",
+        "eval_episodes",
+    }
+)
+
+
+def _poolability_view(config: dict) -> dict:
+    """Project a recorded config onto the result-affecting keys.
+
+    Keys are lower-cased first so that the same set answers for the lowercase
+    YAML configs the tests compare and for whatever casing a results file
+    recorded.
+
+    Args:
+        config: A config dict as recorded in a results.json file.
+
+    Returns:
+        The subset of *config* named by :data:`_RESULT_AFFECTING`, lowercased.
+    """
+    return {k.lower(): v for k, v in config.items() if k.lower() in _RESULT_AFFECTING}
+
+
+def _refuse_unpoolable(
+    reference_path: str,
+    reference: dict,
+    candidate_path: str,
+    candidate: dict,
+) -> None:
+    """Raise if two results files disagree on a result-affecting key.
+
+    Args:
+        reference_path: Path of the first merged file, which sets the reference.
+        reference:      That file's recorded config.
+        candidate_path: Path of the file being checked against it.
+        candidate:      Its recorded config.
+
+    Raises:
+        ValueError: If the two configs differ on any result-affecting key.
+    """
+    ref = _poolability_view(reference)
+    cand = _poolability_view(candidate)
+    diverged = {
+        k: (ref.get(k, "<absent>"), cand.get(k, "<absent>"))
+        for k in _RESULT_AFFECTING
+        if ref.get(k, "<absent>") != cand.get(k, "<absent>")
+    }
+    if not diverged:
+        return
+    detail = "; ".join(f"{k}: {a!r} vs {b!r}" for k, (a, b) in sorted(diverged.items()))
+    raise ValueError(
+        f"Refusing to merge {candidate_path} with {reference_path}: the runs "
+        f"are not poolable, diverging on result-affecting key(s) {detail}. "
+        "Pooling recomputes mean/std over the union of seeds, which is only "
+        "sound for runs trained and scored the same way."
+    )
+
+
 def _merge_result_files(
     paths: list[str],
 ) -> tuple[dict[str, dict], float, dict]:
@@ -386,13 +466,30 @@ def _merge_result_files(
 
     Returns:
         Tuple of (merged_results, pretrained_score, config).
+
+    Raises:
+        ValueError: If a file records no config, or if two files are not
+            poolable.
     """
     merged: dict[str, dict] = {}
     pretrained_scores: list[float] = []
     config: dict = {}
+    reference_path = ""
 
     for p in paths:
         results, pt_score, cfg = _results_from_json(p)
+        # Absent is not equal: a file with no recorded config cannot be shown
+        # poolable, so it is refused rather than merged on trust.
+        if not cfg:
+            raise ValueError(
+                f"Refusing to merge {p}: it records no config, so it cannot "
+                "be checked for poolability. Merge only results files "
+                "written by this suite, which always record one."
+            )
+        if not reference_path:
+            reference_path = p
+        else:
+            _refuse_unpoolable(reference_path, config, p, cfg)
         pretrained_scores.append(pt_score)
         if not config:
             config = cfg
@@ -713,8 +810,10 @@ def main(argv: list[str] | None = None) -> None:
 
     # W&B (optional dependency). The CLI flag overrides the config key
     # when given; otherwise the config governs, as in the craftax twin.
-    use_wandb = args.use_wandb if args.use_wandb is not None else getattr(
-        cfg, "use_wandb", False
+    use_wandb = (
+        args.use_wandb
+        if args.use_wandb is not None
+        else getattr(cfg, "use_wandb", False)
     )
     wandb_run = None
     if use_wandb:

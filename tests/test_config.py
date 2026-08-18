@@ -4,6 +4,7 @@ ablation poolability, W&B naming and publish-time checkpoint selection."""
 import ast
 import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -236,21 +237,9 @@ def test_preset_pins_offline_overrides_to_null(preset):
 
 _REFERENCE_CONFIG = "ablations_final_ucl.yaml"
 
-#: Keys that change the trained model or the score it is measured with.
-_RESULT_AFFECTING = frozenset(
-    {
-        "max_iter",
-        "batch_size",
-        "episodes_per_iter",
-        "grad_steps_per_iter",
-        "lr",
-        "weight_decay",
-        "max_grad_norm",
-        "diffusion_steps_collect",
-        "use_amp",
-        "eval_episodes",
-    }
-)
+# The result-affecting key set is declared once, in production, as
+# ``run_ablations._RESULT_AFFECTING``: the same set that classifies these
+# configs is the one ``--merge`` enforces on the configs a run recorded.
 
 #: Configs whose runs may be merged with the reference.
 _POOLABLE = {_REFERENCE_CONFIG}
@@ -278,7 +267,7 @@ def _divergence(ra, name: str) -> set[str]:
     candidate = ra._load_ablation_config(str(_ABL_CONFIGS / name))
     return {
         k
-        for k in _RESULT_AFFECTING
+        for k in ra._RESULT_AFFECTING
         if candidate.get(k, "<absent>") != reference.get(k, "<absent>")
     }
 
@@ -313,6 +302,100 @@ def test_not_poolable_divergence_is_recorded(ra, name):
         f"Recorded: {sorted(expected)}; actual: {sorted(actual)}. "
         "Update _NOT_POOLABLE, or move it to _POOLABLE if now aligned."
     )
+
+
+# ---------------------------------------------------------------------------
+# --merge enforces the policy above on the configs a run actually recorded.
+# The classification tests read the shipped YAML; these read results.json,
+# which is what an operator merges.
+# ---------------------------------------------------------------------------
+
+
+def _results_file(tmp_path: Path, name: str, config: dict, scores: list[float]):
+    """Write a minimal results.json recording *config*.
+
+    Args:
+        tmp_path: Directory to write into.
+        name:     File name.
+        config:   The config to record, exactly as given.
+        scores:   Per-seed scores for the single ablation in the file.
+
+    Returns:
+        The path, as a string.
+    """
+    payload = {
+        "pretrained_score": 0.5,
+        "config": config,
+        "ablations": {
+            "baseline_rl": {
+                "score": sum(scores) / len(scores),
+                "score_std": 0.0,
+                "all_scores": scores,
+                "history": {},
+            }
+        },
+    }
+    path = tmp_path / name
+    path.write_text(json.dumps(payload))
+    return str(path)
+
+
+@pytest.mark.parametrize("name", sorted(_NOT_POOLABLE))
+def test_merge_refuses_a_not_poolable_pair(ra, tmp_path, name):
+    """The refusal names every recorded diverging key, with both values."""
+    paths = [
+        _results_file(
+            tmp_path,
+            "ref.json",
+            ra._load_ablation_config(str(_ABL_CONFIGS / _REFERENCE_CONFIG)),
+            [1.0],
+        ),
+        _results_file(
+            tmp_path,
+            "cand.json",
+            ra._load_ablation_config(str(_ABL_CONFIGS / name)),
+            [2.0],
+        ),
+    ]
+    with pytest.raises(ValueError) as excinfo:
+        ra._merge_result_files(paths)
+
+    message = str(excinfo.value)
+    assert "not poolable" in message
+    for key in _NOT_POOLABLE[name]:
+        assert key in message, f"{key} is a recorded divergence but unnamed"
+
+
+def test_merge_refuses_a_file_that_records_no_config(ra, tmp_path):
+    """A distinct refusal: absent is not equal, so it is never merged on trust."""
+    paths = [
+        _results_file(
+            tmp_path,
+            "ref.json",
+            ra._load_ablation_config(str(_ABL_CONFIGS / _REFERENCE_CONFIG)),
+            [1.0],
+        ),
+        _results_file(tmp_path, "bare.json", {}, [2.0]),
+    ]
+    with pytest.raises(ValueError, match="records no config"):
+        ra._merge_result_files(paths)
+
+
+def test_merge_still_pools_two_runs_of_the_same_config(ra, tmp_path):
+    """The guard is a refusal on wrong input only: a poolable pair merges to
+    the same values it did before the guard existed."""
+    config = ra._load_ablation_config(str(_ABL_CONFIGS / _REFERENCE_CONFIG))
+    paths = [
+        _results_file(tmp_path, "a.json", config, [1.0, 2.0]),
+        _results_file(tmp_path, "b.json", config, [3.0]),
+    ]
+    merged, pretrained, merged_config = ra._merge_result_files(paths)
+
+    assert merged["baseline_rl"]["all_scores"] == [1.0, 2.0, 3.0]
+    assert merged["baseline_rl"]["score"] == pytest.approx(2.0)
+    assert merged["baseline_rl"]["score_std"] == pytest.approx(math.sqrt(2 / 3))
+    assert pretrained == pytest.approx(0.5)
+    assert merged_config == config
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +571,11 @@ _NOT_FROM_A_CONFIG_FILE = frozenset(
 
 
 _HF_ONLINE = (
-    _ROOT / "checkpoints" / "hf" / "checkpoints" / "online"
+    _ROOT
+    / "checkpoints"
+    / "hf"
+    / "checkpoints"
+    / "online"
     / "Minihack-Online-Diffusion-DAgger-100M"
 )
 _needs_artefact = pytest.mark.skipif(

@@ -192,11 +192,13 @@ python experiments/rl_finetuning/run_ablations.py \
 The merged `results.json` is identical in format to a single-run file and can
 be used with `--analyze-only` for further filtering or re-plotting.
 
-**Only merge runs from configs that agree on result-affecting keys.** `--merge`
-averages seeds without checking where they came from, so pooling two machine
-configs is sound only when they train the same model and measure it the same
-way. All published MiniHack ablation results were produced on the **UCL 3090
-Ti** (`ablations_final_ucl.yaml`), which is the reference config.
+**`--merge` only pools runs from configs that agree on result-affecting keys.**
+Pooling is sound only when the runs train the same model and measure it the
+same way, so `--merge` compares the configs the results files recorded and
+refuses, naming every diverging key with both values, rather than averaging
+across them. A file that records no config is refused too. All published
+MiniHack ablation results were produced on the **UCL 3090 Ti**
+(`ablations_final_ucl.yaml`), which is the reference config.
 
 `ablations_final_qmul.yaml` is **not poolable** with it. It diverges on four
 keys that change the result, not just the wall-clock:
@@ -215,7 +217,10 @@ are wall-clock only and do not affect poolability.
 `tests/test_config.py` enforces this: every `ablations_final_*.yaml` must be
 declared poolable or not, configs declared poolable must match the reference on
 the result-affecting keys, and the recorded QMUL divergence must stay accurate.
-Aligning QMUL later fails the test until it is moved to the poolable set.
+Aligning QMUL later fails the test until it is moved to the poolable set. The
+key set itself is declared once, in `run_ablations._RESULT_AFFECTING`, so the
+classification the tests check and the refusal `--merge` performs are the same
+policy.
 
 ### Ablations
 
