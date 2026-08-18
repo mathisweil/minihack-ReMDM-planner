@@ -316,6 +316,41 @@ def test_the_batch_reduction_is_exactly_the_per_sample_mean():
     assert torch.equal(scalar, per_sample.mean())
 
 
+def test_the_supervised_auxiliary_goal_loss_is_the_mse_over_visible_rows():
+    """The non-degenerate branch: MSE over the visible rows only.
+
+    Derivation, hand-computed. `find_staircase_from_glyphs` normalises to
+    (row/(H-1), col/(W-1)) on a 21x79 map, so a staircase at (0, 0) is the
+    target (0.0, 0.0) and one at (20, 78) is (1.0, 1.0); a row with no
+    staircase glyph is (-1, -1) and is excluded by `valid`. With predictions
+    (0.0, 0.5), (0.5, 1.0) and an arbitrary third row, the squared errors on
+    the two supervised rows are 0.25 and 0.25, and `diff.mean()` averages over
+    all 2 x 2 entries: (0.25 + 0.25) / 4 = 0.125.
+
+    This branch had no test of its own -- the only coverage of this function
+    was its degenerate branch below -- so its value was pinned by nothing
+    while the branch beside it was twice rewritten. The excluded row's
+    gradient is asserted too: exclusion is what the degenerate branch was
+    finally made consistent with.
+    """
+    from src.diffusion.loss import auxiliary_goal_loss
+
+    global_obs = torch.zeros(3, 21, 79, dtype=torch.long)
+    global_obs[0, 0, 0] = 62        # '>' at the top-left    -> (0.0, 0.0)
+    global_obs[1, 20, 78] = 62      # '>' at the bottom-right -> (1.0, 1.0)
+    #                                 row 2 carries no staircase
+    goal_pred = torch.tensor(
+        [[0.0, 0.5], [0.5, 1.0], [9.0, 9.0]], requires_grad=True
+    )
+
+    loss = auxiliary_goal_loss(goal_pred, global_obs)
+
+    assert float(loss) == 0.125
+    loss.backward()
+    assert bool((goal_pred.grad[2] == 0).all()), "an unsupervised row was scored"
+    assert not bool((goal_pred.grad[:2] == 0).all()), "supervised rows got no gradient"
+
+
 @pytest.mark.parametrize(
     "poison", [None, float("nan"), float("inf"), float("-inf")]
 )
