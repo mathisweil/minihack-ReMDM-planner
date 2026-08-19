@@ -102,6 +102,109 @@ def test_kl_and_js_closed_forms():
     assert compute_js(p, q) == pytest.approx(compute_js(q, p), abs=1e-12)
 
 
+def _grad_alignment_setup(tiny_cfg, perturb: float):
+    """A model displaced `perturb` from its pretrained reference, and a batch."""
+    import copy
+
+    import torch
+
+    from src.diffusion.schedules import get_schedule
+    from src.models.denoiser import make_model
+
+    torch.manual_seed(0)
+    tiny_cfg._schedule_fn = get_schedule(tiny_cfg.noise_schedule)
+
+    ref_model = make_model(tiny_cfg)
+    ref_model.eval()
+    for param in ref_model.parameters():
+        param.requires_grad = False
+
+    model = copy.deepcopy(ref_model)
+    for param in model.parameters():
+        param.requires_grad = True
+    if perturb:
+        with torch.no_grad():
+            for param in model.parameters():
+                param.add_(torch.randn_like(param) * perturb)
+
+    batch = 8
+    local = torch.randint(0, 1000, (batch, tiny_cfg.crop_size, tiny_cfg.crop_size))
+    glob = torch.randint(0, 1000, (batch, tiny_cfg.map_h, tiny_cfg.map_w))
+    x0 = torch.randint(0, tiny_cfg.action_dim, (batch, tiny_cfg.seq_len))
+    return model, ref_model, local.long(), glob.long(), x0.long(), torch.device("cpu")
+
+
+def test_grad_alignment_shares_one_draw_and_references_the_pretrained_params(tiny_cfg):
+    """The RL and BC gradients come from one ``(z_t, t)`` draw, and the BC
+    gradient is taken at the pretrained parameters (spec-ablations §3.2; the
+    same definition as craftax's `make_grad_alignment_fn`).
+
+    Derivation of the exact case: uniform advantages make the RL loss
+    ``(per_sample * 1).mean()`` and the BC loss ``per_sample.mean()`` the
+    same expression, so on one draw at one parameter point the two
+    gradients are the same vector and the cosine is exactly 1. Anything
+    less is the draw differing: at independent draws the metric is a
+    Monte-Carlo estimate whose scatter is the size of the quantity, and it
+    reports objective disagreement where there is none by construction.
+
+    Displacing the model from the reference then drops the cosine below 1
+    while nothing about the objectives has changed, which is what taking
+    the BC gradient at a fixed pretrained reference means.
+    """
+    import torch
+
+    from experiments.rl_finetuning.ablations.losses import _core_loss
+    from experiments.rl_finetuning.diagnostics.gradient import (
+        _at_reference_parameters,
+        _collect_flat_grad,
+        compute_grad_alignment,
+    )
+
+    model, ref_model, local, glob, x0, device = _grad_alignment_setup(tiny_cfg, 0.0)
+    batch = x0.shape[0]
+    uniform = torch.ones(batch)
+
+    # One draw, one parameter point, one objective in two spellings.
+    cos, rl_norm, bc_norm = compute_grad_alignment(
+        model, ref_model, local, glob, x0, uniform, tiny_cfg, device
+    )
+    assert cos == pytest.approx(1.0, abs=1e-4)
+    assert rl_norm == pytest.approx(bc_norm, rel=1e-5)
+
+    def shipped_independent_draws() -> float:
+        """What the metric was: a second draw, and the BC gradient at `model`."""
+        model.train()
+        model.zero_grad()
+        _core_loss(model, local, glob, x0, uniform, tiny_cfg, device).backward()
+        g_rl = _collect_flat_grad(model)
+        model.zero_grad()
+        _core_loss(model, local, glob, x0, None, tiny_cfg, device).backward()
+        g_bc = _collect_flat_grad(model)
+        model.zero_grad()
+        return (torch.dot(g_rl, g_bc) / (g_rl.norm() * g_bc.norm() + 1e-10)).item()
+
+    independent = [shipped_independent_draws() for _ in range(5)]
+    assert max(independent) < 1.0 - 1e-3
+    assert max(independent) - min(independent) > 1e-3
+
+    # The reference is the pretrained point, not wherever the run has got to.
+    model, ref_model, local, glob, x0, device = _grad_alignment_setup(tiny_cfg, 0.05)
+    displaced, _, _ = compute_grad_alignment(
+        model, ref_model, local, glob, x0, uniform, tiny_cfg, device
+    )
+    assert displaced < 1.0 - 1e-3
+
+    # And the swap that gets it there puts every parameter back.
+    before = torch.cat([p.detach().clone().reshape(-1) for p in model.parameters()])
+    reference = torch.cat([p.detach().reshape(-1) for p in ref_model.parameters()])
+    assert (before - reference).abs().max() > 1e-3
+    with _at_reference_parameters(model, ref_model):
+        inside = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
+        assert (inside - reference).abs().max() == pytest.approx(0.0, abs=1e-12)
+    after = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
+    assert (after - before).abs().max() == pytest.approx(0.0, abs=1e-12)
+
+
 def test_the_significance_test_states_its_floor_and_corrects_for_selection(tmp_path):
     """The significance test is exact over all C(n_a+n_b, n_b) relabellings,
     reports the floor that enumeration imposes, and draws its null

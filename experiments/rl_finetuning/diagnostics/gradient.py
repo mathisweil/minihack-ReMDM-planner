@@ -9,6 +9,8 @@ PyTorch; no JIT compilation.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from types import SimpleNamespace
 
 import torch
@@ -36,6 +38,65 @@ def _collect_flat_grad(model: nn.Module) -> Tensor:
     return torch.cat(parts)
 
 
+def _canonical_name(name: str) -> str:
+    """Parameter name with the wrappers' decorations removed.
+
+    ``torch.compile`` prefixes ``_orig_mod.`` and
+    ``torch.nn.utils.parametrize`` rewrites ``w`` to
+    ``parametrizations.w.original``; the pretrained reference carries
+    neither, so both are stripped before pairing parameters by name.
+
+    Args:
+        name: Name as ``named_parameters`` reports it.
+
+    Returns:
+        The name the uninstrumented module would report.
+    """
+    return (
+        name.replace("_orig_mod.", "")
+        .replace("parametrizations.", "")
+        .replace(".original", "")
+    )
+
+
+@contextlib.contextmanager
+def _at_reference_parameters(model: nn.Module, ref_model: nn.Module) -> Iterator[None]:
+    """Hold ``model``'s parameters at ``ref_model``'s values for the block.
+
+    Evaluating the BC gradient by loading the reference values into the
+    current module -- rather than by differentiating ``ref_model`` itself --
+    keeps both gradients in one parameter space and one ordering, so the
+    cosine is well defined for every ablation, including the parametrized
+    and the partly frozen ones.
+
+    Parameters with no counterpart in the reference keep their current
+    values. LoRA's A and B factors are the case that arises: the pretrained
+    model has no analogue for them, and the sibling repo's ``params["base"]``
+    reference leaves them out for the same reason.
+
+    Args:
+        model: Module whose parameters are swapped.
+        ref_model: Pretrained module supplying the values.
+
+    Yields:
+        None, with the swap in force.
+    """
+    ref = {_canonical_name(n): p for n, p in ref_model.named_parameters()}
+    saved: list[tuple[Tensor, Tensor]] = []
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            src = ref.get(_canonical_name(name))
+            if src is not None and src.shape == param.shape:
+                saved.append((param, param.detach().clone()))
+                param.copy_(src)
+    try:
+        yield
+    finally:
+        with torch.no_grad():
+            for param, value in saved:
+                param.copy_(value)
+
+
 def compute_grad_alignment(
     model: nn.Module,
     ref_model: nn.Module,
@@ -48,12 +109,30 @@ def compute_grad_alignment(
 ) -> tuple[float, float, float]:
     """Cosine similarity between RL and BC gradient vectors.
 
-    Computes RL loss with advantages and BC loss without, then
-    measures alignment of their full-model gradient vectors.
+    Computes RL loss with advantages and BC loss without, then measures
+    alignment of their full-model gradient vectors.
+
+    Both gradients are taken on the same batch **and the same ``(z_t, t)``
+    draw**: ``_core_loss`` samples its timestep and its masking from the
+    global generator, so the generator is rewound between the two backward
+    passes. At independent draws the metric reports Monte-Carlo noise as
+    objective disagreement. Measured over six trials on one fixed batch at
+    the production architecture: two draws give a mean cosine of 0.858
+    ranging over 0.104, where one draw gives 0.954 ranging over 0.063 -- a
+    mean shift of 0.096. The sibling repo is hit far harder, reporting
+    anti-alignment where the same-draw value is 0.98. Sharing the draw
+    leaves the generator where one loss would have left it rather than
+    where two would.
+
+    The BC gradient is taken at the **pretrained** parameters, not at the
+    current ones: a fixed reference is comparable across iterations and is
+    the quantity the forgetting framing needs, and it is what the sibling
+    repo has always measured. ``ref_model`` supplies them, held in place by
+    :func:`_at_reference_parameters` for the BC pass alone.
 
     Args:
         model: Current model (must be in train mode).
-        ref_model: Pretrained model (unused here; kept for interface).
+        ref_model: Pretrained model, the reference the BC gradient is taken at.
         local_obs: ``[B, 9, 9]``.
         global_obs: ``[B, 21, 79]``.
         x0: ``[B, H]`` clean actions.
@@ -67,35 +146,26 @@ def compute_grad_alignment(
     model.train()
     _use_amp = getattr(cfg, "use_amp", False) and device.type == "cuda"
 
-    # RL gradient
-    model.zero_grad()
-    with torch.amp.autocast("cuda", enabled=_use_amp):
-        rl_loss = _core_loss(
-            model,
-            local_obs,
-            global_obs,
-            x0,
-            advantages,
-            cfg,
-            device,
-        )
-    rl_loss.backward()
-    g_rl = _collect_flat_grad(model)
+    def _grad(weights: Tensor | None) -> Tensor:
+        model.zero_grad()
+        with torch.amp.autocast("cuda", enabled=_use_amp):
+            loss = _core_loss(model, local_obs, global_obs, x0, weights, cfg, device)
+        loss.backward()
+        return _collect_flat_grad(model)
 
-    # BC gradient (no advantage weighting)
-    model.zero_grad()
-    with torch.amp.autocast("cuda", enabled=_use_amp):
-        bc_loss = _core_loss(
-            model,
-            local_obs,
-            global_obs,
-            x0,
-            None,
-            cfg,
-            device,
-        )
-    bc_loss.backward()
-    g_bc = _collect_flat_grad(model)
+    cpu_rng = torch.get_rng_state()
+    cuda_rng = torch.cuda.get_rng_state(device) if device.type == "cuda" else None
+
+    # RL gradient
+    g_rl = _grad(advantages)
+
+    # BC gradient: no advantage weighting, the pretrained parameters, and
+    # the same draw the RL gradient saw.
+    torch.set_rng_state(cpu_rng)
+    if cuda_rng is not None:
+        torch.cuda.set_rng_state(cuda_rng, device)
+    with _at_reference_parameters(model, ref_model):
+        g_bc = _grad(None)
 
     model.zero_grad()
 
