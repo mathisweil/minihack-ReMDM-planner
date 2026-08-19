@@ -503,54 +503,81 @@ def make_per_env_table(
 def make_forgetting_analysis_table(
     results: dict[str, dict],
     pretrained_score: float,
-    collapse_threshold: float = 0.05,
+    collapse_threshold: float = 0.1,
 ) -> pl.DataFrame:
     """Forgetting timeline: first collapse, min score, recovery.
 
-    Collapse is defined as eval score dropping below
-    ``pretrained_score - collapse_threshold``.
+    One function, character for character, in both repos. The two halves
+    had drifted apart in five places; each is settled below, with the
+    behaviour that was dropped named so the choice can be read back.
+
+    **Collapse boundary** is multiplicative: ``pretrained * (1 -
+    collapse_threshold)``, a tenth below pretrained. minihack subtracted an
+    absolute 0.05 instead, which means something different on a Craftax
+    achievement score than on a MiniHack win rate; the verdict rule was
+    scaled to the metric on 2026-08-17 and this follows it.
+
+    **Recovery** is judged from the first collapse onward -- did any later
+    evaluation climb back to the boundary. An arm that never collapsed
+    reports ``"N/A"``, not recovery: minihack asked only whether the final
+    score cleared the boundary, which labels every healthy arm "recovered"
+    from a collapse it never had.
+
+    **The recovery score** is ``res["score"]``, the terminal evaluation,
+    which is the quantity the main results table, the verdict rule and the
+    hypothesis table all use. minihack read the last in-loop evaluation
+    instead, so its ``Final_Score`` column and the ``Score`` column beside
+    it could disagree.
+
+    **An arm with no evaluation history still gets a row**, with a null
+    minimum and no collapse. minihack skipped it, which silently shrinks
+    the denominator of any count taken over this table.
+
+    **Arms are visited in sorted order**, so the table is byte-reproducible
+    across runs; craftax inherited dict order.
 
     Args:
-        results: Ablation results dict.
-        pretrained_score: Pretrained eval score.
-        collapse_threshold: Drop from pretrained that counts as collapse.
+        results:            ``{name: {"history": AblationHistory, "score": float}}``.
+        pretrained_score:   Pretrained model eval score.
+        collapse_threshold: Fraction below pretrained that counts as collapse.
 
     Returns:
-        DataFrame with one row per ablation.
+        Polars DataFrame with one row per ablation, in sorted name order.
     """
+    collapse_level = pretrained_score * (1 - collapse_threshold)
     rows: list[dict] = []
     for name, res in sorted(results.items()):
-        h: AblationHistory = res["history"]
-        if not h.eval_iters or not h.eval_score:
-            continue
+        history: AblationHistory = res["history"]
+        evals = history.eval_score
+        eval_iters = history.eval_iters
 
-        scores = h.eval_score
-        iters = h.eval_iters
-        min_score = min(scores)
-        min_idx = scores.index(min_score)
-        final_score = scores[-1]
-        boundary = pretrained_score - collapse_threshold
+        first_collapse_iter = "never"
+        min_score = round(min(evals), 4) if evals else None
+        min_score_iter = eval_iters[evals.index(min(evals))] if evals else None
+        recovery_score = round(res["score"], 4)
+        recovered = "N/A"
 
-        first_collapse = "never"
-        for it, sc in zip(iters, scores, strict=False):
-            if sc < boundary:
-                first_collapse = str(it)
+        for i, (it, sc) in enumerate(zip(eval_iters, evals, strict=False)):
+            if sc < collapse_level:
+                first_collapse_iter = str(it)
+                later_scores = evals[i + 1 :]
+                recovered = (
+                    "Y" if any(s >= collapse_level for s in later_scores) else "N"
+                )
                 break
-
-        recovered = final_score >= boundary
 
         rows.append(
             {
                 "Method": name,
-                "First_Collapse": first_collapse,
-                "Min_Score": round(min_score, 4),
-                "Min_Score_Iter": iters[min_idx],
-                "Final_Score": round(final_score, 4),
+                "First_Collapse_Iter": first_collapse_iter,
+                "Min_Score": min_score,
+                "Min_Score_Iter": min_score_iter,
+                "Recovery_Score": recovery_score,
                 "Recovered": recovered,
             }
         )
 
-    return pl.DataFrame(rows) if rows else pl.DataFrame()
+    return pl.DataFrame(rows)
 
 
 def make_hypothesis_verdict_table(
@@ -678,7 +705,7 @@ def generate_summary_tables(
         _save_table(
             forg_df,
             tables_dir / "forgetting_analysis",
-            caption="Forgetting analysis",
+            caption="Catastrophic forgetting timeline.",
             label="tab:forgetting",
         )
 

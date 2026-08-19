@@ -22,7 +22,10 @@ import torch
 from scipy import stats as scipy_stats
 
 from experiments.rl_finetuning.ablations.registry import REGISTRY
-from experiments.rl_finetuning.ablations.training import _effective_batch_size
+from experiments.rl_finetuning.ablations.training import (
+    AblationHistory,
+    _effective_batch_size,
+)
 from experiments.rl_finetuning.analysis.action_distribution import (
     compute_all_metrics,
     compute_entropy,
@@ -36,6 +39,7 @@ from experiments.rl_finetuning.analysis.report import (
 )
 from experiments.rl_finetuning.analysis.tables import (
     baseline_rl_score_of,
+    make_forgetting_analysis_table,
     metric_scale,
     verdict,
     write_significance_test,
@@ -312,6 +316,93 @@ def test_grad_alignment_shares_one_draw_and_references_the_pretrained_params(tin
         assert (inside - reference).abs().max() == pytest.approx(0.0, abs=1e-12)
     after = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
     assert (after - before).abs().max() == pytest.approx(0.0, abs=1e-12)
+
+
+def test_the_forgetting_table_is_one_definition_across_the_repos():
+    """The forgetting table is one function in both repos, and each of the
+    five places the two halves had drifted apart resolves the same way
+    (spec-ablations §3.3).
+
+    Derivation, boundary: multiplicative, ``pretrained * (1 - 0.1)``. At a
+    pretrained score of 1.0 that is 0.9, so an evaluation of 0.85 is a
+    collapse and 0.92 is not. The absolute form minihack used --
+    ``pretrained - 0.05`` -- puts the boundary at 0.95 instead, which makes
+    `dipped_but_not_collapsed` a collapse at iteration 20 rather than an
+    arm that never collapsed. The two rules coincide only at a pretrained
+    score of 0.5; on a Craftax achievement score the absolute 0.05 is a
+    different fraction entirely, which is why the verdict rule was scaled
+    to the metric on 2026-08-17.
+
+    Derivation, recovery: `collapsed_then_recovered` drops to 0.85 at
+    iteration 20 and climbs to 0.95, so `Recovered` is "Y". `healthy` never
+    goes below 0.9, so it is "N/A" -- not recovery, because there was no
+    collapse; the rule minihack used, final score at or above the boundary,
+    calls it recovered.
+
+    Derivation, recovery score: `score_differs_from_last_eval` has a
+    terminal evaluation of 0.42 and a last in-loop evaluation of 0.99. The
+    terminal one is what the main results table, the verdict rule and the
+    hypothesis table all read, so `Recovery_Score` is 0.42.
+
+    Derivation, empty history: `no_history` still gets a row, with a null
+    minimum and no collapse. Dropping it would leave four rows where five
+    arms ran, and any count taken over this table would silently change
+    denominator.
+
+    Derivation, order: the rows come out in sorted name order, so the CSV
+    is byte-reproducible across runs.
+    """
+    results = {
+        "healthy": {
+            "history": AblationHistory(eval_iters=[10, 20, 30], eval_score=[1.0, 0.95, 0.98]),
+            "score": 0.98,
+        },
+        "dipped_but_not_collapsed": {
+            "history": AblationHistory(eval_iters=[10, 20, 30], eval_score=[1.0, 0.92, 0.97]),
+            "score": 0.97,
+        },
+        "collapsed_then_recovered": {
+            "history": AblationHistory(eval_iters=[10, 20, 30], eval_score=[1.0, 0.85, 0.95]),
+            "score": 0.95,
+        },
+        "collapsed_and_stayed": {
+            "history": AblationHistory(eval_iters=[10, 20, 30], eval_score=[1.0, 0.85, 0.20]),
+            "score": 0.20,
+        },
+        "score_differs_from_last_eval": {
+            "history": AblationHistory(eval_iters=[10, 20], eval_score=[1.0, 0.99]),
+            "score": 0.42,
+        },
+        "no_history": {"history": AblationHistory(), "score": 0.5},
+    }
+    df = make_forgetting_analysis_table(results, pretrained_score=1.0)
+    rows = {r["Method"]: r for r in df.to_dicts()}
+
+    # Every arm gets a row, including the one with nothing to plot.
+    assert df.shape[0] == 6
+    assert rows["no_history"]["Min_Score"] is None
+    assert rows["no_history"]["First_Collapse_Iter"] == "never"
+    assert rows["no_history"]["Recovered"] == "N/A"
+
+    # Sorted, so the CSV is reproducible.
+    assert df["Method"].to_list() == sorted(results)
+
+    # The boundary is 0.9, not 0.95: a dip to 0.92 is not a collapse.
+    assert rows["dipped_but_not_collapsed"]["First_Collapse_Iter"] == "never"
+    assert rows["dipped_but_not_collapsed"]["Recovered"] == "N/A"
+    assert rows["healthy"]["First_Collapse_Iter"] == "never"
+    assert rows["healthy"]["Recovered"] == "N/A"
+
+    # Recovery is judged from the first collapse onward.
+    assert rows["collapsed_then_recovered"]["First_Collapse_Iter"] == "20"
+    assert rows["collapsed_then_recovered"]["Recovered"] == "Y"
+    assert rows["collapsed_and_stayed"]["First_Collapse_Iter"] == "20"
+    assert rows["collapsed_and_stayed"]["Recovered"] == "N"
+
+    # The recovery score is the terminal evaluation, not the last in-loop one.
+    assert rows["score_differs_from_last_eval"]["Recovery_Score"] == pytest.approx(0.42)
+    assert rows["score_differs_from_last_eval"]["Min_Score"] == pytest.approx(0.99)
+    assert rows["score_differs_from_last_eval"]["Min_Score_Iter"] == 20
 
 
 def test_the_significance_test_states_its_floor_and_corrects_for_selection(tmp_path):
