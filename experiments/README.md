@@ -34,8 +34,7 @@ rl_finetuning/
 │   ├── plots.py              # 12 matplotlib figure generators
 │   ├── tables.py             # Summary tables as polars DataFrames + LaTeX export
 │   ├── report.py             # diagnosis.md + decision tree figure
-│   ├── action_distribution.py  # Pre/post-RL action distribution analysis
-│   └── mixing_experiment.py    # Data quality degradation curve experiment
+│   └── action_distribution.py  # Pre/post-RL action distribution analysis
 └── configs/
     ├── ablations_default.yaml   # Base: all ablation hyperparameters
     ├── ablations_fast.yaml      # Smoke-test overlay (50 iterations)
