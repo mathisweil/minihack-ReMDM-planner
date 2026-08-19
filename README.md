@@ -122,8 +122,8 @@ Write eval JSONs into `results/inference/` (created for you): `scripts/hf_upload
 Always evaluate with the checkpoint's own config snapshot:
 
 ```bash
-DIR=checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M
-python main.py --mode inference --config $DIR/config_iter600.yaml --checkpoint $DIR/iter600.pth
+DIR=checkpoints/online/Minihack-Online-Diffusion-DAgger-100M
+python main.py --mode inference --config $DIR/config.yaml --checkpoint $DIR/iter563.pth
 ```
 
 ## Baselines and ablations
@@ -198,8 +198,8 @@ Training writes to a unique run directory under `checkpoint_dir` (default `check
 
 | Directory | Method | Selected at | Sample-equivalents |
 |---|---|---|---|
-| `checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M` | DAgger (main result) | iteration 600 | 123M |
-| `checkpoints/offline/Minihack-OfflineDiffusion-BC-82M` | Offline BC baseline | gradient step 40,000 | 82M |
+| `checkpoints/online/Minihack-Online-Diffusion-DAgger-100M` | DAgger (main result) | `iter563` | 100M |
+| `checkpoints/offline/Minihack-Offline-Diffusion-BC-100M` | Offline BC baseline | `offline_step50000` | 100M |
 
 ```bash
 # All checkpoints
@@ -210,7 +210,7 @@ uv run hf download mathisweil/remdm-minihack-checkpoints \
     --include "checkpoints/online/Minihack-*/**" --local-dir .
 ```
 
-Each checkpoint directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config_<step>.yaml` (config snapshot) and `selection.json`. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading.
+Each released directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config.yaml` (config snapshot) and `selection.json`. The `-100M` suffix counts **sample-equivalents, not env steps** — the runs behind these train 5,650,000 env steps. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading.
 
 Historical note: the released DAgger `selection.json` records `"every": null, "configured_max": null` and `"unit": "dagger_iterations"`. It was published by a version of `selection()` that read two config keys which had been renamed out of the config, so the values came back empty. It is **historical and noncanonical** and stays as published (author decision 2026-08-17); the checkpoint's own `config_<step>.yaml` carries the real cadence and budget, so nothing is lost. A publish from the current code records the candidate set in env steps — `"every": 940000, "configured_max": 5650000` for the shipped recipe — and raises rather than writing a null for any key it cannot read.
 
@@ -421,8 +421,8 @@ from safetensors.torch import load_file
 from src.config import load_config
 from src.models.denoiser import make_model
 
-DIR = "checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M"
-cfg = load_config(f"{DIR}/config_iter600.yaml")
+DIR = "checkpoints/online/Minihack-Online-Diffusion-DAgger-100M"
+cfg = load_config(f"{DIR}/config.yaml")
 model = make_model(cfg)
 model.load_state_dict(load_file(f"{DIR}/model.safetensors"))
 model.eval()
@@ -434,9 +434,9 @@ import torch
 from src.config import load_config
 from src.models.denoiser import make_model, ModelEMA
 
-DIR = "checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M"
-cfg = load_config(f"{DIR}/config_iter600.yaml")
-ckpt = torch.load(f"{DIR}/iter600.pth", map_location="cpu", weights_only=False)
+DIR = "checkpoints/online/Minihack-Online-Diffusion-DAgger-100M"
+cfg = load_config(f"{DIR}/config.yaml")
+ckpt = torch.load(f"{DIR}/iter563.pth", map_location="cpu", weights_only=False)
 
 model = make_model(cfg)
 model.load_state_dict(ckpt["model_state_dict"])
