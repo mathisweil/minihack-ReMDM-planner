@@ -3,8 +3,7 @@
 Research and diagnostic scripts for investigating RL fine-tuning of the ReMDM
 diffusion planner. These scripts are **standalone research code** -- they
 import from `src/` (model, sampling, env wrapper, evaluator) but never modify
-the core training pipeline. They start from a pretrained DAgger checkpoint
-and answer the question: *which intervention prevents RL fine-tuning collapse?*
+the core training pipeline. They start from a pretrained DAgger checkpoint.
 
 ---
 
@@ -13,7 +12,7 @@ and answer the question: *which intervention prevents RL fine-tuning collapse?*
 Diagnoses why RL fine-tuning of the diffusion model collapses and which interventions fix it.
 Implements **25 ablations**: a baseline plus four groups (A: Regularisation, B: Training Signal, C: Architecture, D: Data Quality), with a comprehensive diagnostic and analysis pipeline.
 
-**Training data is on-policy, and returns are per window.** Each iteration rolls the *current* model out under its EMA weights and trains on the resulting windows; a window's return is the reward sum over exactly the actions it trains on, not the episode total broadcast to every window. Author decision 2026-08-16; the craftax twin uses the same definition, so scores are comparable across repos.
+**Training data is on-policy, and returns are per window.** Each iteration rolls the *current* model out under its EMA weights and trains on the resulting windows; a window's return is the reward sum over exactly the actions it trains on, not the episode total broadcast to every window.
 
 ### Directory structure
 
@@ -44,10 +43,9 @@ rl_finetuning/
 
 ### Config layering
 
-Two layers, always. `ablations_default.yaml` carries every ablation
-hyperparameter, including the settings both clusters share (AMP on, three seeds
-per ablation). A machine config carries only what that machine changes.
-Configs never inherit from one another.
+Two layers, always: `ablations_default.yaml` carries every ablation
+hyperparameter, a machine config carries only what that machine changes, and
+configs never inherit from one another.
 
 Merge order, later wins:
 
@@ -75,12 +73,11 @@ cka_batch_size: 128
 | Restated default | Rejected by `tests/test_config.py`: a key whose value equals what it would inherit is redundant and must be deleted |
 
 Key validation matters here because every ablation reads config through
-`getattr(cfg, key, fallback)`. Without it a typo such as `batch_sze: 512` is
-silently ignored and the real `batch_size` quietly keeps its inherited value.
+`getattr(cfg, key, fallback)`, so an unrejected typo such as `batch_sze: 512`
+leaves the real `batch_size` at its inherited value with no error.
 
-Note that `use_amp` and `num_seeds` now live in the base, so a bare
-`--fast` run (no `--ablations-config`) inherits `num_seeds: 3` and AMP rather
-than the previous `1` and off. Pass `--num-seeds 1` for a single-seed smoke run.
+A bare `--fast` run (no `--ablations-config`) inherits `num_seeds: 3` and AMP
+from the base. Pass `--num-seeds 1` for a single-seed smoke run.
 
 ### Usage
 
@@ -166,9 +163,9 @@ python experiments/rl_finetuning/run_ablations.py \
     --output-dir outputs/combined
 ```
 
-`--merge` accepts any number of `results.json` files. When the same ablation
-appears in multiple files (e.g. different seeds on different GPUs), the
-per-seed scores are concatenated and mean/std are recomputed over the union:
+`--merge` accepts any number of `results.json` files. Where the same ablation
+appears in more than one, the per-seed scores are concatenated and mean/std
+recomputed over the union:
 
 ```bash
 # Seed 0 on GPU 0
@@ -185,17 +182,15 @@ python experiments/rl_finetuning/run_ablations.py \
 python experiments/rl_finetuning/run_ablations.py \
     --merge outputs/seed0/results.json outputs/seed1/results.json \
     --output-dir outputs/merged
-# -> baseline_rl: 0.6250 +/- 0.0250 (2 seeds)
+# -> <ablation>: <mean> +/- <std> (2 seeds)
 ```
 
-The merged `results.json` is identical in format to a single-run file and can
-be used with `--analyze-only` for further filtering or re-plotting.
+The merged file is a `results.json` like any other, so `--analyze-only` works on it.
 
 **`--merge` only pools runs from configs that agree on result-affecting keys.**
-Pooling is sound only when the runs train the same model and measure it the
-same way, so `--merge` compares the configs the results files recorded and
-refuses, naming every diverging key with both values, rather than averaging
-across them. A file that records no config is refused too. All published
+It compares the configs the results files recorded and refuses, naming every
+diverging key with both values; a file that records no config is refused too.
+All published
 MiniHack ablation results were produced on the **UCL 3090 Ti**
 (`ablations_final_ucl.yaml`), which is the reference config.
 
@@ -254,13 +249,13 @@ policy.
 Group C freezes parameters exactly: under an adversarial gradient on every
 tensor, each frozen tensor of each arm measures a parameter delta of exactly
 0.0 (`tests/test_spec_ablations.py`, at the production architecture). The
-weights the suite *evaluates* are the EMA shadow, and a shadow drifts even
-when its parameter does not, because `decay * x + (1 - decay) * x` is not
-exactly `x` in float32 — 45 of 72 tensors by up to 4.6e-05 over 500 updates
-at decay 0.999. So a group-C arm's frozen parameters are bit-exact in the
-trained weights and approximate to that magnitude in the evaluated ones. The
-drift is far below the resolution of any reported win rate and is left as it
-is; see `ModelEMA` in `src/models/denoiser.py`.
+weights the suite *evaluates* are the EMA shadow, which drifts even when its
+parameter does not, because `decay * x + (1 - decay) * x` is not exactly `x` in
+float32: **45 of 72 tensors, by up to 4.6e-05 over 500 updates at decay 0.999**.
+A group-C arm's frozen parameters are therefore bit-exact in the trained weights
+and approximate to that magnitude in the evaluated ones — far below the
+resolution of any reported win rate, and left as it is (`ModelEMA` in
+`src/models/denoiser.py`).
 
 ### Output structure
 
@@ -309,12 +304,7 @@ experiments/rl_finetuning/outputs/{run_id}/
     └── hypothesis_verdict.{csv,tex}   # Per-ablation hypothesis verdict + conclusion
 ```
 
-This mirrors the `figures/` and `tables/` layout used by the sibling
-`craftax-ReMDM-planner` repository, so the two ablation suites produce
-directly comparable output trees.
-
-**Action distribution analysis** is opt-in via `--action-dist`, because
-MiniHack rollouts are not vectorised: it costs roughly
+**Action distribution analysis** is opt-in via `--action-dist`. It costs roughly
 `len(id_envs) * --action-dist-episodes * (1 + n_ablations)` episodes. The
 pretrained baseline is rolled out once and reused across ablations. It reads
 the per-ablation `checkpoint_{name}.pth` files, so it only covers ablations
