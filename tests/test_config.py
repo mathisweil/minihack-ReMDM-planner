@@ -541,6 +541,32 @@ def test_publish_discovery_is_at_the_released_layout_and_skips_downloads(tmp_pat
 
 
 
+def test_the_published_config_drops_the_same_environment_keys_in_both_repos():
+    """The published config keeps the recipe and drops provenance, by one
+    declaration that is byte-identical across the repos (both READMEs).
+
+    Neither repo dropped `use_wandb`: it starts with neither `wandb_` nor
+    `hub_`, so minihack's prefix rule missed it, and craftax removed only the
+    nested `_wandb` blob, leaving `USE_WANDB`, `WANDB_ENTITY` and
+    `WANDB_PROJECT` in the released `config.yaml`. No credential was exposed
+    either way -- those live in `_wandb` and `wandb-metadata.json`, both
+    already removed -- but the published surface advertised an account and a
+    project that are nothing to do with the recipe, and the two repos
+    advertised different ones.
+
+    Keys are compared lower-cased because craftax records them UPPERCASE and
+    minihack lower-case.
+    """
+    hf = _hf_upload()
+
+    for key in ("_wandb", "use_wandb", "USE_WANDB", "wandb_project",
+                "WANDB_ENTITY", "hub_repo_id", "HUB_TOKEN"):
+        assert hf.is_environment_key(key), key
+
+    for key in ("lr", "LR", "batch_size", "NUM_ENVS", "noise_schedule",
+                "use_amp", "USE_AMP", "hubris", "wandbish"):
+        assert not hf.is_environment_key(key), key
+
 def _shipped_defaults() -> dict:
     """The shipped `configs/defaults.yaml` as a published snapshot would be.
 
