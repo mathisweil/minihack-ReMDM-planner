@@ -225,6 +225,8 @@ HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-mi
 
 `--dry-run` prints the staged tree and card without uploading; drop it to upload. `--selection-metric` records what the best-of-N checkpoints were chosen on. Also `--inference-results <FILE|DIR> ...` (eval JSONs kept elsewhere), `--private`, `--yes`. Publish one model per directory with a single `.pth` and config, since the script takes one row per directory and otherwise picks by sort order.
 
+**Checkpoint discovery expects the released layout**, `checkpoints/<role>/<name>/*.pth` — the layout the Hub repo mirrors. A training run writes to its own `checkpoints/dagger_<timestamp>/` directory, so copy the checkpoints you mean to release into `checkpoints/{offline,online}/<name>/` first, or nothing is staged. `checkpoints/hf/` is skipped: that is where a Hub *download* lands, and publishing from it would push already-published artefacts back up into a nested `checkpoints/hf/checkpoints/...` tree. Discovery used to be a recursive `rglob`, which staged every run directory it could find and both download copies with them; the sibling `craftax-ReMDM-planner` repo has the same requirement and the same exclusion.
+
 ## Results, citation, licence
 
 Results tables and the full method description are in the accompanying paper (under submission); `demo_minihack.ipynb` reproduces the headline comparison. Citation to be added on publication. Licence: MIT, see `LICENSE`.

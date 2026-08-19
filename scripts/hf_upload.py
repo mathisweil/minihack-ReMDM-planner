@@ -61,10 +61,45 @@ HUB_IGNORE = ["**/.DS_Store", "**/__pycache__/**", "**/wandb-metadata.json"]
 # Discovery
 # =============================================================================
 
+# `checkpoints/hf/` is where a Hub *download* lands. Publishing from it would
+# re-upload already-published artefacts into a nested `checkpoints/hf/...` tree
+# on the Hub, so it is never a publish source in either repo.
+HF_DOWNLOAD_DIR = "hf"
+
+
+def _is_download_copy(path: Path) -> bool:
+    """True for anything under ``checkpoints/hf/``, wherever it sits."""
+    return HF_DOWNLOAD_DIR in path.relative_to(CKPTS).parts
+
+
 def discover_checkpoints() -> dict[Path, list[Path]]:
-    """Map each checkpoint directory to its ``.pth`` files, oldest first."""
+    """Map each checkpoint directory to its ``.pth`` files, oldest first.
+
+    Discovery is at the **released layout**, ``checkpoints/<role>/<name>/`` —
+    the layout the Hub repo mirrors, matching the sibling repo. A recursive
+    ``rglob("*.pth")`` found everything instead, which is wrong in both
+    directions: measured on this repo's live tree it discovered 10 directories,
+    **none of them at the released layout** — seven raw ``dagger_<timestamp>/``
+    run directories, the repository root itself with two loose files, and **two
+    already-published artefacts under** ``checkpoints/hf/``, which a publish
+    would have pushed back up into a nested ``checkpoints/hf/checkpoints/...``
+    tree.
+
+    A training run writes to its own directory, so its checkpoints have to be
+    copied into ``checkpoints/{offline,online}/<name>/`` before publishing. The
+    README documents that; it is the same requirement the sibling repo has
+    always had, and it is now stated on both sides rather than one.
+
+    Anything under ``checkpoints/hf/`` is skipped as a download copy, explicitly
+    rather than by depth arithmetic.
+
+    Returns:
+        ``{checkpoint directory: [.pth paths, oldest first]}``.
+    """
     models: dict[Path, list[Path]] = {}
-    for pth in sorted(CKPTS.rglob("*.pth")):
+    for pth in sorted(CKPTS.glob("*/*/*.pth")):
+        if _is_download_copy(pth):
+            continue
         models.setdefault(pth.parent, []).append(pth)
     return models
 
@@ -595,7 +630,14 @@ def main() -> int:
 
     models = discover_checkpoints()
     if not models:
-        print(f"No .pth checkpoints found under {CKPTS}.", file=sys.stderr)
+        print(
+            f"No .pth checkpoints found under {CKPTS}.\n"
+            "Discovery expects the released layout, "
+            "checkpoints/<role>/<name>/*.pth, and skips checkpoints/hf/ "
+            "because that is where Hub downloads land. Copy a run's "
+            "checkpoints into checkpoints/{offline,online}/<name> first.",
+            file=sys.stderr,
+        )
         return 1
     runs = discover_runs()
     inference = discover_inference(args.inference_results)
