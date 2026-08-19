@@ -24,6 +24,8 @@ from scipy import stats as scipy_stats
 from experiments.rl_finetuning.ablations.registry import REGISTRY
 from experiments.rl_finetuning.ablations.training import _effective_batch_size
 from experiments.rl_finetuning.analysis.action_distribution import (
+    compute_all_metrics,
+    compute_entropy,
     compute_js,
     compute_kl,
     run_statistical_tests,
@@ -134,6 +136,51 @@ def _grad_alignment_setup(tiny_cfg, perturb: float):
     glob = torch.randint(0, 1000, (batch, tiny_cfg.map_h, tiny_cfg.map_w))
     x0 = torch.randint(0, tiny_cfg.action_dim, (batch, tiny_cfg.seq_len))
     return model, ref_model, local.long(), glob.long(), x0.long(), torch.device("cpu")
+
+
+def test_action_entropy_is_reported_in_nats():
+    """Action-distribution entropy is in nats, and every column that carries
+    it says so (spec-ablations §3.5; craftax `_compute_metrics`).
+
+    Both repos reported "entropy" under one label with the unit stated
+    nowhere: craftax natural log, minihack log base 2, a factor of
+    1/ln 2 = 1.442695 apart. Canon is nats, which is what the NELBO and
+    cross-entropy figures throughout both suites already use.
+
+    Derivation: for [1/2, 1/4, 1/8, 1/8] the entropy is
+    (1/2)ln2 + (1/4)ln4 + 2*(1/8)ln8 = 1.75 ln 2 = 1.2130075656 nats,
+    which is 1.75 bits. Uniform over A actions is ln A: over the 8 actions
+    below, 2.0794415417 nats against 3 bits.
+    """
+    probs = np.array([0.5, 0.25, 0.125, 0.125])
+    assert compute_entropy(probs) == pytest.approx(1.2130075656, abs=1e-9)
+    assert compute_entropy(probs) == pytest.approx(1.75 * math.log(2), abs=1e-12)
+
+    uniform = np.full(8, 1.0 / 8.0)
+    assert compute_entropy(uniform) == pytest.approx(math.log(8), abs=1e-12)
+
+    def _entropy_stats():
+        return {
+            "action_counts": {},
+            "episode_returns": np.array([0.0, 1.0]),
+            "episode_won": np.array([0.0, 1.0]),
+        }
+
+    padded = np.concatenate([probs, np.zeros(4)])
+    metrics = compute_all_metrics(
+        uniform,
+        padded,
+        _entropy_stats(),
+        _entropy_stats(),
+        8,
+    )
+    assert metrics["Max Possible Entropy (nats)"] == pytest.approx(math.log(8), abs=1e-12)
+    assert metrics["Pre-RL Entropy (nats)"] == pytest.approx(math.log(8), abs=1e-12)
+    assert metrics["Entropy Change (nats)"] == pytest.approx(
+        1.2130075656 - math.log(8), abs=1e-9
+    )
+    # Normalised entropy is a ratio, so it is unit-free and carries no suffix.
+    assert metrics["Pre-RL Normalised Entropy"] == pytest.approx(1.0, abs=1e-12)
 
 
 def test_the_action_distribution_chi_squared_compares_two_observed_samples():

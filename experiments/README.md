@@ -292,7 +292,7 @@ experiments/rl_finetuning/outputs/{run_id}/
 │   └── action_dist/                   # Only with --action-dist (see below)
 │       ├── action_dist_comparison_{name}.png   # Pre/post action frequency bars
 │       ├── probability_change_{name}.png       # Per-action delta and log-ratio
-│       ├── distribution_metrics_{name}.png     # Entropy, effective actions, Gini
+│       ├── distribution_metrics_{name}.png     # Entropy (nats), effective actions, Gini
 │       ├── episode_analysis_{name}.png         # Return and length histograms
 │       ├── cumulative_distribution_{name}.png  # Cumulative sorted probability
 │       ├── action_transitions_{name}.png       # Pre, post, diff transition matrices

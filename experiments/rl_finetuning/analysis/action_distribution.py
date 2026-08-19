@@ -138,16 +138,21 @@ def collect_action_statistics(
 
 
 def compute_entropy(probs: np.ndarray) -> float:
-    """Compute base-2 Shannon entropy of a probability distribution.
+    """Compute Shannon entropy of a probability distribution, in nats.
+
+    Nats, not bits: the sibling repo reports nats and so do the NELBO and
+    cross-entropy figures throughout both suites, and the two were being
+    reported under one label with the unit stated nowhere -- a factor of
+    1/ln 2 = 1.4427 between them.
 
     Args:
         probs: 1-D probability vector (non-negative, sums to 1).
 
     Returns:
-        Entropy in bits. Zero-probability entries are ignored.
+        Entropy in nats. Zero-probability entries are ignored.
     """
     p = probs[probs > 0]
-    return float(np.sum(-p * np.log2(p)))
+    return float(np.sum(-p * np.log(p)))
 
 
 def compute_kl(p: np.ndarray, q: np.ndarray) -> float:
@@ -247,15 +252,15 @@ def compute_all_metrics(
         entropy, KL, JS, TV distance, effective actions, Gini, mode
         probability, win rate, and mean return.
     """
-    max_entropy = float(np.log2(action_dim))
+    max_entropy = float(np.log(action_dim))  # nats, as compute_entropy
     pre_entropy = compute_entropy(pre_probs)
     post_entropy = compute_entropy(post_probs)
 
     return {
-        "Pre-RL Entropy": pre_entropy,
-        "Post-RL Entropy": post_entropy,
-        "Entropy Change": post_entropy - pre_entropy,
-        "Max Possible Entropy": max_entropy,
+        "Pre-RL Entropy (nats)": pre_entropy,
+        "Post-RL Entropy (nats)": post_entropy,
+        "Entropy Change (nats)": post_entropy - pre_entropy,
+        "Max Possible Entropy (nats)": max_entropy,
         "Pre-RL Normalised Entropy": (
             pre_entropy / max_entropy if max_entropy > 0 else 0.0
         ),
@@ -459,12 +464,12 @@ def generate_action_distribution_plots(
     ax = axes[0, 0]
     cats = ["Pre-RL", "Post-RL", "Max Possible"]
     vals = [
-        metrics["Pre-RL Entropy"],
-        metrics["Post-RL Entropy"],
-        metrics["Max Possible Entropy"],
+        metrics["Pre-RL Entropy (nats)"],
+        metrics["Post-RL Entropy (nats)"],
+        metrics["Max Possible Entropy (nats)"],
     ]
     bars = ax.bar(cats, vals, color=["steelblue", "coral", "gray"], alpha=0.85)
-    ax.set_ylabel("Entropy (bits)")
+    ax.set_ylabel("Shannon Entropy (nats)")
     ax.set_title("Distribution Entropy", fontweight="bold")
     for bar, val in zip(bars, vals, strict=False):
         ax.text(
