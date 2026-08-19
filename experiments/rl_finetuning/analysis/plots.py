@@ -108,23 +108,36 @@ def _group_color(name: str) -> str:
 
 
 def _ema(values: list[float], alpha: float = 0.3) -> list[float]:
-    """Exponential moving average smoothing.
+    """Exponential moving average smoothing for a list of scalars.
+
+    A missing value -- ``None`` after a NaN has round-tripped through JSON,
+    or a NaN itself -- is missing data, not a measurement of zero. It is
+    carried through as NaN, which matplotlib draws as a **gap** in the
+    line, and the average steps over it rather than being pulled towards
+    zero by it: a run whose evaluation failed once would otherwise show a
+    win rate collapsing to 0 and recovering, which is a finding the suite
+    would report and nothing that happened.
 
     Args:
-        values: Raw values.
-        alpha: Smoothing factor (0 = no smooth, 1 = no memory).
+        values: Raw scalar values, possibly with ``None`` or NaN holes.
+        alpha:  Smoothing factor (0=no smoothing, 1=no memory).
 
     Returns:
-        Smoothed list.
+        Smoothed list of the same length, NaN wherever the input was
+        missing, and NaN in the leading positions until the first real
+        value arrives.
     """
     if not values:
         return []
-    # Replace None (from NaN -> JSON null -> None roundtrip) with 0.0
-    clean = [v if v is not None else 0.0 for v in values]
-    out = [clean[0]]
-    for v in clean[1:]:
-        out.append(alpha * v + (1.0 - alpha) * out[-1])
-    return out
+    smoothed: list[float] = []
+    state: float | None = None
+    for v in values:
+        if v is None or v != v:  # None, or NaN, which is not equal to itself
+            smoothed.append(float("nan"))
+            continue
+        state = float(v) if state is None else alpha * float(v) + (1 - alpha) * state
+        smoothed.append(state)
+    return smoothed
 
 
 def _save(fig: plt.Figure, path: Path) -> None:

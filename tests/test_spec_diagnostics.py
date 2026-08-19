@@ -33,6 +33,7 @@ from experiments.rl_finetuning.analysis.action_distribution import (
     compute_kl,
     run_statistical_tests,
 )
+from experiments.rl_finetuning.analysis.plots import _ema
 from experiments.rl_finetuning.analysis.report import (
     _HYPOTHESIS_GROUPS,
     _score_hypothesis,
@@ -316,6 +317,48 @@ def test_grad_alignment_shares_one_draw_and_references_the_pretrained_params(tin
         assert (inside - reference).abs().max() == pytest.approx(0.0, abs=1e-12)
     after = torch.cat([p.detach().reshape(-1) for p in model.parameters()])
     assert (after - before).abs().max() == pytest.approx(0.0, abs=1e-12)
+
+
+def test_the_curve_smoother_leaves_a_gap_where_data_is_missing():
+    """A missing evaluation is a hole in the record, not a measurement of
+    zero, and `_ema` draws it as a gap (spec-ablations §3.3).
+
+    A NaN metric round-trips through the results JSON as null and comes
+    back as None. minihack substituted 0.0 for it and craftax raised a
+    TypeError, so the same hole either invented a collapse or lost the
+    figure.
+
+    Derivation: with one hole in a flat 0.65 curve, substituting zero gives
+    [0.65, 0.455, 0.5135, 0.5544, 0.5831] -- a 30 % drop and a four-point
+    recovery that the run never had, on a win-rate axis where that is
+    exactly the shape the suite is looking for. Carrying the hole through
+    as NaN leaves the curve flat at 0.65 with one point missing, which
+    matplotlib renders as a break in the line.
+
+    A hole-free input is unchanged, so no existing figure moves: the
+    recursion is the same expression, seeded from the first real value.
+    """
+    flat = [0.65, 0.65, 0.65, 0.65, 0.65]
+    assert _ema(flat) == _ema([0.65, 0.65, 0.65, 0.65, 0.65])
+    assert all(v == pytest.approx(0.65) for v in _ema(flat))
+
+    holed = _ema([0.65, None, 0.65, 0.65, 0.65])
+    assert math.isnan(holed[1])
+    assert [v for i, v in enumerate(holed) if i != 1] == pytest.approx(
+        [0.65, 0.65, 0.65, 0.65]
+    )
+    # The zero substitution this replaced would have produced these.
+    assert holed[2] != pytest.approx(0.5135)
+
+    # A NaN that never reached JSON behaves the same as the None it becomes.
+    assert math.isnan(_ema([0.65, float("nan"), 0.65])[1])
+
+    # Leading holes stay holes rather than seeding the average.
+    leading = _ema([None, 1.0, 1.0])
+    assert math.isnan(leading[0])
+    assert leading[1:] == pytest.approx([1.0, 1.0])
+
+    assert _ema([]) == []
 
 
 def test_the_forgetting_table_is_one_definition_across_the_repos():
