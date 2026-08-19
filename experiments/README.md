@@ -300,7 +300,7 @@ experiments/rl_finetuning/outputs/{run_id}/
 │       └── js_divergence_comparison.png        # JS divergence across ablations
 └── tables/
     ├── main_results.{csv,tex}         # Main results table
-    ├── significance_test.txt          # Pairwise significance notes
+    ├── significance_test.txt          # Max-statistic permutation test + p floor + bootstrap CI
     ├── group_summary.{csv,tex}        # Group-level summary table
     ├── gradient_analysis.{csv,tex}    # Grad alignment (mean/final/trend) + KL drift
     ├── t_distribution.{csv,tex}       # High/low-t ratio, alignment, dominant regime
