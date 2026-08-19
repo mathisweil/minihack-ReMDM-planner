@@ -13,7 +13,7 @@ PyTorch ReMDM planner on MiniHack; supervision by the built-in BFS oracle (no ex
 ## Checkpoints
 
 - The model is built from the config: match config to checkpoint (local `.pth` or `wandb:` refs).
-- EMA vs raw weights is a result-affecting choice (`--no-ema`); see README.md §Checkpoints.
+- EMA vs raw weights is a result-affecting choice (`--no-ema`); see README.md §Evaluation from a checkpoint.
 
 ## Tests
 
