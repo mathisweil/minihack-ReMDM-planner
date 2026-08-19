@@ -119,7 +119,7 @@ python main.py --mode inference --checkpoint checkpoints/iter600.pth --no-ema
 
 Write eval JSONs into `results/inference/` (created for you): `scripts/hf_upload.py` publishes every JSON it finds there.
 
-Always evaluate with the checkpoint's own config snapshot:
+**Match the config to the checkpoint.** The model is built from the config, not the checkpoint, and a mismatch raises at load. Always evaluate with the checkpoint's own config snapshot:
 
 ```bash
 DIR=checkpoints/online/Minihack-Online-Diffusion-DAgger-100M
