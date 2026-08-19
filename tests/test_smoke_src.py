@@ -441,6 +441,42 @@ def test_main_smoke_mode_runs(tiny_config_file):
 
 
 @requires_minihack
+def test_smoke_mode_removes_its_temporary_artefact_directory(tiny_config_file):
+    """A smoke run leaves no `remdm-smoke-*` directory behind (PARITY
+    "Smoke-mode side effects").
+
+    `run_smoke` points `cfg.checkpoint_dir` at a fresh `mkdtemp` so
+    checkpoints, config snapshots and eval JSONs stay out of the repository
+    tree -- and it never removed it. Every smoke run since leaked one: 183
+    of them, 9.3 GB, had accumulated by 2026-08-19, enough to exhaust the
+    100 GB project quota and fail this suite on
+    `OSError: [Errno 122] Disk quota exceeded`, and 42 more reappeared
+    within a day of the first clear-out. craftax's smoke path has always
+    removed its temporary expert directory in a `finally`.
+
+    Counting the directories rather than trusting the run to report them
+    is what makes this catch a leak from any path inside the run.
+    """
+    import glob
+    import tempfile
+    from pathlib import Path
+
+    pattern = str(Path(tempfile.gettempdir()) / "remdm-smoke-*")
+
+    def _count() -> int:
+        return len([p for p in glob.glob(pattern) if Path(p).is_dir()])
+
+    before = _count()
+    result = run_cli("main.py", "--mode", "smoke", "--config", str(tiny_config_file))
+    assert_cli_ok(result)
+
+    assert _count() == before, (
+        "smoke mode leaked a temporary artefact directory; "
+        f"{_count() - before} left behind under {pattern}"
+    )
+
+
+@requires_minihack
 def test_main_collect_mode_runs(tiny_config_file, tmp_path):
     result = run_cli("main.py", "--mode", "collect", "--config", str(tiny_config_file))
 

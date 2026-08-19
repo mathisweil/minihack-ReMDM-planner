@@ -1,4 +1,5 @@
 import logging
+import shutil
 import tempfile
 
 import torch
@@ -16,16 +17,41 @@ logger = logging.getLogger(__name__)
 
 
 def run_smoke(cfg) -> None:
-    """Smoke test: collect oracle data, train briefly, eval."""
+    """Smoke test: collect oracle data, train briefly, eval.
+
+    Smoke runs are throwaway, so checkpoints, config snapshots and eval
+    JSONs go to a temporary directory instead of the repository tree
+    (step-7 finding N6 / PARITY "Smoke-mode side effects"), **and that
+    directory is removed when the run ends**.
+
+    It was not. Every smoke run since the directory was introduced left one
+    behind: 183 of them, 9.3 GB, had accumulated by 2026-08-19 -- enough to
+    exhaust the 100 GB project quota and fail the test suite on
+    `OSError: [Errno 122] Disk quota exceeded`, and 42 more (3.8 GB)
+    reappeared within a day of the first clear-out. craftax's smoke path
+    has always removed its own temporary expert directory the same way; this
+    is that pattern, applied to the artefact directory.
+
+    `ignore_errors=True` matches craftax and keeps a cleanup failure from
+    masking the run's own result.
+    """
+    cfg.checkpoint_dir = tempfile.mkdtemp(prefix="remdm-smoke-")
+    logger.info(f"Smoke artefacts -> {cfg.checkpoint_dir}")
+    try:
+        _run_smoke(cfg)
+    finally:
+        shutil.rmtree(cfg.checkpoint_dir, ignore_errors=True)
+
+
+def _run_smoke(cfg) -> None:
+    """The smoke run itself.
+
+    Split out so `run_smoke` owns the temporary directory's whole lifetime;
+    `cfg.checkpoint_dir` already points at it on entry.
+    """
 
     device = cfg.device
     logger.info(f"Smoke test on {device}")
-
-    # Smoke runs are throwaway: keep checkpoints, config snapshots and
-    # eval JSONs out of the repository tree (step-7 finding N6 / PARITY
-    # "Smoke-mode side effects" - craftax smoke leaves no artefacts).
-    cfg.checkpoint_dir = tempfile.mkdtemp(prefix="remdm-smoke-")
-    logger.info(f"Smoke artefacts -> {cfg.checkpoint_dir}")
 
     # Collect a few oracle trajectories into the buffer
     buffer = ReplayBuffer(cfg.buffer_capacity, cfg.seq_len, cfg.pad_token)
