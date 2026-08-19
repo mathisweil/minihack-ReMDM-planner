@@ -6,7 +6,7 @@ The sibling repository [`craftax-ReMDM-planner`](../craftax-ReMDM-planner) imple
 
 ## Method
 
-The planner starts from a fully-masked action sequence and iteratively unmasks tokens over `K` denoising steps via the ReMDM Algorithm 1 posterior (per-token Bernoulli unmasking), while ReMDM remasking lets committed tokens be re-predicted for plan refinement (a MaskGIT-style greedy decoder is used only for DAgger data collection). Two independent training pipelines are compared head-to-head in the accompanying paper (under submission; citation to follow): **online DAgger** under a BFS oracle (primary) and **offline behavioural cloning** on pre-collected oracle datasets. See [Architecture](#architecture) and [Diffusion](#diffusion) for details.
+The planner starts from a fully-masked action sequence and iteratively unmasks tokens over `K` denoising steps via the ReMDM Algorithm 1 posterior (per-token Bernoulli unmasking), while ReMDM remasking lets committed tokens be re-predicted for plan refinement. Two independent training pipelines are compared head-to-head in the accompanying paper (under submission; citation to follow): **online DAgger** under a BFS oracle (primary) and **offline behavioural cloning** on pre-collected oracle datasets. See [Architecture](#architecture) and [Diffusion](#diffusion) for details.
 
 ## Setup
 
@@ -97,7 +97,7 @@ python main.py --mode offline --data data/dataset.pt --override total_timesteps=
 python main.py --mode offline --data data/dataset.pt --checkpoint checkpoints/offline_step40000.pth
 ```
 
-Gradient steps default to `total_timesteps // offline_batch_size`; ID + OOD eval runs on the `id_eval_every_timesteps` / `ood_eval_every_timesteps` cadence. For paper-fair BC-vs-DAgger comparisons the `offline_*_grad_steps` keys pin offline metrics in grad-step units instead, and since `defaults.yaml` is the paper recipe they are set there — so they apply to **every** run unless a preset pins them back to `null`. See the hazard note under [Configuration](#configuration).
+Gradient steps default to `total_timesteps // offline_batch_size`; ID + OOD eval runs on the `id_eval_every_timesteps` / `ood_eval_every_timesteps` cadence. The `offline_*_grad_steps` keys override that in grad-step units — see the hazard note under [Configuration](#configuration). See the hazard note under [Configuration](#configuration).
 
 ## Evaluation from a checkpoint
 
@@ -115,7 +115,7 @@ python main.py --mode inference --checkpoint checkpoints/iter600.pth \
 python main.py --mode inference --checkpoint checkpoints/iter600.pth --no-ema
 ```
 
-`--checkpoint` accepts a local `.pth` path or a `wandb:` artifact reference (`wandb:entity/project/name:version`). Inference uses EMA weights unless `--no-ema` is given; `--episodes` defaults to `eval_episodes_per_env` from the config.
+`--checkpoint` accepts a local `.pth` path or a `wandb:` artifact reference (`wandb:entity/project/name:version`). Inference uses EMA weights unless `--no-ema` is given.
 
 Write eval JSONs into `results/inference/` (created for you): `scripts/hf_upload.py` publishes every JSON it finds there.
 
@@ -223,9 +223,9 @@ HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-mi
     --selection-metric "mean ID+OOD win rate" --dry-run
 ```
 
-`--dry-run` prints the staged tree and card without uploading; drop it to upload. `--selection-metric` records what the best-of-N checkpoints were chosen on. Also `--inference-results <FILE|DIR> ...` (eval JSONs kept elsewhere), `--private`, `--yes`. Publish one model per directory with a single `.pth` and config, since the script takes one row per directory and otherwise picks by sort order.
+`--dry-run` prints the staged tree and card without uploading; drop it to upload. `--selection-metric` records what the best-of-N checkpoints were chosen on. Also `--inference-results <FILE|DIR> ...` (eval JSONs kept elsewhere), `--private`, `--yes`. Publish one model per directory, with a single `.pth` and config.
 
-**Checkpoint discovery expects the released layout**, `checkpoints/<role>/<name>/*.pth` — the layout the Hub repo mirrors. A training run writes to its own `checkpoints/dagger_<timestamp>/` directory, so copy the checkpoints you mean to release into `checkpoints/{offline,online}/<name>/` first, or nothing is staged. `checkpoints/hf/` is skipped: that is where a Hub *download* lands, and publishing from it would push already-published artefacts back up into a nested `checkpoints/hf/checkpoints/...` tree. Discovery used to be a recursive `rglob`, which staged every run directory it could find and both download copies with them; the sibling `craftax-ReMDM-planner` repo has the same requirement and the same exclusion.
+**Checkpoint discovery expects the released layout**, `checkpoints/<role>/<name>/*.pth` — the layout the Hub repo mirrors. A training run writes to its own `checkpoints/dagger_<timestamp>/` directory, so copy the checkpoints you mean to release into `checkpoints/{offline,online}/<name>/` first, or nothing is staged. `checkpoints/hf/` is skipped: that is where a Hub *download* lands, and publishing from it would push already-published artefacts back up into a nested `checkpoints/hf/checkpoints/...` tree.
 
 ## Results, citation, licence
 
@@ -260,7 +260,7 @@ Output head:    last 64 tokens -> Linear(256, 12) -> action logits
 
 Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions": [B,64,12], "goal_pred": [B,2]}`.
 
-`LocalDiffusionPlanner` (no global stream, no goal head) is the `ablation_local_only` variant. It trains a genuinely local-only model, unlike `--blind-global`, which zeroes the global observation of an already-trained dual-stream model at inference. Supported by `--mode offline` and `--mode online`; the `experiments/` ablation suite assumes the goal head is present.
+`LocalDiffusionPlanner` (no global stream, no goal head) is the `ablation_local_only` variant. Supported by `--mode offline` and `--mode online`; the `experiments/` ablation suite assumes the goal head is present.
 
 ## Diffusion
 
@@ -373,7 +373,6 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 5. **Budget accounting:** `env_steps_total += model_steps + oracle_steps`; halt at `total_timesteps`.
 6. **Training:** sample the buffer, run `grad_steps_per_iteration` steps, update EMA after each.
 
-Collection is GPU-batched on CUDA with `episodes_per_iteration > 1`, falling back to threaded CPU or sequential.
 
 BFS oracle priority: (1) kick adjacent doors, (2) BFS to staircase, (3) BFS to frontier, (4) BFS to farthest tile, (5) random cardinal.
 
@@ -449,7 +448,7 @@ model.eval()
 
 ### W&B artifacts and run resumption
 
-Checkpoints upload as versioned W&B artifacts (type `"model"`) at each save, containing the `.pth` and a `config.yaml` snapshot. Reference format is `wandb:entity/project/artifact-name:version`, version being `latest`, `v0`, `v1`.
+W&B model artifacts contain the `.pth` and a `config.yaml` snapshot. Reference format is `wandb:entity/project/artifact-name:version`, version being `latest`, `v0`, `v1`.
 
 All training loops store the W&B run ID in their checkpoints. Resuming extracts it and passes it to `wandb.init(resume="must")`, so curves continue with no gaps.
 
@@ -474,14 +473,14 @@ python main.py --mode online --checkpoint old.pth --override wandb_resume_id=abc
 | `ckpt_eval/` | `id_winrate`, `ood_winrate` |
 | `offline/` | `final_loss`, `total_steps`, `total_timesteps` (summary only) |
 
-DAgger and offline BC both emit to `eval_id/` and `eval_ood/`, reusing the same `Evaluator` and EMA-weight path, so curves are directly comparable.
+DAgger and offline BC both emit to `eval_id/` and `eval_ood/`, through the same `Evaluator` and EMA-weight path.
 
 ## Performance tuning
 
 | Key | Default | Effect |
 |---|---|---|
-| `use_amp` | false | `torch.amp.autocast("cuda")` + `GradScaler` in both trainers. **2.2x** on gradient steps, **1.7x** on smoke-test wall-clock. Loss and win rates statistically equivalent to FP32. No-op on CPU. Always enable on GPU |
-| `torch_compile` | false | `torch.compile(model, mode="default")`. No measured gain beyond AMP. Experimental only |
+| `use_amp` | **true** | `torch.amp.autocast("cuda")` + `GradScaler` in both trainers. Roughly 2x on gradient steps, with loss and win rates statistically equivalent to FP32. No-op on CPU |
+| `torch_compile` | **true** | `torch.compile(model, mode="default")`. No measured gain beyond AMP |
 | `num_collection_workers` | 8 | Affects the threaded CPU fallback. Collection auto-selects GPU-batched (CUDA, `episodes_per_iteration > 1`) > threaded CPU > sequential |
 
 Profile with `python scripts/profile_dagger.py [--override key=value ...]`.
@@ -489,21 +488,20 @@ Profile with `python scripts/profile_dagger.py [--override key=value ...]`.
 ## Testing
 
 ```bash
-uv run pytest            # ~35s
-uv run pytest -m slow    # slow entry points only (BC + PPO baselines), ~45s
+uv run pytest            # 15 modules; `slow` deselected by default
+uv run pytest -m slow    # slow entry points only (BC + PPO baselines)
 ```
 
-`tests/test_smoke_src.py` and `tests/test_smoke_experiments.py` cover both pipelines: modules import, the model builds from `configs/defaults.yaml`, a forward pass returns the expected shape and dtype with no NaNs, one training step gives a finite loss, save/reload reproduces identical output, each entry point runs, and all 25 registry ablations step. They assert things *run*, not that results are good. CPU-only, seeded, synthetic data; nothing written outside `tmp_path`. For a quality signal, use `--mode smoke`.
+`conftest.py` forces CPU and disables W&B. `test_spec_*.py` and `test_method_spec*.py` pin each canonical statement of `research/spec-*.md` against the implementation; `test_config.py` and `test_recipe_values.py` guard the preset, delta-only and poolability rules and the shipped recipe values; `test_ablation_perf.py` and `test_gpu_step_perf.py` hold measured perf expectations. `test_smoke_src.py` and `test_smoke_experiments.py` cover both pipelines: modules import, the model builds from `configs/defaults.yaml`, a forward pass returns the expected shape and dtype with no NaNs, one training step gives a finite loss, save/reload reproduces identical output, each entry point runs, and all 25 registry ablations step. They assert things *run*, not that results are good. CPU-only, seeded, synthetic data; nothing written outside `tmp_path`. For a quality signal, use `--mode smoke`.
 
 ## Implementation notes
 
 - **MDLM loss** returns `0.0` (not NaN) when no masked positions exist. NELBO-weighted per MDLM eq (10).
 - **PAD tokens** are never masked and are excluded from the loss.
 - **Sampling paths:** evaluation uses stochastic ReMDM (temperature, top-p, remasking, `diffusion_steps_eval`); DAgger collection uses greedy argmax (`diffusion_steps_collect`).
-- **`remdm_sample`** guarantees a fully committed output via a final greedy cleanup of any remaining masked positions (same safety net as the craftax twin).
+- **`remdm_sample`** guarantees a fully committed output via a final greedy cleanup of any remaining masked positions.
 - **EMA** updates after every gradient step, not per iteration. `DataCollector` syncs EMA weights before each rollout.
 - **Curriculum** starts from a 50/50 prior per environment and buckets the rolling win-rate: `[0, 0.15)` -> 0.2, `[0.15, 0.85)` -> 1.0, `[0.85, 1.0]` -> 0.1.
 - **Replay buffer** pins offline data at the front; only online samples are FIFO-evicted. Returns `None` when empty.
 - **Global gate** starts at `sigmoid(-3.0) ~ 0.047`, nearly closed, so the global stream cannot destabilise early training.
 - **DAgger warm-start:** iteration 0 seeds the buffer with 3 oracle trajectories per ID environment (12 total).
-- **nhdat patching:** `src/envs/minihack_env.py` substitutes a Python implementation of MiniHack's `mh_patch_nhdat.sh` when the install path contains whitespace, which would otherwise make the script fail silently and yield goalless levels.
