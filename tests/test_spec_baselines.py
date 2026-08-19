@@ -40,6 +40,77 @@ def _dt_batch(b=2, t=4, n_actions=8, seed=0):
     }
 
 
+def test_baseline_eval_seeds_match_the_planners():
+    """The baselines evaluate on the planner's episodes, so the headline
+    planner-vs-baseline comparison is on matched levels (spec-training §8).
+
+    `evaluation_seeds` duplicates the planner's formula rather than importing
+    it, so this is what stops the two drifting: `inference.py` builds
+    `42 + crc32(f"{env_id}:{ep}") % 2**31` and is pinned by
+    `test_evaluator_seeds_are_fixed_and_run_seed_independent`.
+    """
+    import zlib
+
+    from src.planners.baselines import evaluation_seeds
+
+    for env_id in ("MiniHack-MazeWalk-9x9-v0", "MiniHack-Room-Random-15x15-v0"):
+        expected = [
+            42 + zlib.crc32(f"{env_id}:{ep}".encode()) % (2**31) for ep in range(7)
+        ]
+        assert evaluation_seeds(env_id, 7) == expected
+    assert evaluation_seeds("MiniHack-MazeWalk-9x9-v0", 0) == []
+
+
+@pytest.mark.slow
+def test_baseline_eval_levels_are_fixed_and_match_the_planner():
+    """Two baseline evaluations at the same seed generate the same levels, and
+    they are the levels the planner is scored on (spec-training §8).
+
+    They were not. `_make_sb3_env_fn` built the env with no seed and
+    `_eval_sb3_policy_manually` ran it inside a `SubprocVecEnv` -- a child
+    process that never inherited the parent's `_seed_everything` -- and
+    `_eval_dt` had the same shape. The only seeding was the Python/NumPy/torch
+    globals plus `seed=` into the SB3 constructors, which seeds action sampling
+    and **not** MiniHack level generation: gymnasium's `reset(seed=...)` does
+    not reach the NetHack core RNG, which is why `AdvancedObservationEnv.reset`
+    seeds it explicitly.
+
+    Measured on `MiniHack-MazeWalk-9x9-v0`, which is procedural (a fixed room
+    would pass either way): identical global seeding through the old
+    `SubprocVecEnv` path gave first-observation hashes `79babee90de37a50` and
+    `7f9629876fb5a633`. Per-episode seeding gives the same hash twice, a
+    different one per episode, and the same hash the planner sees.
+    """
+    import hashlib
+
+    import numpy as np
+
+    from src.config import load_config
+    from src.envs.minihack_env import AdvancedObservationEnv
+    from src.planners.baselines import evaluation_seeds
+
+    env_id = "MiniHack-MazeWalk-9x9-v0"
+    cfg = load_config("configs/defaults.yaml")
+    cfg.device = "cpu"
+    seeds = evaluation_seeds(env_id, 3)
+
+    def first_obs(seed: int) -> str:
+        env = AdvancedObservationEnv(env_id, des_file=None, cfg=cfg)
+        try:
+            (local, glob), _ = env.reset(seed=seed)
+        finally:
+            env.close()
+        return hashlib.blake2b(
+            np.asarray(local).tobytes() + np.asarray(glob).tobytes(), digest_size=8
+        ).hexdigest()
+
+    hashes = [first_obs(s) for s in seeds]
+    # Reproducible: the same seed gives the same level, every time.
+    assert [first_obs(s) for s in seeds] == hashes
+    # And the episodes are distinct, so this is not one level repeated.
+    assert len(set(hashes)) == len(hashes)
+
+
 def test_decision_transformer_is_causal_over_interleaved_tokens():
     """DT logits at step t may depend only on (R, s) up to t and actions
     before t (Chen 2021 §3: causal masking over the interleaved

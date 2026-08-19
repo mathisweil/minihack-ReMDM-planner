@@ -25,6 +25,7 @@ import importlib.util
 import logging
 import os
 import random
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -602,6 +603,43 @@ class _BCDataset(Dataset):
         }
 
 
+def evaluation_seeds(env_id: str, n_episodes: int) -> list[int]:
+    """The per-episode evaluation seeds, matching the planner's exactly.
+
+    The planner evaluates on `42 + crc32(f"{env_id}:{ep}") % 2**31`
+    (`src/planners/inference.py`, pinned by
+    `test_evaluator_seeds_are_fixed_and_run_seed_independent`). The baselines
+    have to evaluate on the same episodes or the headline planner-vs-baseline
+    comparison is between two different sets of levels.
+
+    They did not. `_make_sb3_env_fn` built the env with no seed at all and
+    `_eval_sb3_policy_manually` ran it inside a `SubprocVecEnv`, a child
+    process that never inherited the parent's `_seed_everything`; `_eval_dt`
+    had the same shape. The only seeding was the Python/NumPy/torch globals
+    plus `seed=` into the SB3 constructors, which seeds action sampling and
+    **not MiniHack level generation** — gymnasium's `reset(seed=...)` does not
+    reach the NetHack core RNG, which is why `AdvancedObservationEnv.reset`
+    seeds it explicitly. Measured before the fix: `_seed_everything(0)` twice
+    gave first-observation hashes `62a012aa6f073246` and `2ee59c01b9bfd35d`.
+
+    Python's `hash()` is salted per process, so crc32 is what keeps these
+    stable across invocations. The formula is duplicated from the planner
+    rather than imported, and
+    `test_baseline_eval_seeds_match_the_planners` fails if the two ever drift.
+
+    Args:
+        env_id: The MiniHack environment id being evaluated.
+        n_episodes: How many episodes the evaluation runs.
+
+    Returns:
+        One seed per episode, in episode order.
+    """
+    return [
+        42 + zlib.crc32(f"{env_id}:{ep}".encode()) % (2**31)
+        for ep in range(n_episodes)
+    ]
+
+
 def _eval_sb3_policy_manually(
     policy: ActorCriticPolicy,
     env_id: str,
@@ -609,23 +647,35 @@ def _eval_sb3_policy_manually(
     log_dir: str,
     n_episodes: int,
 ) -> tuple[float, float]:
-    """Run ``policy.predict`` on a Monitor-wrapped vec env and return
-    (win_rate, avg_steps)."""
+    """Run ``policy.predict`` on a Monitor-wrapped env and return
+    (win_rate, avg_steps).
 
-    eval_env = SubprocVecEnv([_make_sb3_env_fn(env_id, cfg, log_dir)])
+    Each episode is reset on its own seed from :func:`evaluation_seeds`, so the
+    baseline is scored on the same levels the planner is. That is also why the
+    env is built here rather than inside a ``SubprocVecEnv``: the vec env auto-
+    resets between episodes with no seed to give it, and it ran in a child
+    process that never inherited the parent's ``_seed_everything`` — one env in
+    one subprocess bought nothing and cost the seeding.
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    eval_env = Monitor(
+        _SB3MiniHackWrapper(AdvancedObservationEnv(env_id, des_file=None, cfg=cfg)),
+        log_dir,
+    )
+    seeds = evaluation_seeds(env_id, n_episodes)
     try:
-        obs = eval_env.reset()
         wins = 0
         total_steps = 0
-        completed = 0
-        while completed < n_episodes:
-            action, _ = policy.predict(obs, deterministic=True)
-            obs, _rewards, dones, infos = eval_env.step(action)
-            if dones[0]:
-                completed += 1
-                if infos[0].get("won", False):
-                    wins += 1
-                total_steps += infos[0]["episode"]["l"]
+        for episode in range(n_episodes):
+            obs, _info = eval_env.reset(seed=seeds[episode])
+            terminated = truncated = False
+            info: dict = {}
+            while not (terminated or truncated):
+                action, _ = policy.predict(obs, deterministic=True)
+                obs, _reward, terminated, truncated, info = eval_env.step(int(action))
+            if info.get("won", False):
+                wins += 1
+            total_steps += info["episode"]["l"]
     finally:
         eval_env.close()
     return wins / n_episodes, total_steps / n_episodes
@@ -776,12 +826,14 @@ def _eval_dt(
     device = torch.device(cfg.device)
     env = AdvancedObservationEnv(env_id, des_file=None, cfg=cfg)
     env = _SB3MiniHackWrapper(env)
+    # The same episodes the planner and the SB3 baselines are scored on.
+    seeds = evaluation_seeds(env_id, n_episodes)
     model.eval()
     wins = 0
     total_steps = 0
     try:
         for _ep in range(n_episodes):
-            obs, _ = env.reset()
+            obs, _ = env.reset(seed=seeds[_ep])
             done = False
 
             local_hist: list[np.ndarray] = []
