@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # The training recipe lives in configs/defaults.yaml, which both clusters
-# share, so this config and final_qmul_gpu.yaml train an identical model
+# share, so this config and final_minihack_qmul.yaml train an identical model
 # by construction. Only this machine's values live here.
 #
 # In practice that is a single key. The collection worker counts stay at

@@ -87,7 +87,7 @@ def main() -> None:
     p.add_argument(
         "--ablations-config",
         default=str(
-            _PROJECT_ROOT / "experiments/rl_finetuning/configs/ablations_final_ucl.yaml"
+            _PROJECT_ROOT / "experiments/rl_finetuning/configs/ablations_final_minihack_ucl.yaml"
         ),
     )
     p.add_argument(

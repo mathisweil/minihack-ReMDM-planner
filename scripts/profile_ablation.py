@@ -14,7 +14,7 @@ Usage:
         --ablation baseline_rl --max-iter 51
 
 Without ``--config`` this profiles ``configs/defaults.yaml`` merged with
-``experiments/rl_finetuning/configs/ablations_final_ucl.yaml``.
+``experiments/rl_finetuning/configs/ablations_final_minihack_ucl.yaml``.
 """
 
 from __future__ import annotations
@@ -191,7 +191,7 @@ def main() -> None:
         "--ablations-config",
         default=str(
             _PROJECT_ROOT
-            / "experiments/rl_finetuning/configs/ablations_final_ucl.yaml"
+            / "experiments/rl_finetuning/configs/ablations_final_minihack_ucl.yaml"
         ),
     )
     p.add_argument("--checkpoint", required=True)

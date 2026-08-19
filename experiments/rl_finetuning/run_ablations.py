@@ -108,7 +108,7 @@ def _load_ablation_config(path: str | None, allowed: set[str] | None = None) -> 
     """Load an ablations config on top of ``ablations_default.yaml``.
 
     Two layers, always: the base carries every ablation hyperparameter and
-    the machine config (e.g. ``ablations_final_ucl.yaml``) carries only what
+    the machine config (e.g. ``ablations_final_minihack_ucl.yaml``) carries only what
     that machine changes. Configs never inherit from one another.
 
     Args:

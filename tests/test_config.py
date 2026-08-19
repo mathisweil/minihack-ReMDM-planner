@@ -81,7 +81,7 @@ def test_preset_does_not_inherit_from_another_preset():
 
 def test_extends_rejected_as_config_key():
     """The mechanism is gone, so the key must now be an error, not ignored."""
-    cfg = _write(_CONFIGS, "_tmp_extends.yaml", "extends: final_qmul_gpu.yaml\n")
+    cfg = _write(_CONFIGS, "_tmp_extends.yaml", "extends: final_minihack_qmul.yaml\n")
     try:
         with pytest.raises(KeyError, match="extends"):
             load_config("configs/_tmp_extends.yaml")
@@ -111,13 +111,13 @@ def test_shipped_ablation_configs_validate(ra):
     allowed = set(yaml.safe_load((_CONFIGS / "defaults.yaml").read_text())) | set(
         yaml.safe_load(_ABL_DEFAULT.read_text())
     )
-    for name in ("ablations_final_qmul.yaml", "ablations_final_ucl.yaml"):
+    for name in ("ablations_final_minihack_qmul.yaml", "ablations_final_minihack_ucl.yaml"):
         ra._load_ablation_config(str(_ABL_CONFIGS / name), allowed=allowed)
 
 
 def test_extends_rejected_as_cli_override():
     with pytest.raises(KeyError, match="extends"):
-        load_config("configs/final_ucl_gpu.yaml", {"extends": "x.yaml"})
+        load_config("configs/final_minihack_ucl.yaml", {"extends": "x.yaml"})
 
 
 # --------------------------------------------------------------------------
@@ -165,22 +165,22 @@ _MACHINE_KEYS = frozenset(
 
 
 def test_paper_configs_differ_only_in_machine_keys():
-    qmul = vars(load_config("configs/final_qmul_gpu.yaml"))
-    ucl = vars(load_config("configs/final_ucl_gpu.yaml"))
+    qmul = vars(load_config("configs/final_minihack_qmul.yaml"))
+    ucl = vars(load_config("configs/final_minihack_ucl.yaml"))
     diverged = {
         k
         for k in set(qmul) | set(ucl)
         if k != "device" and qmul.get(k, "<absent>") != ucl.get(k, "<absent>")
     }
     assert diverged <= set(_MACHINE_KEYS), (
-        "final_qmul_gpu.yaml and final_ucl_gpu.yaml must train an identical "
+        "final_minihack_qmul.yaml and final_minihack_ucl.yaml must train an identical "
         f"model. They diverge on non-machine key(s): "
         f"{sorted(diverged - set(_MACHINE_KEYS))}. Move the shared value into "
         "configs/defaults.yaml."
     )
 
 
-@pytest.mark.parametrize("preset", ["final_qmul_gpu.yaml", "final_ucl_gpu.yaml"])
+@pytest.mark.parametrize("preset", ["final_minihack_qmul.yaml", "final_minihack_ucl.yaml"])
 def test_paper_config_holds_only_machine_keys(preset):
     raw = yaml.safe_load((_CONFIGS / preset).read_text()) or {}
     stray = set(raw) - set(_MACHINE_KEYS)
@@ -209,8 +209,8 @@ _OFFLINE_PINS = (
 _DERIVES_OFFLINE_BUDGET = [
     "smoke.yaml",
     "ablation_local_only.yaml",
-    "ucl_gpu_bigger_model.yaml",
-    "ucl_gpu_learning_behaviour.yaml",
+    "ucl_bigger_model.yaml",
+    "ucl_learning_behaviour.yaml",
 ]
 
 
@@ -235,7 +235,7 @@ def test_preset_pins_offline_overrides_to_null(preset):
 # which is therefore the reference.
 # --------------------------------------------------------------------------
 
-_REFERENCE_CONFIG = "ablations_final_ucl.yaml"
+_REFERENCE_CONFIG = "ablations_final_minihack_ucl.yaml"
 
 # The result-affecting key set is declared once, in production, as
 # ``run_ablations._RESULT_AFFECTING``: the same set that classifies these
@@ -247,7 +247,7 @@ _POOLABLE = {_REFERENCE_CONFIG}
 #: Configs that must NOT be merged with the reference, mapped to the
 #: result-affecting keys on which they are known to diverge.
 _NOT_POOLABLE = {
-    "ablations_final_qmul.yaml": frozenset(
+    "ablations_final_minihack_qmul.yaml": frozenset(
         {
             "batch_size",  # 512 vs 4608: ~9x per-update SNR
             "episodes_per_iter",  # 20 vs 30: 10k vs 15k total episodes

@@ -2,7 +2,7 @@
 # MiniHack ReMDM RL Fine-Tuning Ablation Suite -- UCL 3090 Ti 24GB Configuration
 #
 # Optimised for 5x NVIDIA RTX 3090 Ti (24GB VRAM each).
-# Checkpoint trained with configs/final_qmul_gpu.yaml on QMUL H200 8GB.
+# Checkpoint trained with configs/final_minihack_qmul.yaml on QMUL H200 8GB.
 #
 # This is the reference config: all published MiniHack ablation results were
 # produced with it. Inherits everything from ablations_default.yaml, which now
