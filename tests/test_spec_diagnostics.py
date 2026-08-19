@@ -19,12 +19,14 @@ import re
 import numpy as np
 import pytest
 import torch
+from scipy import stats as scipy_stats
 
 from experiments.rl_finetuning.ablations.registry import REGISTRY
 from experiments.rl_finetuning.ablations.training import _effective_batch_size
 from experiments.rl_finetuning.analysis.action_distribution import (
     compute_js,
     compute_kl,
+    run_statistical_tests,
 )
 from experiments.rl_finetuning.analysis.report import (
     _HYPOTHESIS_GROUPS,
@@ -132,6 +134,66 @@ def _grad_alignment_setup(tiny_cfg, perturb: float):
     glob = torch.randint(0, 1000, (batch, tiny_cfg.map_h, tiny_cfg.map_w))
     x0 = torch.randint(0, tiny_cfg.action_dim, (batch, tiny_cfg.seq_len))
     return model, ref_model, local.long(), glob.long(), x0.long(), torch.device("cpu")
+
+
+def test_the_action_distribution_chi_squared_compares_two_observed_samples():
+    """The action-distribution chi-squared is a contingency test on two
+    observed count vectors, not a goodness-of-fit test against one of them
+    (spec-ablations §3.5).
+
+    Both action count vectors are sampled. Handing one to
+    ``scipy.stats.chisquare`` as the expectation asserts it is known
+    exactly, which drops half the sampling error from the comparison and
+    roughly doubles the statistic; the contingency form estimates the
+    shared expectation from both margins instead. Degrees of freedom are
+    A - 1 either way -- (2-1)(A-1) for the table -- so the two differ only
+    in the expectation, and the statistic ratio below is that difference.
+
+    Derivation of the null rate: with the same distribution generating
+    both samples the test should reject at alpha = 0.05 on about 5 % of
+    draws. Measured over 400 draws of 2000 actions across 8 actions, the
+    goodness-of-fit form rejects on roughly 40 % and the contingency form
+    on roughly 5 %.
+    """
+    action_dim = 8
+    rng = np.random.default_rng(0)
+    probs = rng.dirichlet(np.ones(action_dim) * 2.0)
+
+    def _stats(counts):
+        return {
+            "action_counts": {i: int(c) for i, c in enumerate(counts)},
+            "episode_returns": [0.0, 1.0, 2.0],
+        }
+
+    def _goodness_of_fit_p(pre, post):
+        """The form this replaced: post rescaled and used as the expectation."""
+        p = pre + 1.0
+        q = post + 1.0
+        return scipy_stats.chisquare(p, q * (p.sum() / q.sum()))[1]
+
+    trials = 400
+    gof_hits = contingency_hits = 0
+    for _ in range(trials):
+        pre = rng.multinomial(2000, probs).astype(float)
+        post = rng.multinomial(2000, probs).astype(float)
+        contingency_hits += run_statistical_tests(
+            _stats(pre), _stats(post), action_dim
+        )["chi2_significant"]
+        gof_hits += _goodness_of_fit_p(pre, post) < 0.05
+
+    assert gof_hits / trials > 0.25
+    assert 0.01 < contingency_hits / trials < 0.10
+
+    # A real shift is still detected.
+    shifted = probs * 0.5
+    shifted[0] += 0.5
+    out = run_statistical_tests(
+        _stats(rng.multinomial(5000, probs).astype(float)),
+        _stats(rng.multinomial(5000, shifted).astype(float)),
+        action_dim,
+    )
+    assert out["chi2_significant"]
+    assert out["chi2_p"] < 1e-6
 
 
 def test_grad_alignment_shares_one_draw_and_references_the_pretrained_params(tiny_cfg):
