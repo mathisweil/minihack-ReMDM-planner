@@ -1,11 +1,10 @@
 """Spec tests for the DAgger training pipeline (step 8).
 
 Sources: research/spec-training.md §1.6-1.9 (demonstration-variant
-DAgger, curriculum, warm start, efficiency filter), §Amendments 3 and 6
-(--no-warm-start doc conflict; Evaluator seeding), research/
-traceability.md §8.9 and step-7 finding N6 (verification/
-2026-08-15-executable-baseline.md). Expected values come from those
-loci or in-docstring derivations, never from current repo output.
+DAgger, curriculum, warm start, efficiency filter) -- §1.8 records the
+--no-warm-start conflict this file pins, closed at 287a22f. Expected
+values come from those loci or in-docstring derivations, never from
+current repo output.
 
 The DAgger variant is repo-specific (PARITY "Method pipeline"), so this
 file has no craftax twin; craftax's DAgger internals are inline in
