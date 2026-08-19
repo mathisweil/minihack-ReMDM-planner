@@ -2,7 +2,9 @@
 
 KL drift measures how far the output distribution has moved from the
 pretrained model across different t ranges.  CKA (Centred Kernel
-Alignment) measures similarity of internal activations.
+Alignment) measures similarity of the mean-pooled output logits: the
+model's action distribution, not its internal activations, which nothing
+here reads.
 
 Adapted from Craftax JAX implementation.
 """

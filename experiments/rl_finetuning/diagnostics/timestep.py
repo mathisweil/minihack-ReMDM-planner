@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import torch
 from torch import Tensor, nn
 
-from experiments.rl_finetuning.ablations.losses import _core_loss, _forward_and_loss
+from experiments.rl_finetuning.ablations.losses import _core_loss
 
 _EPS: float = 1e-5
 N_BINS: int = 10
