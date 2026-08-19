@@ -28,11 +28,18 @@ from experiments.rl_finetuning.ablations.training import (  # noqa: E402
     AblationHistory,
 )
 from experiments.rl_finetuning.analysis.tables import (  # noqa: E402
+    _MIN_METRIC_SCALE,
     baseline_rl_score_of,
+    metric_scale,
     verdict,
 )
 
 logger = logging.getLogger(__name__)
+
+# The margin an arm must clear to count as evidence for a hypothesis,
+# as a fraction of the metric scale. Scaled for the same reason the verdict
+# thresholds are: a flat margin is a different demand on each repo's metric.
+EVIDENCE_FRACTION = 0.01
 
 _DPI = 150
 
@@ -138,14 +145,15 @@ def _score_hypothesis(
         "score",
         pretrained_score,
     )
-    threshold = max(pretrained_score, baseline_score)
+    scale = metric_scale(baseline_score, pretrained_score)
+    threshold = max(pretrained_score, baseline_score) + EVIDENCE_FRACTION * scale
     n_tested = 0
     n_supporting = 0
 
     for abl_name in hyp_info["supporting_ablations"]:
         if abl_name in results:
             n_tested += 1
-            if results[abl_name]["score"] > threshold + 0.01:
+            if scale >= _MIN_METRIC_SCALE and results[abl_name]["score"] > threshold:
                 n_supporting += 1
 
     evidence = n_supporting / max(n_tested, 1)

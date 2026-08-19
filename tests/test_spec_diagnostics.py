@@ -705,6 +705,55 @@ def test_the_hypothesis_evidence_sets_are_the_pinned_shared_ones():
     assert actual == _EXPECTED_EVIDENCE_SETS
 
 
+def test_the_evidence_margin_is_a_fraction_of_the_metric_scale():
+    """An arm counts as evidence for a hypothesis when it clears the larger
+    reference by a fraction of the metric scale, not by a flat 0.01
+    (spec-ablations §3.6; the same scaling as :func:`verdict`).
+
+    Both repos demanded an absolute +0.01 over `max(pretrained, baseline)`
+    on metrics of different magnitude: 0.4 % of a 2.6 Craftax achievement
+    score against 1.5 % of a 0.65 MiniHack win rate, so the same margin
+    asked nearly four times the relative improvement on one side. That is
+    the defect the verdict rule had, and it is fixed the same way.
+
+    Derivation. At a baseline of 2.0 the scale is 2.0, so the margin is
+    0.02 and the threshold 2.02: an arm at 2.015 is a 0.75 % gain and is
+    not evidence, though the flat rule's 2.01 threshold would have counted
+    it. At a baseline of 0.2 the scale is 0.2, the margin 0.002 and the
+    threshold 0.202: an arm at 0.205 is a 2.5 % gain and is evidence,
+    though the flat rule's 0.21 threshold would have refused it. The two
+    cases move in opposite directions, which is what an unscaled margin on
+    two different metrics does.
+
+    With no scale to measure against, nothing supports anything, which is
+    what the verdict rule calls NEUTRAL.
+    """
+    hyp = {
+        "supporting_ablations": ["kl_penalty", "ewc"],
+        "description": "d",
+        "recommendation": "r",
+    }
+
+    def _n(baseline, arm_scores):
+        results = {"baseline_rl": {"score": baseline}}
+        for name, s in zip(("kl_penalty", "ewc"), arm_scores, strict=True):
+            results[name] = {"score": s}
+        return _score_hypothesis("h", hyp, results, pretrained_score=baseline)
+
+    # Scale 2.0 -> threshold 2.02. The flat rule's threshold was 2.01.
+    assert _n(2.0, [2.015, 2.025])["n_supporting"] == 1
+    assert _n(2.0, [2.025, 2.5])["n_supporting"] == 2
+
+    # Scale 0.2 -> threshold 0.202. The flat rule's threshold was 0.21.
+    assert _n(0.2, [0.205, 0.2015])["n_supporting"] == 1
+    assert _n(0.2, [0.205, 0.203])["n_supporting"] == 2
+
+    # No scale, no evidence.
+    assert _n(0.0, [1.0, 1.0])["n_supporting"] == 0
+    assert _n(0.0, [1.0, 1.0])["evidence_score"] == 0.0
+    assert _n(0.0, [1.0, 1.0])["n_tested"] == 2
+
+
 def test_the_evidence_score_is_the_raw_quotient_in_both_repos():
     """`evidence_score` is the unrounded fraction; rounding is for display.
 
