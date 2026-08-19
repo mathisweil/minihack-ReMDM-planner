@@ -299,19 +299,24 @@ def _results_to_json(
     results: dict[str, dict],
     pretrained_score: float,
     config: dict,
+    merge_provenance: dict | None = None,
 ) -> bytes:
     """Serialise results to orjson bytes.
 
     Args:
         results: ``{name: {"score": float, "history": AblationHistory}}``.
         pretrained_score: Pretrained eval score.
-        config: Merged config dict.
+        config: The run's config; under --merge, the first input file's, whole.
+        merge_provenance: Under --merge, which files were pooled and which one
+            the recorded config came from. Omitted for a single run, so its
+            presence is what marks a file as merged.
 
     Returns:
         UTF-8 JSON bytes.
     """
     serialisable = {
         "pretrained_score": pretrained_score,
+        **({"merge_provenance": merge_provenance} if merge_provenance else {}),
         "config": {
             k: v
             for k, v in config.items()
@@ -461,11 +466,20 @@ def _merge_result_files(
     lists are concatenated and ``score`` / ``score_std`` are recomputed
     over the union.  The history from the first file encountered is kept.
 
+    The config returned is **the first input file's**, whole, never a
+    key-by-key blend of the inputs: the poolability guard forbids the
+    result-affecting keys from diverging, but everything else -- worker
+    counts, output paths, the W&B run name -- would otherwise come from a
+    different file per key, and the record beside the merged numbers would
+    describe a run that never happened. Which file it came from, and what
+    the other inputs were, is recorded next to it by the caller.
+
     Args:
         paths: List of paths to results.json files.
 
     Returns:
-        Tuple of (merged_results, pretrained_score, config).
+        Tuple of (merged_results, pretrained_score, config), where config is
+        the first input file's, unmodified.
 
     Raises:
         ValueError: If a file records no config, or if two files are not
@@ -715,8 +729,14 @@ def main(argv: list[str] | None = None) -> None:
 
         # Save merged results
         merged_path = output_dir / "results.json"
+        provenance = {"inputs": list(merge_paths), "config_from": merge_paths[0]}
+        logger.info(
+            "Recorded config comes from %s; pooled with %s",
+            provenance["config_from"],
+            ", ".join(provenance["inputs"][1:]) or "nothing",
+        )
         merged_path.write_bytes(
-            _results_to_json(results, pretrained_score, config),
+            _results_to_json(results, pretrained_score, config, provenance),
         )
         logger.info("Saved merged results to %s", merged_path)
 

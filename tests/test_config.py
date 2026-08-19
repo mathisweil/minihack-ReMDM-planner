@@ -381,6 +381,49 @@ def test_merge_refuses_a_file_that_records_no_config(ra, tmp_path):
         ra._merge_result_files(paths)
 
 
+def test_a_merged_config_is_one_input_file_and_the_merge_is_recorded(ra, tmp_path):
+    """The config recorded beside merged results is one input file's, whole,
+    and which one is written next to it (spec-ablations §1.3).
+
+    Merging the configs key by key produced a config that matched no input
+    file. The poolability guard forbids the result-affecting keys from
+    diverging, so the chimera can only form out of the rest -- worker
+    counts, output paths, the W&B run name -- but those are what tell a
+    reader which machine produced the numbers, and a per-key blend names a
+    run that never happened.
+
+    Derivation: two poolable files differing only in the W&B project, a key
+    the guard does not police. The blend takes the second file's value while
+    every other key comes from the first; the fix takes the first file's
+    config entire, and records that it did.
+    """
+    config_a = ra._load_ablation_config(str(_ABL_CONFIGS / _REFERENCE_CONFIG))
+    config_a["wandb_project"] = "run-on-ucl"
+    config_b = dict(config_a)
+    config_b["wandb_project"] = "run-on-qmul"
+    paths = [
+        _results_file(tmp_path, "a.json", config_a, [1.0, 2.0]),
+        _results_file(tmp_path, "b.json", config_b, [3.0]),
+    ]
+    _, _, merged_config = ra._merge_result_files(paths)
+
+    # The whole of the first file's config, not a key-by-key blend.
+    assert merged_config == config_a
+    assert merged_config["wandb_project"] == "run-on-ucl"
+    assert ra._merge_result_files(paths[::-1])[2] == config_b
+
+    # And the merge itself is on the record.
+    provenance = {"inputs": paths, "config_from": paths[0]}
+    payload = json.loads(
+        ra._results_to_json({}, 0.5, merged_config, provenance).decode()
+    )
+    assert payload["merge_provenance"] == provenance
+    # A single run carries no provenance block, so its presence marks a merge.
+    assert "merge_provenance" not in json.loads(
+        ra._results_to_json({}, 0.5, merged_config).decode()
+    )
+
+
 def test_merge_still_pools_two_runs_of_the_same_config(ra, tmp_path):
     """The guard is a refusal on wrong input only: a poolable pair merges to
     the same values it did before the guard existed."""
