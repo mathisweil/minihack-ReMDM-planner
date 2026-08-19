@@ -74,7 +74,7 @@ Two independent training methods; neither depends on the other. An offline BC ch
 
 ```bash
 python main.py --mode online                                            # full paper recipe (defaults.yaml)
-python main.py --mode online --config configs/final_qmul_gpu.yaml       # paper run, QMUL H200
+python main.py --mode online --config configs/final_minihack_ucl.yaml      
 python main.py --mode online --override total_timesteps=1000000 --override dagger_lr=0.0001
 python main.py --mode online --checkpoint checkpoints/iter600.pth       # resume
 python main.py --mode online --checkpoint checkpoints/iter600.pth --no-warm-start
@@ -183,10 +183,10 @@ Precedence, lowest to highest: `configs/defaults.yaml` < `--config` file < `--ov
 | `configs/defaults.yaml` | **Shared final paper recipe** — the full run both clusters train |
 | `configs/smoke.yaml` | Smoke test (`total_timesteps=5000`, small buffer, W&B off) |
 | `configs/ablation_local_only.yaml` | Local-only planner ablation (`use_global_stream: false`) |
-| `configs/ucl_gpu_bigger_model.yaml` | UCL GPU, larger model (384D, 6 heads) |
-| `configs/ucl_gpu_learning_behaviour.yaml` | UCL GPU learning-behaviour study (eta=0.18, B=6144) |
-| `configs/final_qmul_gpu.yaml` | **Paper run, QMUL H200.** Machine values only: worker counts (32) and dataset path |
-| `configs/final_ucl_gpu.yaml` | **Paper run, UCL 3090 Ti.** Machine values only: dataset path (workers stay at the default 8) |
+| `configs/ucl_bigger_model.yaml` | UCL GPU, larger model (384D, 6 heads) |
+| `configs/ucl_learning_behaviour.yaml` | UCL GPU learning-behaviour study (eta=0.18, B=6144) |
+| `configs/final_minihack_qmul.yaml` | **Paper run, QMUL H200.** Machine values only: worker counts (32) and dataset path |
+| `configs/final_minihack_ucl.yaml` | **Paper run, UCL 3090 Ti.** Machine values only: dataset path (workers stay at the default 8) |
 
 Key hyperparameters are documented inline in `configs/defaults.yaml`; the [appendix](#key-hyperparameters) tabulates them.
 

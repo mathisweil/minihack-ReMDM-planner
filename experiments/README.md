@@ -37,8 +37,8 @@ rl_finetuning/
 └── configs/
     ├── ablations_default.yaml   # Base: all ablation hyperparameters
     ├── ablations_fast.yaml      # Smoke-test overlay (50 iterations)
-    ├── ablations_final_qmul.yaml  # QMUL H200 overrides only
-    └── ablations_final_ucl.yaml   # UCL 3090 Ti overrides only (reference)
+    ├── ablations_final_minihack_qmul.yaml  # QMUL H200 overrides only
+    └── ablations_final_minihack_ucl.yaml   # UCL 3090 Ti overrides only (reference)
 ```
 
 ### Config layering
@@ -60,7 +60,7 @@ configs/defaults.yaml         # architecture, env IDs, token IDs
 Machine configs carry only the keys they change:
 
 ```yaml
-# ablations_final_ucl.yaml
+# ablations_final_minihack_ucl.yaml
 batch_size: 4608
 cka_batch_size: 128
 ```
@@ -115,7 +115,7 @@ python experiments/rl_finetuning/run_ablations.py \
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint path/to/dagger_checkpoint.pth \
-    --ablations-config experiments/rl_finetuning/configs/ablations_final_ucl.yaml \
+    --ablations-config experiments/rl_finetuning/configs/ablations_final_minihack_ucl.yaml \
     --all \
     --use-wandb
 ```
@@ -192,9 +192,9 @@ It compares the configs the results files recorded and refuses, naming every
 diverging key with both values; a file that records no config is refused too.
 All published
 MiniHack ablation results were produced on the **UCL 3090 Ti**
-(`ablations_final_ucl.yaml`), which is the reference config.
+(`ablations_final_minihack_ucl.yaml`), which is the reference config.
 
-`ablations_final_qmul.yaml` is **not poolable** with it. It diverges on four
+`ablations_final_minihack_qmul.yaml` is **not poolable** with it. It diverges on four
 keys that change the result, not just the wall-clock:
 
 | Key | UCL | QMUL | Effect |
