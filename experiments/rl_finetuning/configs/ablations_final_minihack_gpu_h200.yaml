@@ -1,7 +1,7 @@
 # =============================================================================
-# MiniHack ReMDM RL Fine-Tuning Ablation Suite -- QMUL H200 8GB Configuration
+# MiniHack ReMDM RL Fine-Tuning Ablation Suite -- H200 8GB Configuration
 #
-# Optimised for training efficiency on QMUL H200 GPU (8GB VRAM).
+# Optimised for training efficiency on H200 GPU (8GB VRAM).
 # Inherits everything from ablations_default.yaml; only the keys that differ
 # on this machine live below.
 #

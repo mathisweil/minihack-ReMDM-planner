@@ -6,7 +6,7 @@
 # inherited automatically.  Only keys that differ or are new live here.
 #
 # This is the BASE of the ablations config chain.  Machine-specific configs
-# (ablations_final_minihack_qmul.yaml, ablations_final_minihack_ucl.yaml, ...) are layered on
+# (ablations_final_minihack_gpu_h200.yaml, ablations_final_minihack_gpu_24gb.yaml, ...) are layered on
 # top of this file automatically by --ablations-config and carry ONLY the
 # keys they change, so every key below is the single source of truth unless
 # a machine config deliberately overrides it.  There is no `extends:` key -

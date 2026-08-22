@@ -81,7 +81,7 @@ def test_preset_does_not_inherit_from_another_preset():
 
 def test_extends_rejected_as_config_key():
     """The mechanism is gone, so the key must now be an error, not ignored."""
-    cfg = _write(_CONFIGS, "_tmp_extends.yaml", "extends: final_minihack_qmul.yaml\n")
+    cfg = _write(_CONFIGS, "_tmp_extends.yaml", "extends: final_minihack_gpu_h200.yaml\n")
     try:
         with pytest.raises(KeyError, match="extends"):
             load_config("configs/_tmp_extends.yaml")
@@ -111,13 +111,13 @@ def test_shipped_ablation_configs_validate(ra):
     allowed = set(yaml.safe_load((_CONFIGS / "defaults.yaml").read_text())) | set(
         yaml.safe_load(_ABL_DEFAULT.read_text())
     )
-    for name in ("ablations_final_minihack_qmul.yaml", "ablations_final_minihack_ucl.yaml"):
+    for name in ("ablations_final_minihack_gpu_h200.yaml", "ablations_final_minihack_gpu_24gb.yaml"):
         ra._load_ablation_config(str(_ABL_CONFIGS / name), allowed=allowed)
 
 
 def test_extends_rejected_as_cli_override():
     with pytest.raises(KeyError, match="extends"):
-        load_config("configs/final_minihack_ucl.yaml", {"extends": "x.yaml"})
+        load_config("configs/final_minihack_gpu_24gb.yaml", {"extends": "x.yaml"})
 
 
 # --------------------------------------------------------------------------
@@ -154,7 +154,7 @@ def test_ablation_config_restates_no_inherited_value(preset):
 # --------------------------------------------------------------------------
 # cross-machine drift
 #
-# With inheritance gone, nothing structurally stops the QMUL and UCL configs
+# With inheritance gone, nothing structurally stops the GPU-H200 and GPU-24GB configs
 # drifting apart, so the shared recipe is asserted here instead.
 # --------------------------------------------------------------------------
 
@@ -165,22 +165,22 @@ _MACHINE_KEYS = frozenset(
 
 
 def test_paper_configs_differ_only_in_machine_keys():
-    qmul = vars(load_config("configs/final_minihack_qmul.yaml"))
-    ucl = vars(load_config("configs/final_minihack_ucl.yaml"))
+    gpu_h200 = vars(load_config("configs/final_minihack_gpu_h200.yaml"))
+    gpu_24gb = vars(load_config("configs/final_minihack_gpu_24gb.yaml"))
     diverged = {
         k
-        for k in set(qmul) | set(ucl)
-        if k != "device" and qmul.get(k, "<absent>") != ucl.get(k, "<absent>")
+        for k in set(gpu_h200) | set(gpu_24gb)
+        if k != "device" and gpu_h200.get(k, "<absent>") != gpu_24gb.get(k, "<absent>")
     }
     assert diverged <= set(_MACHINE_KEYS), (
-        "final_minihack_qmul.yaml and final_minihack_ucl.yaml must train an identical "
+        "final_minihack_gpu_h200.yaml and final_minihack_gpu_24gb.yaml must train an identical "
         f"model. They diverge on non-machine key(s): "
         f"{sorted(diverged - set(_MACHINE_KEYS))}. Move the shared value into "
         "configs/defaults.yaml."
     )
 
 
-@pytest.mark.parametrize("preset", ["final_minihack_qmul.yaml", "final_minihack_ucl.yaml"])
+@pytest.mark.parametrize("preset", ["final_minihack_gpu_h200.yaml", "final_minihack_gpu_24gb.yaml"])
 def test_paper_config_holds_only_machine_keys(preset):
     raw = yaml.safe_load((_CONFIGS / preset).read_text()) or {}
     stray = set(raw) - set(_MACHINE_KEYS)
@@ -209,8 +209,8 @@ _OFFLINE_PINS = (
 _DERIVES_OFFLINE_BUDGET = [
     "smoke.yaml",
     "ablation_local_only.yaml",
-    "ucl_bigger_model.yaml",
-    "ucl_learning_behaviour.yaml",
+    "gpu_24gb_bigger_model.yaml",
+    "gpu_24gb_learning_behaviour.yaml",
 ]
 
 
@@ -231,11 +231,11 @@ def test_preset_pins_offline_overrides_to_null(preset):
 # `run_ablations.py --merge` averages seeds of the same ablation across
 # results.json files, so pooling two machine configs is only sound when they
 # agree on everything that changes the trained model or the measured score.
-# All published MiniHack ablation results were produced on the UCL 3090 Ti,
+# All published MiniHack ablation results were produced on the RTX 3090 Ti,
 # which is therefore the reference.
 # --------------------------------------------------------------------------
 
-_REFERENCE_CONFIG = "ablations_final_minihack_ucl.yaml"
+_REFERENCE_CONFIG = "ablations_final_minihack_gpu_24gb.yaml"
 
 # The result-affecting key set is declared once, in production, as
 # ``run_ablations._RESULT_AFFECTING``: the same set that classifies these
@@ -247,7 +247,7 @@ _POOLABLE = {_REFERENCE_CONFIG}
 #: Configs that must NOT be merged with the reference, mapped to the
 #: result-affecting keys on which they are known to diverge.
 _NOT_POOLABLE = {
-    "ablations_final_minihack_qmul.yaml": frozenset(
+    "ablations_final_minihack_gpu_h200.yaml": frozenset(
         {
             "batch_size",  # 512 vs 4608: ~9x per-update SNR
             "episodes_per_iter",  # 20 vs 30: 10k vs 15k total episodes
@@ -398,9 +398,9 @@ def test_a_merged_config_is_one_input_file_and_the_merge_is_recorded(ra, tmp_pat
     config entire, and records that it did.
     """
     config_a = ra._load_ablation_config(str(_ABL_CONFIGS / _REFERENCE_CONFIG))
-    config_a["wandb_project"] = "run-on-ucl"
+    config_a["wandb_project"] = "run-on-gpu-24gb"
     config_b = dict(config_a)
-    config_b["wandb_project"] = "run-on-qmul"
+    config_b["wandb_project"] = "run-on-gpu-h200"
     paths = [
         _results_file(tmp_path, "a.json", config_a, [1.0, 2.0]),
         _results_file(tmp_path, "b.json", config_b, [3.0]),
@@ -409,7 +409,7 @@ def test_a_merged_config_is_one_input_file_and_the_merge_is_recorded(ra, tmp_pat
 
     # The whole of the first file's config, not a key-by-key blend.
     assert merged_config == config_a
-    assert merged_config["wandb_project"] == "run-on-ucl"
+    assert merged_config["wandb_project"] == "run-on-gpu-24gb"
     assert ra._merge_result_files(paths[::-1])[2] == config_b
 
     # And the merge itself is on the record.

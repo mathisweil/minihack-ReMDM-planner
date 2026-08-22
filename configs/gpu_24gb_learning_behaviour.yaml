@@ -1,5 +1,5 @@
 # =============================================================================
-# UCL GPU -- learning-behaviour study (eta=0.18, B=6144)
+# GPU-24GB -- learning-behaviour study (eta=0.18, B=6144)
 # =============================================================================
 # Deep-merged onto configs/defaults.yaml: only the deltas live here.
 # Model architecture is the default 256-dim / 4-head / 4-layer planner.

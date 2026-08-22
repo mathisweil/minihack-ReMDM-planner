@@ -7,7 +7,7 @@ PyTorch ReMDM planner on MiniHack; supervision by the built-in BFS oracle (no ex
 - Exactly two config layers: a `--config` preset merges onto `configs/defaults.yaml`; presets never inherit from presets (there is no `extends` key). `--override KEY=VALUE` keys are validated against `defaults.yaml`.
 - `configs/defaults.yaml` IS the final paper recipe, not a neutral baseline, and is authoritative for hyperparameter values; README tables may lag behind it. Presets are delta-only; restating a defaults value silently pins it (enforced by `tests/test_config.py`).
 - Silent-pin hazard: the four `offline_*` grad-step/capacity keys override env-step-derived values whenever non-null; a preset deriving its own budget must pin all four to explicit `null`. Read README.md §Configuration before touching any YAML.
-- Machine configs (`final_minihack_qmul.yaml`, `final_minihack_ucl.yaml`, `ablations_final_{qmul,ucl}.yaml`) carry machine values only; UCL is the ablation reference and QMUL results are not poolable with it (experiments/README.md). Never edit `final_*` or ablation machine configs to fit local hardware.
+- Machine configs (`final_minihack_gpu_h200.yaml`, `final_minihack_gpu_24gb.yaml`, `ablations_final_{gpu_h200,gpu_24gb}.yaml`) carry machine values only; GPU-24GB is the ablation reference and GPU-H200 results are not poolable with it (experiments/README.md). Never edit `final_*` or ablation machine configs to fit local hardware.
 - The ablation suite has its own config precedence chain and no `--override`; read experiments/README.md before touching `experiments/rl_finetuning/configs/`.
 
 ## Checkpoints

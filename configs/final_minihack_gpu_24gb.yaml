@@ -1,21 +1,21 @@
 # =============================================================================
-# UCL 3090 Ti GPU -- machine values for the final paper run
+# RTX 3090 Ti GPU -- machine values for the final paper run
 # =============================================================================
 #
 # The training recipe lives in configs/defaults.yaml, which both clusters
-# share, so this config and final_minihack_qmul.yaml train an identical model
+# share, so this config and final_minihack_gpu_h200.yaml train an identical model
 # by construction. Only this machine's values live here.
 #
 # In practice that is a single key. The collection worker counts stay at
-# the defaults.yaml value of 8 (QMUL raises them to 32), so the output
-# path is the only genuine UCL delta.
+# the defaults.yaml value of 8 (GPU-H200 raises them to 32), so the output
+# path is the only genuine GPU-24GB delta.
 #
 #   --mode online    -> reproduces the iter600 DAgger checkpoint recipe
 #   --mode offline   -> trains a fair offline BC baseline against it
 #
 # -- Hardware ---------------------------------------------------------
 #
-# UCL 3090 Ti -- 24 GB VRAM. The 4-layer x 256-dim model at the inherited
+# RTX 3090 Ti -- 24 GB VRAM. The 4-layer x 256-dim model at the inherited
 # batch=2048 with AMP fits with comfortable headroom. Measured on the
 # target box (RTX 3090 Ti, driver 590.44.01, torch 2.13.0+cu126):
 # 6,678 MB peak allocated and 7,065 MB peak reserved over 200 gradient
@@ -25,7 +25,7 @@
 # card is ~17 GB.
 #
 # `num_collection_workers` has NO EFFECT on this box, which is why it is
-# left at the defaults.yaml value of 8 rather than raised to QMUL's 32.
+# left at the defaults.yaml value of 8 rather than raised to GPU-H200's 32.
 # It only feeds `collect_batch_parallel`, and `online.py:147` always
 # takes the `collect_batch_gpu` branch on CUDA with
 # `episodes_per_iteration > 1`. The one cost of a non-zero value is that
@@ -40,4 +40,4 @@
 # -- Data collection (for offline BC dataset) -------------------------
 # HARDWARE-SPECIFIC path. collect_episodes_per_env stays at the
 # inherited 5000: 20k oracle trajectories over the 4 ID envs.
-collect_output: data/oracle_bc_ucl.pt
+collect_output: data/oracle_bc_gpu_24gb.pt

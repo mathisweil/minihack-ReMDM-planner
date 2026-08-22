@@ -37,8 +37,8 @@ rl_finetuning/
 └── configs/
     ├── ablations_default.yaml   # Base: all ablation hyperparameters
     ├── ablations_fast.yaml      # Smoke-test overlay (50 iterations)
-    ├── ablations_final_minihack_qmul.yaml  # QMUL H200 overrides only
-    └── ablations_final_minihack_ucl.yaml   # UCL 3090 Ti overrides only (reference)
+    ├── ablations_final_minihack_gpu_h200.yaml  # H200 overrides only
+    └── ablations_final_minihack_gpu_24gb.yaml   # RTX 3090 Ti overrides only (reference)
 ```
 
 ### Config layering
@@ -60,7 +60,7 @@ configs/defaults.yaml         # architecture, env IDs, token IDs
 Machine configs carry only the keys they change:
 
 ```yaml
-# ablations_final_minihack_ucl.yaml
+# ablations_final_minihack_gpu_24gb.yaml
 batch_size: 4608
 cka_batch_size: 128
 ```
@@ -115,7 +115,7 @@ python experiments/rl_finetuning/run_ablations.py \
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint path/to/dagger_checkpoint.pth \
-    --ablations-config experiments/rl_finetuning/configs/ablations_final_minihack_ucl.yaml \
+    --ablations-config experiments/rl_finetuning/configs/ablations_final_minihack_gpu_24gb.yaml \
     --all \
     --use-wandb
 ```
@@ -191,13 +191,13 @@ The merged file is a `results.json` like any other, so `--analyze-only` works on
 It compares the configs the results files recorded and refuses, naming every
 diverging key with both values; a file that records no config is refused too.
 All published
-MiniHack ablation results were produced on the **UCL 3090 Ti**
-(`ablations_final_minihack_ucl.yaml`), which is the reference config.
+MiniHack ablation results were produced on the **RTX 3090 Ti**
+(`ablations_final_minihack_gpu_24gb.yaml`), which is the reference config.
 
-`ablations_final_minihack_qmul.yaml` is **not poolable** with it. It diverges on four
+`ablations_final_minihack_gpu_h200.yaml` is **not poolable** with it. It diverges on four
 keys that change the result, not just the wall-clock:
 
-| Key | UCL | QMUL | Effect |
+| Key | GPU-24GB | GPU-H200 | Effect |
 |---|---|---|---|
 | `batch_size` | 4608 | 512 | ~9x per-update SNR |
 | `episodes_per_iter` | 30 | 20 | 15k vs 10k total episodes |
@@ -210,8 +210,8 @@ are wall-clock only and do not affect poolability.
 
 `tests/test_config.py` enforces this: every `ablations_final_*.yaml` must be
 declared poolable or not, configs declared poolable must match the reference on
-the result-affecting keys, and the recorded QMUL divergence must stay accurate.
-Aligning QMUL later fails the test until it is moved to the poolable set. The
+the result-affecting keys, and the recorded GPU-H200 divergence must stay accurate.
+Aligning GPU-H200 later fails the test until it is moved to the poolable set. The
 key set itself is declared once, in `run_ablations._RESULT_AFFECTING`, so the
 classification the tests check and the refusal `--merge` performs are the same
 policy.

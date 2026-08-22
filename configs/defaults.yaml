@@ -125,8 +125,8 @@ aux_loss_weight: 0.5
 # value when non-null. They are part of the paper recipe and are now set
 # here, so any preset that wants the derived behaviour must pin the key
 # back to `null` explicitly — omitting it inherits the pin instead.
-# `smoke.yaml`, `ablation_local_only.yaml`, `ucl_bigger_model.yaml`
-# and `ucl_learning_behaviour.yaml` all do exactly that; without the
+# `smoke.yaml`, `ablation_local_only.yaml`, `gpu_24gb_bigger_model.yaml`
+# and `gpu_24gb_learning_behaviour.yaml` all do exactly that; without the
 # pin, smoke would train 60,000 grad steps instead of 19.
 #
 # offline_total_grad_steps: pins the gradient budget (60000 = 600 DAgger

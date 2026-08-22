@@ -1,5 +1,5 @@
 # =============================================================================
-# QMUL H200 GPU -- machine values for the final paper run
+# H200 GPU -- machine values for the final paper run
 # =============================================================================
 #
 # The training recipe lives in configs/defaults.yaml, which both clusters
@@ -21,13 +21,13 @@
 #
 # -- Hardware ---------------------------------------------------------
 #
-# QMUL H200 (constrained VRAM allocation). The DAgger checkpoint was
+# H200 (constrained VRAM allocation). The DAgger checkpoint was
 # produced on this hardware, so the inherited batch sizes and AMP
 # settings must stay identical to the original run. 32-worker collection
 # is the original perf setting.
 
 # -- Collection workers -----------------------------------------------
-# HARDWARE-SPECIFIC. UCL leaves these at the defaults.yaml value of 8.
+# HARDWARE-SPECIFIC. GPU-24GB leaves these at the defaults.yaml value of 8.
 num_collection_workers: 32
 collect_num_workers: 32
 
@@ -36,4 +36,4 @@ collect_num_workers: 32
 # inherited 5000: 5000 eps x 4 ID envs = 20k oracle trajectories,
 # strictly more than the ~7k unique trajectories DAgger had in its
 # filtered buffer at iter600.
-collect_output: data/oracle_bc_qmul.pt
+collect_output: data/oracle_bc_gpu_h200.pt

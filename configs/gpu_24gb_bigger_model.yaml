@@ -1,5 +1,5 @@
 # =============================================================================
-# UCL GPU -- larger model study (384-dim, 6 heads)
+# GPU-24GB -- larger model study (384-dim, 6 heads)
 # =============================================================================
 # Deep-merged onto configs/defaults.yaml: only the deltas live here.
 # Everything else (environments, diffusion, sampling, LRs, DAgger loop,
