@@ -55,7 +55,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Source paths inside the repo.
 CHECKPOINT_SRC = (
     PROJECT_ROOT / "checkpoints" / "online"
-    / "Minihack-OnlineDiffusion-DAgger-123M" / "iter600.pth"
+    / "Minihack-Online-Diffusion-DAgger-100M" / "iter563.pth"
 )
 ABLATION_SRC = (
     PROJECT_ROOT / "experiments" / "rl_finetuning"
@@ -132,7 +132,7 @@ def stage(staging_dir: Path) -> None:
             shutil.copy2(src, staging_dir / fname)
             logger.info(f"  staged {fname}")
 
-    # Stripped checkpoint — created on demand from the DAgger iter600 ckpt.
+    # Stripped checkpoint — created on demand from the published DAgger ckpt.
     ckpt_dst = staging_dir / "checkpoint_inference.pth"
     stripped_cache = PROJECT_ROOT / "checkpoint_inference.pth"
     if stripped_cache.exists():
@@ -193,7 +193,7 @@ def strip_checkpoint(src: Path, dst: Path) -> None:
 
     if not src.exists():
         raise FileNotFoundError(
-            f"checkpoint not found: {src}. Expected the DAgger iter600 "
+            f"checkpoint not found: {src}. Expected the published DAgger "
             f"checkpoint at this path."
         )
     full = torch.load(src, map_location="cpu", weights_only=False)

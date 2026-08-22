@@ -8,10 +8,10 @@
 # offline BC compute-match pins, AMP and torch.compile -- is inherited.
 #
 # This config drives BOTH the final DAgger run behind the released
-# `checkpoints/online/Minihack-OnlineDiffusion-DAgger-123M` checkpoint
+# `checkpoints/online/Minihack-Online-Diffusion-DAgger-100M` checkpoint
 # AND the compute-matched offline BC baseline used for the paper
 # comparison (released as
-# `checkpoints/offline/Minihack-OfflineDiffusion-BC-82M`).
+# `checkpoints/offline/Minihack-Offline-Diffusion-BC-100M`).
 #
 #   --mode online    -> reproduces the iter600 DAgger checkpoint recipe
 #   --mode offline   -> trains a fair offline BC baseline against it
