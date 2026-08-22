@@ -182,6 +182,29 @@ def scrub(cfg: dict) -> dict:
     }
 
 
+def scrub_checkpoint(src: Path, dst: Path) -> None:
+    """Copy a ``.pth`` with its provenance keys dropped.
+
+    ``scrub`` only reaches the YAML/JSON sidecars, so `wandb_run_id` shipped
+    inside the pickled checkpoints themselves (iter563.pth -> a07wlxl7,
+    offline_step50000.pth -> 4nzxat0c) while the uploader reported that W&B
+    settings had been scrubbed. Environment keys are dropped with the same
+    predicate the configs use; every training-state key is preserved.
+    """
+    import torch
+
+    ckpt = torch.load(src, map_location="cpu", weights_only=False)
+    if not isinstance(ckpt, dict):
+        shutil.copy2(src, dst)
+        return
+    dropped = [k for k in ckpt if is_environment_key(str(k))]
+    if not dropped:
+        shutil.copy2(src, dst)
+        return
+    torch.save({k: v for k, v in ckpt.items() if k not in dropped}, dst)
+    print(f"  scrubbed {', '.join(sorted(map(str, dropped)))} from {src.name}")
+
+
 def export_weights(pth: Path, out: Path) -> dict:
     """Write EMA inference weights as safetensors; return checkpoint stats."""
     import torch
@@ -356,7 +379,7 @@ def stage_checkpoints(
                 cfg, cfg_name = scrub(yaml.safe_load(src.read_text())), src.name
                 (target / src.name).write_text(yaml.safe_dump(cfg, sort_keys=True))
             elif src.suffix == ".pth":
-                shutil.copy2(src, target / src.name)
+                scrub_checkpoint(src, target / src.name)
 
         stats = export_weights(pths[-1], target / "model.safetensors")
         (target / "selection.json").write_text(
