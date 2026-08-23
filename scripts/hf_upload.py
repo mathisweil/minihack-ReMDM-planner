@@ -31,8 +31,8 @@ RUNS = ROOT / "experiments" / "rl_finetuning" / "outputs"
 INFERENCE = ROOT / "results" / "inference"
 
 PAPER = (
-    "The Double Intractability of Reinforcement Learning "
-    "for Discrete Diffusion Planners"
+    "Return-Weighted ELBO Fine-Tuning Degrades "
+    "Masked Diffusion Planners"
 )
 CODE_URL = "https://github.com/mathisweil/minihack-ReMDM-planner"
 ENV_NAME = "MiniHack"
