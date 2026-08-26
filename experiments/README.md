@@ -19,7 +19,6 @@ Implements **25 ablations**: a baseline plus four groups (A: Regularisation, B: 
 ```
 rl_finetuning/
 ├── run_ablations.py          # CLI entry point
-├── measure_gdelta.py         # Gradient decomposition: grad L_RW = Abar (grad L_BC + g_delta)
 ├── ablations/
 │   ├── losses.py             # 15 loss/objective factory functions + LossContext
 │   ├── optimizers.py         # AdamW, LLRD, LoRA, frozen params, PCGrad helpers
@@ -31,6 +30,7 @@ rl_finetuning/
 │   ├── representation.py     # KL drift, CKA similarity, activation norms
 │   └── timestep.py           # t-bin gradient norms, per-t loss decomposition
 ├── analysis/
+│   ├── gdelta.py             # Return term g_delta of the decomposition (no training)
 │   ├── plots.py              # 12 matplotlib figure generators
 │   ├── tables.py             # Summary tables as polars DataFrames + LaTeX export
 │   ├── report.py             # diagnosis.md + decision tree figure
@@ -293,6 +293,9 @@ experiments/rl_finetuning/outputs/{run_id}/
 │       ├── action_transitions_{name}.png       # Pre, post, diff transition matrices
 │       ├── action_distribution_results_{name}.json  # Metrics + statistical tests
 │       └── js_divergence_comparison.png        # JS divergence across ablations
+├── gdelta/                            # --measure-gdelta only
+│   ├── gdelta_seed{n}.json            # Per rollout seed; +/- within is across that seed's draws
+│   └── gdelta_aggregate.json          # Across seeds; the dispersion the paper's table prints
 └── tables/
     ├── results.tex                    # --emit-tex-macros only: \newcommand per headline number
     ├── main_results.{csv,tex}         # Per-condition table: score, seed sd, deltas, verdict
@@ -303,7 +306,8 @@ experiments/rl_finetuning/outputs/{run_id}/
     ├── repr_drift.{csv,tex}           # KL drift values at final iteration
     ├── per_env.{csv,tex}              # Per-environment win rates
     ├── forgetting_analysis.{csv,tex}  # First collapse iter, min score, recovery
-    └── hypothesis_verdict.{csv,tex}   # Per-ablation hypothesis verdict + conclusion
+    ├── hypothesis_verdict.{csv,tex}   # Per-ablation hypothesis verdict + conclusion
+    └── gdelta.{csv,tex}               # --measure-gdelta only: the decomposition per weight transform
 ```
 
 **Action distribution analysis** is opt-in via `--action-dist`. It costs roughly
@@ -312,7 +316,7 @@ pretrained baseline is rolled out once and reused across ablations. It reads
 the per-ablation `checkpoint_{name}.pth` files, so it only covers ablations
 whose checkpoint was saved.
 
-### `measure_gdelta.py` -- the return-term diagnostic
+### Measuring the return term (`--measure-gdelta`)
 
 Splits the return-weighted ELBO gradient into an imitation term and a return
 term at a single parameter point:
@@ -322,22 +326,44 @@ grad L_RW  =  Abar * ( grad L_BC + g_delta ),
 g_delta    =  (1/B) sum_i delta_i grad l_i,    delta_i = A_i/Abar - 1.
 ```
 
-No training, no optimiser step, one on-policy batch and a few gradient
-evaluations. It runs on CPU in minutes.
+It loads the pretrained checkpoint, collects one on-policy batch from it, and
+evaluates `grad L_BC`, `g_delta` and `grad L_RW` on that batch at those
+parameters under a shared `(z_t, t)` draw, so the only difference between the
+three is the weight vector. It repeats for the four weighting ablations
+(`baseline_rl`, `advantage_clip`, `normalized_adv`, `bc_wins`). No training and
+no optimiser step occur; it runs on a laptop CPU in minutes.
 
+Results land in `gdelta/` under the run's own output directory, beside
+`results.json`, and the aggregate additionally produces
+`tables/gdelta.{csv,tex}`. With `--emit-tex-macros`, the analysis pass picks
+the aggregate up and emits the measured quantities as `\mhGdelta*` macros.
+Those are kept separate from the `\mhCvA*` macros, which recover `CV_A` from
+the ESS logged during training: the two are measured on different batches and
+do not agree.
+
+Config comes from `--results-path`, so the weight transforms measured are the
+ones that run trained under; without it the standard layering applies.
+
+**Reproduction (three rollout seeds, aggregated in one pass):**
 ```bash
-# per seed
-for s in 0 1 2; do
-  uv run python experiments/rl_finetuning/measure_gdelta.py \
-      --ckpt results/checkpoints/online/<run>/iterNNN.pth \
-      --config results/experiments/rl_finetuning/outputs/minihack_ablations/results.json \
-      --seed ${s} --out gdelta_seed${s}.json
-done
-
-# the +/- the paper's table prints is ACROSS seeds, which needs the second pass
-uv run python experiments/rl_finetuning/measure_gdelta.py --aggregate \
-    --inputs gdelta_seed0.json gdelta_seed1.json gdelta_seed2.json
+uv run python experiments/rl_finetuning/run_ablations.py \
+    --measure-gdelta --gdelta-seeds 0 1 2 \
+    --checkpoint results/checkpoints/online/<run>/iterNNN.pth \
+    --results-path results/experiments/rl_finetuning/outputs/minihack_ablations/results.json \
+    --output-dir experiments/rl_finetuning/outputs/minihack_ablations
 ```
+
+Seeds run on separate machines are aggregated afterwards with
+`--gdelta-inputs`, the counterpart to `--merge`:
+```bash
+uv run python experiments/rl_finetuning/run_ablations.py --run-id gdelta \
+    --gdelta-inputs experiments/rl_finetuning/outputs/gdelta/gdelta_seed{0,1,2}.json
+```
+
+A single seed's `ratio_std_draws` / `cos_std_draws` are dispersions over that
+seed's eight `(z_t, t)` draws. The aggregate averages the per-seed means and
+reports the standard deviation **across seeds**, which is what the paper's
+table prints.
 
 Reported per weight transform: `CV_A`, `Abar`, `Abar` relative to the
 baseline's, ESS as a fraction of the batch, `|g_delta| / |grad L_BC|`, the
@@ -352,20 +378,22 @@ Four points on scope:
   unweighted auxiliary goal loss; including it would break the identity above
   for reasons unrelated to the return, so it is excluded. The goal head
   therefore carries no gradient here.
-- **`--num-envs` sets `episodes_per_iter`.** MiniHack rollouts are sequential
-  rather than vectorised, so the sibling suite's `NUM_ENVS` has no
-  counterpart. The flag keeps its name so the two CLIs stay identical.
-- **`--config` layers over `configs/defaults.yaml`.** `run_ablations.py`
+- **The collection size is `episodes_per_iter`.** MiniHack rollouts are
+  sequential rather than vectorised, so the sibling suite's `NUM_ENVS` has no
+  counterpart; `measure()` takes the override under the sibling's `num_envs`
+  name and applies it to `episodes_per_iter`.
+- **`--results-path` layers over `configs/defaults.yaml`.** `run_ablations.py`
   records only scalar keys in `results.json`, so a recorded config carries no
-  `id_envs`; defaults supplies the structural keys and the given file wins
-  everywhere it speaks.
+  `id_envs`; defaults supplies the structural keys and the recorded config
+  wins everywhere it speaks.
 - **`--device` has no sibling counterpart.** JAX picks its backend from the
   environment; torch needs to be told. It defaults to CUDA where available.
 
-The sibling `craftax-ReMDM-planner` carries the same script with the same CLI
-and the same output JSON schema. Its version needs an explicit Orbax sharding
-to restore a GPU-written checkpoint on CPU; `torch.load(map_location=...)` has
-no such problem, which is the only structural difference between the two.
+The sibling `craftax-ReMDM-planner` carries the same module with the same
+driver flags and the same output JSON schema. Its version needs an explicit
+Orbax sharding to restore a GPU-written checkpoint on CPU;
+`torch.load(map_location=...)` has no such problem, which is the only
+structural difference between the two.
 
 **`results.json` schema:**
 ```json
@@ -402,8 +430,12 @@ with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--mer
 | `--output-dir DIR` | Output directory (default: auto-timestamped) |
 | `--run-id ID` | Custom run ID for output directory naming |
 | `--analyze-only` | Skip training, regenerate analysis from existing results |
-| `--results-path PATH` | Explicit path to `results.json` (with `--analyze-only`) |
+| `--results-path PATH` | Explicit path to `results.json` (with `--analyze-only` or `--measure-gdelta`) |
 | `--merge JSON [JSON ...]` | Merge multiple `results.json` files and regenerate analysis |
+| `--measure-gdelta` | Measure the return term at the pretrained checkpoint; no training |
+| `--gdelta-seeds N [N ...]` | Rollout seeds to measure (default `0`); the reported +/- is across these |
+| `--gdelta-draws N` | Independent `(z_t, t)` draws per seed (default 8) |
+| `--gdelta-inputs PATH [PATH ...]` | Aggregate per-seed gdelta JSONs from separate machines |
 | `--use-wandb` / `--no-use-wandb` | Enable/disable W&B logging (overrides `use_wandb`, default `false`) |
 | `--wandb-project NAME` | W&B project (overrides `wandb_project`, default `minihack-ReMDM-planner-ablations`) |
 | `--wandb-entity NAME` | W&B entity (overrides `wandb_entity`) |

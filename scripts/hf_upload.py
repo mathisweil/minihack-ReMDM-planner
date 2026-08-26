@@ -46,7 +46,10 @@ ROLES = {
 # An ablation run is published as its own summary plus tables and figures; the
 # raw per-iteration logs stay in the code repository.
 RUN_FILES = ("results.json", "diagnosis.md")
-RUN_DIRS = ("tables", "figures")
+# gdelta/ holds the per-seed gradient measurements behind the paper's
+# decomposition appendix; they land inside the run directory, so
+# discover_runs() finds them with no further change.
+RUN_DIRS = ("tables", "figures", "gdelta")
 
 # Environment provenance, never needed to restore a checkpoint, and dropped
 # from every published config in both repos: the nested `_wandb` blob (email,

@@ -32,6 +32,13 @@ Usage::
     python experiments/rl_finetuning/run_ablations.py \\
         --merge outputs/gpu0/results.json outputs/gpu1/results.json \\
         --output-dir outputs/merged
+
+    # Measure the return term at the pretrained checkpoint (no training)
+    python experiments/rl_finetuning/run_ablations.py \\
+        --measure-gdelta --gdelta-seeds 0 1 2 \\
+        --checkpoint path/to/dagger_checkpoint.pth \\
+        --results-path outputs/run_xyz/results.json \\
+        --output-dir outputs/run_xyz
 """
 
 from __future__ import annotations
@@ -76,9 +83,16 @@ from experiments.rl_finetuning.ablations.training import (
 from experiments.rl_finetuning.analysis.action_distribution import (
     run_all_action_distribution_analyses,
 )
+from experiments.rl_finetuning.analysis.gdelta import (
+    aggregate_files,
+    run_gdelta,
+)
 from experiments.rl_finetuning.analysis.plots import generate_all_plots
 from experiments.rl_finetuning.analysis.report import generate_diagnosis_report
-from experiments.rl_finetuning.analysis.tables import generate_summary_tables
+from experiments.rl_finetuning.analysis.tables import (
+    generate_summary_tables,
+    write_gdelta_table,
+)
 from src.config import validate_keys
 
 logging.basicConfig(
@@ -234,6 +248,38 @@ def _build_parser() -> argparse.ArgumentParser:
             "and regenerate analysis. E.g.:\n"
             "  --merge outputs/gpu0/results.json outputs/gpu1/results.json"
         ),
+    )
+    p.add_argument(
+        "--measure-gdelta",
+        action="store_true",
+        help=(
+            "Measure the return term g_delta of the return-weighted ELBO "
+            "decomposition at the pretrained checkpoint. No training and no "
+            "optimiser step; runs on CPU in minutes. Writes "
+            "gdelta/gdelta_seed{n}.json plus gdelta/gdelta_aggregate.json "
+            "under the output directory."
+        ),
+    )
+    p.add_argument(
+        "--gdelta-seeds",
+        type=int,
+        nargs="+",
+        default=[0],
+        metavar="N",
+        help="Rollout seeds to measure. The reported +/- is across these.",
+    )
+    p.add_argument(
+        "--gdelta-draws",
+        type=int,
+        default=8,
+        help="Independent (z_t, t) draws averaged within each rollout seed.",
+    )
+    p.add_argument(
+        "--gdelta-inputs",
+        nargs="+",
+        metavar="PATH",
+        help="Aggregate existing per-seed gdelta JSONs instead of measuring, "
+        "for seeds run on separate machines. The counterpart to --merge.",
     )
 
     p.add_argument(
@@ -635,6 +681,37 @@ def _iter_ablation_models(
         del model
 
 
+def _resolve_checkpoint(
+    checkpoint: str | None,
+    parser: argparse.ArgumentParser,
+    requester: str,
+) -> str:
+    """Resolve ``--checkpoint`` to a local path, downloading a W&B artifact.
+
+    Args:
+        checkpoint: The raw ``--checkpoint`` value, or None.
+        parser: Parser to report a usage error through.
+        requester: What needs the checkpoint, named in the error message.
+
+    Returns:
+        Absolute path to a checkpoint file or directory.
+    """
+    if not checkpoint:
+        parser.error(f"--checkpoint is required for {requester}.")
+    if checkpoint.startswith("wandb:"):
+        from src.planners.logging import download_artifact
+
+        artifact_ref = checkpoint[len("wandb:") :]
+        resolved = download_artifact(artifact_ref)
+        if resolved is None:
+            parser.error(f"Failed to download W&B artifact: {artifact_ref}")
+        return resolved
+    path = Path(checkpoint).expanduser().resolve()
+    if not path.exists():
+        parser.error(f"Checkpoint not found: {path}")
+    return str(path)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point for the ablation suite.
 
@@ -762,6 +839,48 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("Analysis complete. Outputs in %s", output_dir)
         return
 
+    # Gradient-decomposition mode. Placed here so it inherits the output
+    # directory resolved above: the artifacts land beside the run's own
+    # results.json, which is what makes hf_upload discover and publish them.
+    if args.measure_gdelta or args.gdelta_inputs:
+        if args.gdelta_inputs:
+            agg = aggregate_files(args.gdelta_inputs, output_dir)
+        else:
+            # The run's own recorded config where one is given, so the weight
+            # transforms measured are the ones that run trained under; the
+            # standard layered chain otherwise. results.json records only
+            # scalar keys, so it carries no `id_envs` and cannot on its own
+            # say which layouts to roll out: defaults.yaml supplies the
+            # structural keys underneath, and the recorded config wins
+            # everywhere it speaks.
+            base = _load_yaml(
+                args.config or str(_PROJECT_ROOT / "configs" / "defaults.yaml")
+            )
+            if args.results_path:
+                gd_cfg = {**base, **_results_from_json(args.results_path)[2]}
+                logger.info("Config taken from %s", args.results_path)
+            else:
+                allowed = set(base) | set(_load_yaml(str(_DEFAULT_ABLATIONS_CONFIG)))
+                gd_cfg = {
+                    **base,
+                    **_load_ablation_config(args.ablations_config, allowed=allowed),
+                }
+
+            ckpt = _resolve_checkpoint(args.checkpoint, parser, "--measure-gdelta")
+            agg = run_gdelta(
+                gd_cfg,
+                ckpt,
+                output_dir,
+                seeds=args.gdelta_seeds,
+                n_draws=args.gdelta_draws,
+                batch_size=args.batch_size,
+                device=args.device,
+            )
+
+        write_gdelta_table(agg, output_dir)
+        logger.info("Gradient measurement complete. Outputs in %s", output_dir)
+        return
+
     # Training mode: load configs
     main_cfg = _load_yaml(
         args.config or str(_PROJECT_ROOT / "configs" / "defaults.yaml")
@@ -803,18 +922,7 @@ def main(argv: list[str] | None = None) -> None:
         torch.set_float32_matmul_precision("high")
 
     # Checkpoint (resolve W&B artifact if needed)
-    if not args.checkpoint:
-        parser.error("--checkpoint is required for training mode.")
-    if args.checkpoint.startswith("wandb:"):
-        from src.planners.logging import download_artifact
-
-        artifact_ref = args.checkpoint[len("wandb:") :]
-        resolved = download_artifact(artifact_ref)
-        if resolved is None:
-            parser.error(f"Failed to download W&B artifact: {artifact_ref}")
-        checkpoint_path = resolved
-    else:
-        checkpoint_path = str(Path(args.checkpoint).resolve())
+    checkpoint_path = _resolve_checkpoint(args.checkpoint, parser, "training mode")
 
     # Select ablations
     if args.all:

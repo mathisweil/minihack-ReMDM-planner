@@ -170,9 +170,16 @@ headline quantity, so the manuscript cites generated numbers instead of retyping
 Macros from this repository are prefixed `mh` and the sibling suite's `rw`, so both
 files can be `\input` together; the name-mangling rule is shared between the two.
 
-`experiments/rl_finetuning/measure_gdelta.py` splits the return-weighted ELBO gradient
-into its imitation and return terms at one parameter point. No training, no GPU needed —
-see `experiments/README.md`.
+`--measure-gdelta` splits the return-weighted ELBO gradient into its imitation and return
+terms at one parameter point. No training, no GPU needed; results land in `gdelta/` beside
+the run's `results.json` — see `experiments/README.md`.
+
+```bash
+python experiments/rl_finetuning/run_ablations.py --measure-gdelta --gdelta-seeds 0 1 2 \
+    --checkpoint path/to/ckpt.pth \
+    --results-path outputs/minihack_ablations/results.json \
+    --output-dir outputs/minihack_ablations
+```
 
 ## Configuration
 

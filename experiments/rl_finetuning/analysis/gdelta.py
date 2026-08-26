@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 """Measure the return term g_delta of the return-weighted ELBO decomposition.
 
 MiniHack port of the sibling repository's
-``experiments/rl_finetuning/measure_gdelta.py``. Same CLI, same output JSON
-schema, same reported columns; the differences are PyTorch for JAX and one
-environment-forced flag mapping, noted under `--num-envs` below.
+``experiments/rl_finetuning/analysis/gdelta.py``. Same output JSON schema and
+same reported columns; the differences are PyTorch for JAX and one
+environment-forced flag mapping, noted under ``num_envs`` below.
 
 Writing the per-window weight as A_i and the batch mean as Abar, the training
 gradient decomposes exactly as
@@ -13,12 +12,12 @@ gradient decomposes exactly as
     g_delta    =  (1/B) sum_i delta_i grad l_i,     delta_i = A_i/Abar - 1,
 
 so g_delta carries the entire directional contribution of the return and Abar
-is the scalar step-size rescaling. This script loads a pretrained checkpoint,
-collects one on-policy batch from it, and evaluates grad L_BC, g_delta and
-grad L_RW on that batch at those parameters under a shared (z_t, t) draw, so
-the only difference between the three is the weight vector. It repeats for
-every weight transform the ablation suite uses, and reports three references
-the cosine column needs:
+is the scalar step-size rescaling. :func:`measure` loads a pretrained
+checkpoint, collects one on-policy batch from it, and evaluates grad L_BC,
+g_delta and grad L_RW on that batch at those parameters under a shared
+(z_t, t) draw, so the only difference between the three is the weight vector.
+It repeats for every weight transform the ablation suite uses, and reports
+three references the cosine column needs:
 
   * the random-direction null, cos ~ N(0, 1/sqrt(D)) for D parameters;
   * cos(grad L_BC, grad L_BC) across two independent noise draws, which is the
@@ -45,45 +44,26 @@ sampling t and masking, so the three weight vectors see the identical draw.
 
 No training and no optimiser step occur. Runs on CPU in a few minutes.
 
-Usage, from the repository root:
-
-    python experiments/rl_finetuning/measure_gdelta.py \
-        --ckpt path/to/pretrained_checkpoint.pth \
-        --config path/to/results.json \
-        --seed 0
-
-`--config` accepts the `results.json` emitted by `run_ablations.py` (the script
-reads its "config" entry) or a plain JSON dict of the same keys. With no
-`--out`, the per-seed JSON lands under
-`experiments/rl_finetuning/outputs/{run_id}/gdelta_seed{seed}.json`.
-
-The per-draw standard deviations a single run reports are *within* one rollout
+The per-draw standard deviations a single seed reports are *within* one rollout
 seed. The figure the paper's gradient-decomposition table prints is the
-standard deviation across rollout seeds, which needs the aggregation pass over
-the per-seed files:
+standard deviation across rollout seeds, which :func:`aggregate` computes over
+the per-seed records.
 
-    python experiments/rl_finetuning/measure_gdelta.py --aggregate \
-        --inputs gdelta_seed0.json gdelta_seed1.json gdelta_seed2.json
+Driven by ``run_ablations.py --measure-gdelta``; see :func:`run_gdelta`.
 """
 
 from __future__ import annotations
 
-import argparse
-import datetime
-import json
-import os
-import sys
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import orjson
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+logger = logging.getLogger(__name__)
 
-DEFAULT_OUTPUT_ROOT = REPO_ROOT / "experiments" / "rl_finetuning" / "outputs"
-
-# The variant -> ablation mapping this script assumes. Each entry names the
+# The variant -> ablation mapping this module assumes. Each entry names the
 # registry key, the loss factory that key must still use, and its wins_only
 # flag. verify_registry() fails loudly if the suite drifts away from it, so a
 # registry edit cannot silently desynchronise the measurement.
@@ -96,6 +76,13 @@ REGISTRY_RULES = {
 
 BASELINE = "baseline_clipped_ratio"
 
+GDELTA_DIRNAME = "gdelta"
+AGGREGATE_FILENAME = "gdelta_aggregate.json"
+
+
+class RegistryDriftError(RuntimeError):
+    """The ablation registry no longer matches the variants measured here."""
+
 
 def verify_registry() -> None:
     """Fail if the ablation registry no longer matches the assumed variants."""
@@ -104,17 +91,17 @@ def verify_registry() -> None:
     for variant, (name, factory, wins_only) in REGISTRY_RULES.items():
         spec = REGISTRY.get(name)
         if spec is None:
-            raise SystemExit(
+            raise RegistryDriftError(
                 f"registry has no ablation {name!r}; variant {variant!r} is stale"
             )
         if spec.loss_factory.__name__ != factory:
-            raise SystemExit(
+            raise RegistryDriftError(
                 f"ablation {name!r} now uses {spec.loss_factory.__name__}, "
                 f"not {factory}; variant {variant!r} measures a weighting the "
                 "trainer no longer applies"
             )
         if bool(spec.wins_only) != wins_only:
-            raise SystemExit(
+            raise RegistryDriftError(
                 f"ablation {name!r} has wins_only={spec.wins_only}, expected "
                 f"{wins_only}; variant {variant!r} is stale"
             )
@@ -158,6 +145,14 @@ def centred_delta(weights):
     return weights / wbar - 1.0, wbar, True
 
 
+def against_bc(g, g_bc, norm_bc):
+    """``(||g|| / ||g_BC||, cos(g, g_BC))`` for one gradient against imitation."""
+    import torch
+
+    norm = float(g.norm())
+    return norm / norm_bc, float(torch.dot(g, g_bc) / (norm * norm_bc + 1e-12))
+
+
 def effective_sample_size(weights) -> float:
     """ESS as a fraction of the batch: (sum A)^2 / (B sum A^2)."""
     total = float(weights.sum())
@@ -165,21 +160,6 @@ def effective_sample_size(weights) -> float:
     if sq <= 0.0:
         return float("nan")
     return total**2 / (sq * weights.shape[0])
-
-
-def load_config(path: str) -> dict:
-    """Read an ablation config, accepting a results.json or a bare dict.
-
-    `run_ablations.py` records only the scalar config keys in `results.json`,
-    so a recorded config carries no `id_envs` and cannot on its own say which
-    layouts to roll out. `configs/defaults.yaml` is authoritative for those,
-    and is layered underneath; anything the given file names wins.
-    """
-    import yaml
-
-    base = yaml.safe_load((REPO_ROOT / "configs" / "defaults.yaml").read_text())
-    blob = json.load(open(path))
-    return {**base, **(blob["config"] if "config" in blob else blob)}
 
 
 def restore_params(cfg, ckpt: str, device):
@@ -196,28 +176,41 @@ def restore_params(cfg, ckpt: str, device):
 
     model = make_model(cfg).to(device)
     blob = torch.load(ckpt, map_location=device, weights_only=False)
-    state = blob["ema_state_dict"] if "ema_state_dict" in blob else blob
+    state = blob.get("ema_state_dict", blob)
     model.load_state_dict(state)
     step = int(blob.get("iteration", 0)) if isinstance(blob, dict) else 0
     return model, step
 
 
-def aggregate(paths: list[str]) -> dict:
-    """Combine per-seed JSONs, reporting the standard deviation across seeds.
+def aggregate(blobs: list[dict], inputs: list[str] | None = None) -> dict:
+    """Combine per-seed records, reporting the standard deviation across seeds.
 
     Each input contributes one number per variant per column -- its own mean
     over the ``(z_t, t)`` draws. The dispersion reported here is over those
     per-seed means, which is the quantity the paper's table claims.
+
+    Args:
+        blobs:  Per-seed records, as returned by :func:`measure`.
+        inputs: Optional provenance paths recorded in the output.
+
+    Returns:
+        The aggregate record.
+
+    Raises:
+        ValueError: If an input is itself an aggregate, or the variant sets
+            disagree.
     """
-    blobs = [json.load(open(p)) for p in paths]
-    for blob, path in zip(blobs, paths):
+    labels = inputs if inputs is not None else [
+        f"seed{b.get('seed', i)}" for i, b in enumerate(blobs)
+    ]
+    for blob, label in zip(blobs, labels, strict=True):
         if blob.get("aggregate"):
-            raise SystemExit(f"{path} is already an aggregate")
+            raise ValueError(f"{label} is already an aggregate")
 
     names = list(blobs[0]["variants"])
-    for blob, path in zip(blobs, paths):
+    for blob, label in zip(blobs, labels, strict=True):
         if list(blob["variants"]) != names:
-            raise SystemExit(f"{path} has a different variant set")
+            raise ValueError(f"{label} has a different variant set")
 
     def across(values):
         arr = np.array(values, dtype=float)
@@ -225,7 +218,7 @@ def aggregate(paths: list[str]) -> dict:
 
     out = {
         "aggregate": True,
-        "inputs": [str(p) for p in paths],
+        "inputs": [str(p) for p in labels],
         "seeds": [int(b["seed"]) for b in blobs],
         "n_seeds": len(blobs),
         "n_draws_per_seed": [int(b["n_draws"]) for b in blobs],
@@ -276,7 +269,39 @@ def print_aggregate(agg: dict) -> None:
               f"{flag}")
 
 
-def measure(args) -> dict:
+def measure(
+    config: dict,
+    ckpt: str,
+    *,
+    seed: int = 0,
+    n_draws: int = 8,
+    num_envs: int | None = None,
+    batch_size: int | None = None,
+    device: str | None = None,
+) -> dict:
+    """Measure the decomposition at one rollout seed.
+
+    Args:
+        config:     Lowercase config dict; the run's own, so the weight
+                    transforms match the ones it trained under. It must carry
+                    the structural keys ``make_model`` needs as well as the
+                    scalar ones, which a bare ``results.json`` config does not.
+        ckpt:       Checkpoint ``.pth`` of the pretrained planner.
+        seed:       Rollout seed. Also fixes the ``(z_t, t)`` draws.
+        n_draws:    Independent ``(z_t, t)`` draws to average over.
+        num_envs:   Override the collection size; on MiniHack, whose rollouts
+                    are sequential rather than vectorised, the sibling's
+                    ``NUM_ENVS`` has no counterpart and this sets
+                    ``episodes_per_iter``. ``None`` keeps the config value.
+        batch_size: Override ``batch_size``; ``None`` keeps the config value.
+        device:     Torch device; ``None`` picks CUDA where available.
+
+    Returns:
+        The per-seed record.
+
+    Raises:
+        RuntimeError: If collection produced no windows.
+    """
     import random
 
     import torch
@@ -290,24 +315,21 @@ def measure(args) -> dict:
 
     verify_registry()
 
-    raw = load_config(args.config)
-    # MiniHack rollouts are sequential, not vectorised, so the sibling's
-    # NUM_ENVS has no counterpart. The flag keeps its name for CLI parity and
-    # sets the collection size it does control: episodes per iteration.
-    if args.num_envs is not None:
-        raw["episodes_per_iter"] = args.num_envs
-    if args.batch_size is not None:
-        raw["batch_size"] = args.batch_size
+    raw = dict(config)
+    if num_envs is not None:
+        raw["episodes_per_iter"] = num_envs
+    if batch_size is not None:
+        raw["batch_size"] = batch_size
     cfg = SimpleNamespace(**raw)
-    cfg.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device(cfg.device)
+    cfg.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device_t = torch.device(cfg.device)
     cfg._schedule_fn = get_schedule(cfg.noise_schedule)
 
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    random.seed(args.seed)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
-    model, step = restore_params(cfg, args.ckpt, device)
+    model, step = restore_params(cfg, ckpt, device_t)
     n_params = sum(p.numel() for p in model.parameters())
     random_cos_sd = 1.0 / np.sqrt(n_params)
     print(f"checkpoint step {step}, D = {n_params/1e6:.2f}M, "
@@ -316,10 +338,10 @@ def measure(args) -> dict:
     # ---- one on-policy batch from the pretrained policy ----
     model.eval()
     local_obs, global_obs, x0, returns = collect_training_data(
-        model, cfg, device, cfg.episodes_per_iter
+        model, cfg, device_t, cfg.episodes_per_iter
     )
     if local_obs.shape[0] == 0:
-        raise SystemExit("collection produced no windows")
+        raise RuntimeError("collection produced no windows")
     adv, _, _ = compute_advantages(
         returns,
         cfg.return_weight_floor,
@@ -333,7 +355,7 @@ def measure(args) -> dict:
     )
 
     batch = min(cfg.batch_size, local_obs.shape[0])
-    idx = torch.randperm(local_obs.shape[0], device=device)[:batch]
+    idx = torch.randperm(local_obs.shape[0], device=device_t)[:batch]
     local_b, global_b, x0_b = local_obs[idx], global_obs[idx], x0[idx]
     adv_b, ret_b = adv[idx], returns[idx]
     print(f"batch {batch} windows, win rate "
@@ -353,7 +375,7 @@ def measure(args) -> dict:
         torch.manual_seed(draw_seed)
         model.zero_grad(set_to_none=True)
         per_sample, _, _, _, _ = _forward_and_loss(
-            model, local_b, global_b, x0_b, cfg, device
+            model, local_b, global_b, x0_b, cfg, device_t
         )
         loss = per_sample.mean() if weights is None else (per_sample * weights).mean()
         loss.backward()
@@ -382,9 +404,9 @@ def measure(args) -> dict:
     bc_self, residuals = [], []
     # A separate stream for the shuffled-delta null, so adding the control
     # leaves every draw of the real measurement bit-for-bit unchanged.
-    perm_gen = torch.Generator(device="cpu").manual_seed(args.seed + 10_000)
-    for draw in range(args.n_draws):
-        key = args.seed * 1_000_003 + draw
+    perm_gen = torch.Generator(device="cpu").manual_seed(seed + 10_000)
+    for draw in range(n_draws):
+        key = seed * 1_000_003 + draw
         g_bc = gradient(None, key)
         norm_bc = float(g_bc.norm())
 
@@ -393,14 +415,10 @@ def measure(args) -> dict:
             float(torch.dot(g_bc, g_bc2) / (norm_bc * float(g_bc2.norm()) + 1e-12))
         )
 
-        def against_bc(g):
-            norm = float(g.norm())
-            return norm / norm_bc, float(torch.dot(g, g_bc) / (norm * norm_bc + 1e-12))
-
         for name, weights in variants.items():
             delta = deltas[name]
             g_delta = gradient(delta, key)
-            ratio, cos = against_bc(g_delta)
+            ratio, cos = against_bc(g_delta, g_bc, norm_bc)
             acc[name]["ratio"].append(ratio)
             acc[name]["cos"].append(cos)
 
@@ -409,7 +427,7 @@ def measure(args) -> dict:
             # seed is the one the real measurement used, so the two differ only
             # in which window carries which weight.
             perm = torch.randperm(delta.shape[0], generator=perm_gen).to(delta.device)
-            ratio_s, cos_s = against_bc(gradient(delta[perm], key))
+            ratio_s, cos_s = against_bc(gradient(delta[perm], key), g_bc, norm_bc)
             acc[name]["ratio_shuf"].append(ratio_s)
             acc[name]["cos_shuf"].append(cos_s)
 
@@ -420,7 +438,7 @@ def measure(args) -> dict:
                     (g_rw - stats[name]["abar"] * (g_bc + g_delta)).norm()
                     / (g_rw.norm() + 1e-12)
                 ))
-        print(f"  draw {draw + 1}/{args.n_draws}", flush=True)
+        print(f"  draw {draw + 1}/{n_draws}", flush=True)
 
     out = {
         "aggregate": False,
@@ -428,8 +446,8 @@ def measure(args) -> dict:
         "n_params": int(n_params),
         "random_cos_sd": float(random_cos_sd),
         "batch": int(batch),
-        "seed": args.seed,
-        "n_draws": args.n_draws,
+        "seed": seed,
+        "n_draws": n_draws,
         "bc_self_cos_mean": float(np.mean(bc_self)),
         "bc_self_cos_std": float(np.std(bc_self)),
         "eq4_residual_max": float(np.max(residuals)),
@@ -439,8 +457,8 @@ def measure(args) -> dict:
           f"{np.mean(bc_self):.3f} +/- {np.std(bc_self):.3f}   [same-objective reference]")
     print(f"random-direction null: cos ~ N(0, {random_cos_sd:.2e})")
     print(f"Eq. 4 identity, max relative residual = {np.max(residuals):.2e}")
-    print(f"+/- below is across the {args.n_draws} (z_t, t) draws of this one "
-          "seed, not across seeds; use --aggregate for that\n")
+    print(f"+/- below is across the {n_draws} (z_t, t) draws of this one seed, "
+          "not across seeds\n")
     print(f"{'weight transform':26s} {'CV_A':>7s} {'Abar':>8s} {'Abar/base':>10s} "
           f"{'ESS/B':>7s} {'ratio':>16s} {'cos':>16s} "
           f"{'ratio(shuf)':>16s} {'cos(shuf)':>16s}")
@@ -467,57 +485,78 @@ def measure(args) -> dict:
     return out
 
 
-def default_out(args) -> Path:
-    run_id = args.run_id or f"gdelta_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    stem = "gdelta_aggregate" if args.aggregate else f"gdelta_seed{args.seed}"
-    return DEFAULT_OUTPUT_ROOT / run_id / f"{stem}.json"
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--ckpt", help="pretrained checkpoint .pth")
-    ap.add_argument("--config", help="results.json or config JSON")
-    ap.add_argument("--out", default=None,
-                    help="output JSON path; default is under "
-                         "experiments/rl_finetuning/outputs/{run_id}/")
-    ap.add_argument("--run-id", default=None,
-                    help="output subdirectory name; default is a timestamp")
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--num-envs", type=int, default=None,
-                    help="override the collection size; on MiniHack, whose "
-                         "rollouts are sequential, this sets episodes_per_iter")
-    ap.add_argument("--batch-size", type=int, default=None,
-                    help="override batch_size; default is the config value")
-    ap.add_argument("--n-draws", type=int, default=8,
-                    help="independent (z_t, t) draws to average over")
-    ap.add_argument("--device", default=None,
-                    help="torch device; default is cuda when available")
-    ap.add_argument("--aggregate", action="store_true",
-                    help="combine per-seed JSONs given by --inputs and report "
-                         "the standard deviation across seeds")
-    ap.add_argument("--inputs", nargs="+", default=None,
-                    help="per-seed JSON files to aggregate")
-    args = ap.parse_args()
-
-    os.chdir(REPO_ROOT)
-
-    if args.aggregate:
-        if not args.inputs:
-            ap.error("--aggregate needs --inputs")
-        out = aggregate(args.inputs)
-        print_aggregate(out)
-    else:
-        if args.inputs:
-            ap.error("--inputs is only meaningful with --aggregate")
-        if not args.ckpt or not args.config:
-            ap.error("--ckpt and --config are required unless --aggregate")
-        out = measure(args)
-
-    path = Path(args.out) if args.out else default_out(args)
+def _write(path: Path, blob: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    json.dump(out, open(path, "w"), indent=1)
-    print(f"\nwrote {path}")
+    path.write_bytes(orjson.dumps(blob, option=orjson.OPT_INDENT_2))
+    logger.info("Wrote %s", path)
 
 
-if __name__ == "__main__":
-    main()
+def load_gdelta_aggregate(output_dir: Path) -> dict | None:
+    """The aggregate record for a run, or ``None`` if it was never measured."""
+    path = Path(output_dir) / GDELTA_DIRNAME / AGGREGATE_FILENAME
+    if not path.is_file():
+        return None
+    return orjson.loads(path.read_bytes())
+
+
+def run_gdelta(
+    config: dict,
+    ckpt: str,
+    output_dir: Path,
+    *,
+    seeds: list[int],
+    n_draws: int = 8,
+    num_envs: int | None = None,
+    batch_size: int | None = None,
+    device: str | None = None,
+) -> dict:
+    """Measure every seed and write the per-seed and aggregate records.
+
+    Artifacts land in ``output_dir/gdelta/``, beside the run's ``results.json``,
+    so one run directory holds the suite's scores and the gradient measurement
+    taken at the checkpoint they started from.
+
+    Args:
+        config:     Lowercase config dict.
+        ckpt:       Checkpoint ``.pth`` of the pretrained planner.
+        output_dir: The run's root output directory.
+        seeds:      Rollout seeds to measure.
+        n_draws:    Independent ``(z_t, t)`` draws per seed.
+        num_envs:   Override the collection size (``episodes_per_iter``).
+        batch_size: Override ``batch_size``; ``None`` keeps the config value.
+        device:     Torch device; ``None`` picks CUDA where available.
+
+    Returns:
+        The aggregate record.
+    """
+    gdelta_dir = Path(output_dir) / GDELTA_DIRNAME
+    blobs, labels = [], []
+    for seed in seeds:
+        logger.info("Measuring g_delta at rollout seed %d", seed)
+        blob = measure(
+            config,
+            ckpt,
+            seed=seed,
+            n_draws=n_draws,
+            num_envs=num_envs,
+            batch_size=batch_size,
+            device=device,
+        )
+        path = gdelta_dir / f"gdelta_seed{seed}.json"
+        _write(path, blob)
+        blobs.append(blob)
+        labels.append(str(path))
+
+    agg = aggregate(blobs, labels)
+    _write(gdelta_dir / AGGREGATE_FILENAME, agg)
+    print_aggregate(agg)
+    return agg
+
+
+def aggregate_files(paths: list[str], output_dir: Path) -> dict:
+    """Aggregate per-seed records written elsewhere, e.g. by another machine."""
+    blobs = [orjson.loads(Path(p).read_bytes()) for p in paths]
+    agg = aggregate(blobs, [str(p) for p in paths])
+    _write(Path(output_dir) / GDELTA_DIRNAME / AGGREGATE_FILENAME, agg)
+    print_aggregate(agg)
+    return agg
