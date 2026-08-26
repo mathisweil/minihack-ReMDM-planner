@@ -165,6 +165,15 @@ python experiments/rl_finetuning/run_ablations.py \
     --ablations baseline_rl kl_penalty --fast
 ```
 
+Pass `--emit-tex-macros` to also write `tables/results.tex`, one `\newcommand` per
+headline quantity, so the manuscript cites generated numbers instead of retyping them.
+Macros from this repository are prefixed `mh` and the sibling suite's `rw`, so both
+files can be `\input` together; the name-mangling rule is shared between the two.
+
+`experiments/rl_finetuning/measure_gdelta.py` splits the return-weighted ELBO gradient
+into its imitation and return terms at one parameter point. No training, no GPU needed —
+see `experiments/README.md`.
+
 ## Configuration
 
 One YAML config holds the experiment; the CLI holds the run.

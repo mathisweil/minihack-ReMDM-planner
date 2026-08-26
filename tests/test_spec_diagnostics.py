@@ -39,7 +39,7 @@ from experiments.rl_finetuning.analysis.report import (
     _score_hypothesis,
 )
 from experiments.rl_finetuning.analysis.tables import (
-    _macro,
+    _macro_name,
     baseline_rl_score_of,
     make_forgetting_analysis_table,
     make_per_env_table,
@@ -558,13 +558,16 @@ def test_the_tex_macros_carry_the_numbers_the_manuscript_prints(tmp_path):
     CV_A = sqrt(B / ESS - 1) averaged over iterations.
 
     Derivation: score 0.4375 -> 43.75. With B = 4608 and ESS 4608/2 and
-    4608/5, CV_A = (sqrt(1) + sqrt(4)) / 2 = 1.50.
+    4608/5, CV_A = (sqrt(1) + sqrt(4)) / 2 = 1.50. Pooled seed sd over the
+    one condition carrying seeds is its own sample sd: scores 0.3875 and
+    0.4875 give sqrt(0.005) = 0.0707 -> 7.07 points.
     """
     history = AblationHistory(effective_batch_size=[4608 / 2, 4608 / 5])
     results = {
         "baseline_rl": {
             "score": 0.4375,
             "score_std": 0.0612,
+            "all_scores": [0.3875, 0.4875],
             "history": history,
         },
         "layer_ablation_top1": {
@@ -573,28 +576,62 @@ def test_the_tex_macros_carry_the_numbers_the_manuscript_prints(tmp_path):
             "history": AblationHistory(),
         },
     }
-    path = write_tex_macros(results, 0.475, tmp_path, {"batch_size": 4608})
+    path = write_tex_macros(
+        results, 0.475, tmp_path / "results.tex", {"batch_size": 4608}
+    )
     text = path.read_text()
 
-    for name in re.findall(r"\\newcommand\{\\([A-Za-z]*)\}", text):
+    names = re.findall(r"\\newcommand\{\\([A-Za-z]*)\}", text)
+    for name in names:
         assert name.isalpha() and name.startswith("mh")
-    assert len(re.findall(r"\\newcommand", text)) == len(
-        re.findall(r"\\newcommand\{\\[A-Za-z]+\}", text)
-    )
+    # definitions only, one per line, and no name defined twice
+    assert len(re.findall(r"\\newcommand", text)) == len(names)
+    assert len(set(names)) == len(names)
 
-    assert "\\newcommand{\\mhPretrainedWinRate}{47.50}" in text
-    assert "\\newcommand{\\mhBaselineRlScore}{43.75}" in text
-    assert "\\newcommand{\\mhBaselineRlSd}{6.12}" in text
-    assert "\\newcommand{\\mhBaselineRlCVA}{1.50}" in text
-    assert "\\newcommand{\\mhBaselineRlESS}{1613}" in text
+    assert "\\newcommand{\\mhPretrainedScore}{47.50}" in text
+    assert "\\newcommand{\\mhBatchSize}{4608}" in text
+    assert "\\newcommand{\\mhScoreBaselineRl}{43.75}" in text
+    assert "\\newcommand{\\mhScoreSdBaselineRl}{6.12}" in text
+    assert "\\newcommand{\\mhCvABaselineRl}{1.50}" in text
+    assert "\\newcommand{\\mhEssBaselineRl}{1613}" in text
+    # deltas are magnitudes; the manuscript carries the sign
+    assert "\\newcommand{\\mhDeltaPretrainedBaselineRl}{3.75}" in text
+    assert "\\newcommand{\\mhDeltaBaselineBaselineRl}{0.00}" in text
+    assert "\\newcommand{\\mhPooledSeedSd}{7.07}" in text
     # a digit in the condition name is spelled out, or the macro is unusable
-    assert "\\newcommand{\\mhLayerAblationTopOneScore}{41.25}" in text
+    assert "\\newcommand{\\mhScoreLayerAblationTopOne}{41.25}" in text
     # no ESS recorded -> no CV_A macro invented for it
-    assert _macro("layer_ablation_top1", "CVA") not in text
+    assert f"mhCvA{_macro_name('layer_ablation_top1')}" not in text
     # group means come from the same table the CSV does
-    assert "\\newcommand{\\mhGroupBaselineMean}{43.75}" in text
+    assert "\\newcommand{\\mhGroupMeanBaseline}{43.75}" in text
     # and the file says which evaluation its per-layout numbers came from
     assert "% Per-layout macros come from the merged single-run history." in text
+
+
+def test_the_macro_mangling_rule_matches_the_sibling_suite(tmp_path):
+    """The manuscript inputs both suites' `results.tex`, so a condition must
+    mangle to the same tag in both repositories and the prefixes must be the
+    only thing separating them. `_macro_name` is the sibling's rule verbatim:
+    `-`/`_` are word boundaries, digits are spelled out, every word is
+    capitalised.
+    """
+    assert _macro_name("advantage_clip") == "AdvantageClip"
+    assert _macro_name("layer_ablation_top1") == "LayerAblationTopOne"
+    assert _macro_name("normalized_adv") == "NormalizedAdv"
+    assert _macro_name("bc_wins") == "BcWins"
+    # only the first character of each word is raised, digits and all
+    assert _macro_name("Room-5x5") == "RoomFivexFive"
+    assert _macro_name("Corridor-R3") == "CorridorRThree"
+    assert _macro_name("group", "Baseline") == "GroupBaseline"
+
+    # A collision silently redefines an earlier number, so it must raise
+    # rather than write.
+    results = {
+        "baseline_rl": {"score": 0.4, "history": AblationHistory()},
+        "baseline-rl": {"score": 0.9, "history": AblationHistory()},
+    }
+    with pytest.raises(ValueError, match="Duplicate"):
+        write_tex_macros(results, 0.475, tmp_path / "results.tex")
 
 
 def test_the_per_env_table_reads_the_evaluation_the_score_comes_from():

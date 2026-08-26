@@ -663,91 +663,103 @@ def make_hypothesis_verdict_table(
 # The paper workspace inserts generated numbers through `\newcommand` macros
 # in `papers/<slug>/src/results.tex` so each one is traceable to the run that
 # produced it, and hand-editing a number into the draft is a rule violation.
-# Macros from this repository are prefixed `mh`, the sibling repo's `cx`, so
-# both halves of a two-environment table can live in one file.
+#
+# The manuscript inputs both suites' `results.tex`, so the two files share a
+# namespace. `_macro_name` is character-for-character the sibling repo's
+# mangling rule, which is what makes `advantage_clip` reach the same tag
+# `AdvantageClip` in both; the `prefix` is what keeps the two tags apart.
+# This repository writes `mh`, the sibling `rw`.
 # ---------------------------------------------------------------------------
 
 #: Macro namespace for this repository's numbers.
 _MACRO_PREFIX = "mh"
 
-#: LaTeX control sequences are letters only, so condition names carrying a
-#: digit (`layer_ablation_top1`) need it spelled out.
-_DIGIT_WORDS = {
-    "0": "Zero",
-    "1": "One",
-    "2": "Two",
-    "3": "Three",
-    "4": "Four",
-    "5": "Five",
-    "6": "Six",
-    "7": "Seven",
-    "8": "Eight",
-    "9": "Nine",
-}
+#: Win rates are fractions here and percentage points in the manuscript.
+_MACRO_SCALE = 100.0
+
+#: LaTeX control sequences are letters only, so a condition name carrying a
+#: digit (`layer_ablation_top1`) needs it spelled out.
+_DIGIT_WORDS = ("Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
+                "Eight", "Nine")
 
 
-def _macro(*parts: str) -> str:
-    """Control sequence name for one quantity, e.g. ``mhBaselineRlScore``."""
-    out = _MACRO_PREFIX
-    for part in parts:
-        for chunk in str(part).replace("-", "_").split("_"):
-            if not chunk:
-                continue
-            chunk = "".join(_DIGIT_WORDS.get(c, c) for c in chunk)
-            out += chunk[0].upper() + chunk[1:]
-    if not out.isalpha():
-        raise ValueError(f"Not a usable LaTeX macro name: {out!r}")
-    return out
+def _macro_name(*parts: str) -> str:
+    """A TeX-legal control sequence name built from arbitrary identifiers.
 
-
-def _cv_a_and_ess(
-    history: AblationHistory,
-    batch_size: int | None,
-) -> tuple[float, float] | None:
-    """Mean weight dispersion and mean effective sample size over training.
-
-    ``CV_A = sqrt(B / ESS - 1)`` is the coefficient of variation of the
-    return weights implied by Kish's effective sample size, and is averaged
-    over training iterations, not computed from the mean ESS -- the two
-    differ, and §6.4 of the paper quotes the former.
-
-    Args:
-        history: One ablation's recorded history.
-        batch_size: ``B``, the number of advantages each ESS was taken over.
-
-    Returns:
-        ``(mean CV_A, mean ESS)``, or ``None`` when either is unavailable.
+    ``\\newcommand`` names may contain letters only, so underscores and
+    hyphens become word boundaries and digits are spelled out:
+    ``layer_ablation_top1`` -> ``LayerAblationTopOne``.
     """
-    ess = [e for e in history.effective_batch_size if e > 0]
-    if not ess or not batch_size:
-        return None
-    cv = [np.sqrt(max(batch_size / e - 1.0, 0.0)) for e in ess]
-    return float(np.mean(cv)), float(np.mean(ess))
+    out = []
+    for part in parts:
+        for word in str(part).replace("-", "_").split("_"):
+            if not word:
+                continue
+            chars = [_DIGIT_WORDS[int(c)] if c.isdigit() else c for c in word]
+            joined = "".join(chars)
+            out.append(joined[0].upper() + joined[1:])
+    return "".join(out)
+
+
+def _cv_a(ess: float, batch: int) -> float:
+    """Weight dispersion recovered from an effective sample size."""
+    if not batch or ess <= 0:
+        return float("nan")
+    return float(np.sqrt(max(batch / ess - 1.0, 0.0)))
 
 
 def write_tex_macros(
     results: dict[str, dict],
     pretrained_score: float,
-    out_dir: Path,
+    out_path: Path,
     config: dict | None = None,
+    prefix: str = _MACRO_PREFIX,
+    scale: float = _MACRO_SCALE,
 ) -> Path:
-    """Write ``results.tex``: the headline numbers as LaTeX macros.
+    """Write ``\\newcommand`` definitions for every headline quantity.
 
-    Win rates are emitted in percentage points at the precision the
-    manuscript prints, so a macro can replace a literal without changing the
-    rendered number.
+    The paper workspace expects generated numbers to reach the manuscript
+    through macros so each is traceable to the run that produced it, rather
+    than being retyped as a literal.
+
+    Each quantity is emitted at the number of decimals the manuscript prints
+    it with, not at a uniform significant-figure count. A macro is a literal
+    substitution: ``%.4g`` would render a group mean as ``43.746`` where the
+    paper prints ``43.75``, silently changing the displayed precision at every
+    site. Win rates, standard deviations and group statistics take two
+    decimals; effective sample size takes none, which is how Section 6.4
+    quotes it.
 
     Args:
-        results: Ablation results dict.
+        results:          Dict mapping ablation_name -> result entry.
         pretrained_score: Pretrained model win rate, as a fraction.
-        out_dir: Directory to write ``results.tex`` into.
-        config: The run's recorded config; ``batch_size`` is what CV_A is
-            taken over, so without it CV_A and ESS are omitted.
+        out_path:         File to write, conventionally ``results.tex``.
+        config:           The run's config, read for ``batch_size`` so
+                          :math:`\\mathrm{CV}_A` and ESS can be emitted.
+        prefix:           Macro-name prefix, keeping these out of the way of
+                          LaTeX's own names and of the sibling suite's. Two
+                          suites sharing one ``results.tex`` need different
+                          prefixes.
+        scale:            Multiplier on score-like quantities before
+                          formatting. MiniHack's metric is a fraction the
+                          paper reports as a percentage. Never applied to ESS
+                          or :math:`\\mathrm{CV}_A`, which are unitless.
 
     Returns:
-        Path to the written file.
+        The path written.
+
+    Raises:
+        ValueError: If two quantities mangle to the same control sequence, or
+            a name is not a usable one.
     """
-    batch_size = int(config["batch_size"]) if config and "batch_size" in config else None
+    cfg = config or {}
+    # Lowercase only: `BATCH_SIZE` is the sibling suite's JAX-side spelling and
+    # no config here declares it, which tests/test_config.py enforces.
+    batch = int(cfg.get("batch_size") or 0)
+
+    def score(value: float, decimals: int = 2) -> str:
+        return f"{float(value) * scale:.{decimals}f}"
+
     lines = [
         "% Generated by experiments/rl_finetuning/analysis/tables.py.",
         "% Do not hand-edit: regenerate with",
@@ -757,62 +769,121 @@ def write_tex_macros(
         "% training iterations of the first seed's history.",
         f"% Per-layout macros come from {_per_env_source(results)}.",
         "",
-        f"\\newcommand{{\\{_macro('pretrained', 'win', 'rate')}}}"
-        f"{{{100 * float(pretrained_score):.2f}}}",
-        "",
+        f"\\newcommand{{\\{prefix}PretrainedScore}}{{{score(pretrained_score)}}}",
     ]
-
-    for name, res in sorted(results.items()):
-        lines.append(
-            f"\\newcommand{{\\{_macro(name, 'score')}}}"
-            f"{{{100 * float(res['score']):.2f}}}"
-        )
-        lines.append(
-            f"\\newcommand{{\\{_macro(name, 'sd')}}}"
-            f"{{{100 * float(res.get('score_std', 0.0)):.2f}}}"
-        )
-        stats = _cv_a_and_ess(res["history"], batch_size)
-        if stats is not None:
-            cv, ess = stats
-            lines.append(f"\\newcommand{{\\{_macro(name, 'CVA')}}}{{{cv:.2f}}}")
-            lines.append(f"\\newcommand{{\\{_macro(name, 'ESS')}}}{{{ess:.0f}}}")
+    if batch:
+        lines.append(f"\\newcommand{{\\{prefix}BatchSize}}{{{batch}}}")
     lines.append("")
+
+    within_seed_var: list[float] = []
+    baseline = (
+        float(results["baseline_rl"]["score"]) if "baseline_rl" in results else None
+    )
+    for name in sorted(results):
+        res = results[name]
+        tag = _macro_name(name)
+        lines.append(
+            f"\\newcommand{{\\{prefix}Score{tag}}}{{{score(res['score'])}}}"
+        )
+        # Magnitude only: the manuscript carries the sign as $-$ / $+$.
+        lines.append(
+            f"\\newcommand{{\\{prefix}DeltaPretrained{tag}}}"
+            f"{{{score(abs(float(res['score']) - pretrained_score))}}}"
+        )
+        if baseline is not None:
+            lines.append(
+                f"\\newcommand{{\\{prefix}DeltaBaseline{tag}}}"
+                f"{{{score(abs(float(res['score']) - baseline))}}}"
+            )
+        lines.append(
+            f"\\newcommand{{\\{prefix}ScoreSd{tag}}}"
+            f"{{{score(res.get('score_std', 0.0))}}}"
+        )
+        scores = [float(s) for s in res.get("all_scores", [])]
+        if len(scores) >= 2:
+            within_seed_var.append(float(np.var(scores, ddof=1)))
+
+        ess_series = [e for e in res["history"].effective_batch_size if e > 0]
+        if ess_series:
+            ess = float(np.mean(ess_series))
+            lines.append(f"\\newcommand{{\\{prefix}Ess{tag}}}{{{ess:.0f}}}")
+            if batch:
+                # Averaged over iterations, not taken from the mean ESS: the
+                # two differ, and Section 6.4 quotes the former.
+                cv = float(np.mean([_cv_a(e, batch) for e in ess_series]))
+                lines.append(f"\\newcommand{{\\{prefix}CvA{tag}}}{{{cv:.2f}}}")
+    lines.append("")
+
+    # Pooled within-condition sd across seeds: the seed noise a single
+    # condition's score carries, not the spread between conditions.
+    if within_seed_var:
+        pooled = float(np.sqrt(np.mean(within_seed_var)))
+        lines.append(f"\\newcommand{{\\{prefix}PooledSeedSd}}{{{score(pooled)}}}")
 
     group_df = make_group_summary_table(results, pretrained_score)
-    baseline = float(results["baseline_rl"]["score"]) if "baseline_rl" in results else None
-    for row in group_df.to_dicts():
-        g = row["Group"]
-        for field in ("Mean", "Best", "Worst", "StdDev"):
+    for row in group_df.iter_rows(named=True):
+        tag = _macro_name(row["Group"])
+        for col, suffix in (
+            ("Mean", "GroupMean"),
+            ("Best", "GroupBest"),
+            ("Worst", "GroupWorst"),
+            ("StdDev", "GroupSd"),
+        ):
             lines.append(
-                f"\\newcommand{{\\{_macro('group', g, field)}}}"
-                f"{{{100 * float(row[field]):.2f}}}"
+                f"\\newcommand{{\\{prefix}{suffix}{tag}}}{{{score(row[col])}}}"
             )
-        lines.append(f"\\newcommand{{\\{_macro('group', g, 'N')}}}{{{int(row['N'])}}}")
+        lines.append(f"\\newcommand{{\\{prefix}GroupN{tag}}}{{{int(row['N'])}}}")
         if baseline is not None:
-            # Magnitude only: the manuscript carries the sign as $-$ / $+$.
-            delta = abs(100 * (float(row["Mean"]) - baseline))
             lines.append(
-                f"\\newcommand{{\\{_macro('group', g, 'delta')}}}{{{delta:.2f}}}"
+                f"\\newcommand{{\\{prefix}GroupDelta{tag}}}"
+                f"{{{score(abs(float(row['Mean']) - baseline))}}}"
             )
     lines.append("")
 
-    # Per-layout win rates, the disaggregation tab:per-env reports. One decimal,
-    # which is what that table prints.
+    # Per-layout win rates, the disaggregation tab:per-env reports. One
+    # decimal, which is what that table prints. MiniHack only: the sibling
+    # suite has a single environment and emits no equivalent.
     for row in make_per_env_table(results).to_dicts():
-        name = row.pop("Method")
+        tag = _macro_name(row.pop("Method"))
         for env, value in row.items():
-            tag = str(env).replace("MiniHack-", "").replace("-v0", "")
+            env_tag = _macro_name(
+                str(env).replace("MiniHack-", "").replace("-v0", "")
+            )
             lines.append(
-                f"\\newcommand{{\\{_macro(name, 'env', tag)}}}"
-                f"{{{100 * float(value):.1f}}}"
+                f"\\newcommand{{\\{prefix}Env{tag}{env_tag}}}"
+                f"{{{score(value, 1)}}}"
             )
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "results.tex"
-    path.write_text("\n".join(lines) + "\n")
+    _check_macro_names(lines)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines) + "\n")
     n_macros = sum(1 for x in lines if x.startswith("\\newcommand"))
-    logger.info("Saved %s (%d macros)", path, n_macros)
-    return path
+    logger.info("Saved %s (%d macros)", out_path, n_macros)
+    return out_path
+
+
+def _check_macro_names(lines: list[str]) -> None:
+    """Every emitted name is letters-only and defined exactly once.
+
+    A collision would silently redefine an earlier number, which is the one
+    failure mode this file exists to rule out.
+
+    Args:
+        lines: The lines about to be written.
+
+    Raises:
+        ValueError: On a duplicate or a non-alphabetic control sequence.
+    """
+    seen: set[str] = set()
+    for line in lines:
+        if not line.startswith("\\newcommand"):
+            continue
+        name = line[len("\\newcommand{\\") : line.index("}")]
+        if not name.isalpha():
+            raise ValueError(f"Not a usable LaTeX macro name: {name!r}")
+        if name in seen:
+            raise ValueError(f"Duplicate LaTeX macro name: {name!r}")
+        seen.add(name)
 
 
 def generate_summary_tables(
@@ -919,7 +990,9 @@ def generate_summary_tables(
         )
 
     if emit_tex_macros:
-        write_tex_macros(results, pretrained_score, tables_dir, config)
+        write_tex_macros(
+            results, pretrained_score, tables_dir / "results.tex", config=config
+        )
 
     logger.info("All tables saved to %s", tables_dir)
     return tables

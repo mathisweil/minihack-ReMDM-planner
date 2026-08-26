@@ -19,6 +19,7 @@ Implements **25 ablations**: a baseline plus four groups (A: Regularisation, B: 
 ```
 rl_finetuning/
 ├── run_ablations.py          # CLI entry point
+├── measure_gdelta.py         # Gradient decomposition: grad L_RW = Abar (grad L_BC + g_delta)
 ├── ablations/
 │   ├── losses.py             # 15 loss/objective factory functions + LossContext
 │   ├── optimizers.py         # AdamW, LLRD, LoRA, frozen params, PCGrad helpers
@@ -293,7 +294,8 @@ experiments/rl_finetuning/outputs/{run_id}/
 │       ├── action_distribution_results_{name}.json  # Metrics + statistical tests
 │       └── js_divergence_comparison.png        # JS divergence across ablations
 └── tables/
-    ├── main_results.{csv,tex}         # Main results table
+    ├── results.tex                    # --emit-tex-macros only: \newcommand per headline number
+    ├── main_results.{csv,tex}         # Per-condition table: score, seed sd, deltas, verdict
     ├── significance_test.txt          # Max-statistic permutation test + p floor + bootstrap CI
     ├── group_summary.{csv,tex}        # Group-level summary table
     ├── gradient_analysis.{csv,tex}    # Grad alignment (mean/final/trend) + KL drift
@@ -309,6 +311,61 @@ experiments/rl_finetuning/outputs/{run_id}/
 pretrained baseline is rolled out once and reused across ablations. It reads
 the per-ablation `checkpoint_{name}.pth` files, so it only covers ablations
 whose checkpoint was saved.
+
+### `measure_gdelta.py` -- the return-term diagnostic
+
+Splits the return-weighted ELBO gradient into an imitation term and a return
+term at a single parameter point:
+
+```
+grad L_RW  =  Abar * ( grad L_BC + g_delta ),
+g_delta    =  (1/B) sum_i delta_i grad l_i,    delta_i = A_i/Abar - 1.
+```
+
+No training, no optimiser step, one on-policy batch and a few gradient
+evaluations. It runs on CPU in minutes.
+
+```bash
+# per seed
+for s in 0 1 2; do
+  uv run python experiments/rl_finetuning/measure_gdelta.py \
+      --ckpt results/checkpoints/online/<run>/iterNNN.pth \
+      --config results/experiments/rl_finetuning/outputs/minihack_ablations/results.json \
+      --seed ${s} --out gdelta_seed${s}.json
+done
+
+# the +/- the paper's table prints is ACROSS seeds, which needs the second pass
+uv run python experiments/rl_finetuning/measure_gdelta.py --aggregate \
+    --inputs gdelta_seed0.json gdelta_seed1.json gdelta_seed2.json
+```
+
+Reported per weight transform: `CV_A`, `Abar`, `Abar` relative to the
+baseline's, ESS as a fraction of the batch, `|g_delta| / |grad L_BC|`, the
+cosine between them, and the same two against a **shuffled-delta null** --
+delta permuted across the batch, which preserves `CV_A` and destroys the
+association between a window's weight and its own gradient. Anything that
+survives the shuffle is batch heterogeneity, not return signal.
+
+Four points on scope:
+
+- **The objective is the ELBO term alone.** The trainer also adds an
+  unweighted auxiliary goal loss; including it would break the identity above
+  for reasons unrelated to the return, so it is excluded. The goal head
+  therefore carries no gradient here.
+- **`--num-envs` sets `episodes_per_iter`.** MiniHack rollouts are sequential
+  rather than vectorised, so the sibling suite's `NUM_ENVS` has no
+  counterpart. The flag keeps its name so the two CLIs stay identical.
+- **`--config` layers over `configs/defaults.yaml`.** `run_ablations.py`
+  records only scalar keys in `results.json`, so a recorded config carries no
+  `id_envs`; defaults supplies the structural keys and the given file wins
+  everywhere it speaks.
+- **`--device` has no sibling counterpart.** JAX picks its backend from the
+  environment; torch needs to be told. It defaults to CUDA where available.
+
+The sibling `craftax-ReMDM-planner` carries the same script with the same CLI
+and the same output JSON schema. Its version needs an explicit Orbax sharding
+to restore a GPU-written checkpoint on CPU; `torch.load(map_location=...)` has
+no such problem, which is the only structural difference between the two.
 
 **`results.json` schema:**
 ```json

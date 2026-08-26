@@ -461,3 +461,109 @@ def test_run_ablations_rejects_unknown_ablation(tmp_path, tiny_checkpoint_file):
 
     assert result.returncode != 0
     assert "unknown ablation" in (result.stdout + result.stderr).lower()
+
+
+# ── measure_gdelta.py ────────────────────────────────────────────────
+
+MEASURE_GDELTA = "experiments/rl_finetuning/measure_gdelta.py"
+
+
+def test_measure_gdelta_help():
+    result = run_cli(MEASURE_GDELTA, "--help")
+
+    assert_cli_ok(result)
+    for flag in ("--ckpt", "--config", "--out", "--seed", "--n-draws", "--aggregate"):
+        assert flag in result.stdout
+
+
+def test_measure_gdelta_registry_check_matches_the_suite():
+    """The four measured variants are hardcoded, so a registry edit could
+    silently leave the measurement describing a weighting the trainer no
+    longer applies. `verify_registry` is what stops that; it must pass
+    against the registry as it stands.
+    """
+    from experiments.rl_finetuning.measure_gdelta import (
+        REGISTRY_RULES,
+        verify_registry,
+    )
+
+    verify_registry()
+    assert set(REGISTRY_RULES) == {
+        "baseline_clipped_ratio",
+        "advantage_clip",
+        "normalized_adv",
+        "bc_wins",
+    }
+
+
+def test_gdelta_decomposition_is_exact_on_a_synthetic_batch(tiny_cfg):
+    """Eq. 4: grad L_RW == Abar * (grad L_BC + g_delta), exactly.
+
+    The whole gradient-decomposition argument rests on this being an identity
+    rather than an approximation, and it is checkable without a checkpoint or
+    an environment: a random tiny model, a synthetic batch, and one shared
+    (z_t, t) draw. `mean(delta) == 0` is the algebraic fact that makes
+    g_delta a pure direction with no step-size component.
+    """
+    from experiments.rl_finetuning.ablations.losses import _forward_and_loss
+    from experiments.rl_finetuning.measure_gdelta import centred_delta
+    from src.diffusion.schedules import get_schedule
+    from src.models.denoiser import make_model
+
+    cfg = copy.deepcopy(tiny_cfg)
+    cfg._schedule_fn = get_schedule(cfg.noise_schedule)
+    device = torch.device("cpu")
+    model = make_model(cfg).to(device)
+    params = [p for p in model.parameters() if p.requires_grad]
+
+    batch = 16
+    local = torch.randint(0, 1000, (batch, cfg.crop_size, cfg.crop_size)).long()
+    glob = torch.randint(0, 1000, (batch, cfg.map_h, cfg.map_w)).long()
+    x0 = torch.randint(0, cfg.action_dim, (batch, cfg.seq_len)).long()
+    weights = torch.rand(batch) * 4.0 + 0.1  # non-negative, positive mean
+
+    def gradient(w, draw_seed=1234):
+        torch.manual_seed(draw_seed)
+        model.zero_grad(set_to_none=True)
+        per_sample, _, _, _, _ = _forward_and_loss(model, local, glob, x0, cfg, device)
+        loss = per_sample.mean() if w is None else (per_sample * w).mean()
+        loss.backward()
+        # the goal head sees no gradient from the ELBO term alone
+        return torch.cat([
+            (p.grad if p.grad is not None else torch.zeros_like(p)).reshape(-1)
+            for p in params
+        ]).detach()
+
+    delta, abar, a1_holds = centred_delta(weights)
+    assert a1_holds
+    assert float(delta.mean()) == pytest.approx(0.0, abs=1e-6)
+
+    g_bc = gradient(None)
+    g_delta = gradient(delta)
+    g_rw = gradient(weights)
+
+    residual = float((g_rw - abar * (g_bc + g_delta)).norm() / g_rw.norm())
+    assert residual < 1e-4
+
+
+def test_gdelta_flags_normalized_adv_as_violating_the_positivity_assumption():
+    """`normalized_adv` mean-centres its weights, so Abar vanishes and the
+    ratio g_delta / grad L_BC divides by nothing. The script must report the
+    variant as (A1)-violating rather than return a number.
+    """
+    from experiments.rl_finetuning.measure_gdelta import (
+        build_variants,
+        centred_delta,
+    )
+
+    returns = torch.tensor([0.0, 0.0, 1.0, 2.0])
+    adv = torch.tensor([0.1, 0.1, 1.0, 2.0])
+    cfg = {"adv_clip_eps": 0.2, "win_threshold": 0.5}
+    variants = build_variants(adv, returns, cfg, batch=4)
+
+    assert centred_delta(variants["baseline_clipped_ratio"])[2]
+    assert centred_delta(variants["advantage_clip"])[2]
+    assert not centred_delta(variants["normalized_adv"])[2]
+
+    # bc_wins is the win mask rescaled by B / n_wins: 2 of 4 windows win.
+    assert torch.allclose(variants["bc_wins"], torch.tensor([0.0, 0.0, 2.0, 2.0]))
