@@ -214,6 +214,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument("--fast", action="store_true", help="Fast smoke-test.")
+    p.add_argument(
+        "--emit-tex-macros",
+        action="store_true",
+        help=(
+            "Also write tables/results.tex: the headline numbers as LaTeX "
+            "\\newcommand macros, so the manuscript can cite them instead of "
+            "carrying hand-copied literals."
+        ),
+    )
     p.add_argument("--analyze-only", action="store_true")
     p.add_argument("--results-path", type=str, default=None)
     p.add_argument(
@@ -276,6 +285,13 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+#: Per-seed record lists, concatenated when two results files are merged.
+_PER_SEED_KEYS = ("seeds", "wall_clock_s", "per_seed_finals", "per_seed_final_evals")
+
+#: Everything carried verbatim through save/load alongside the scores.
+_CARRIED_KEYS = ("base_seed", *_PER_SEED_KEYS)
+
+
 def _history_finals(history: AblationHistory) -> dict:
     """Final logged value per history field for one seed.
 
@@ -328,12 +344,8 @@ def _results_to_json(
                 "score_std": res.get("score_std", 0.0),
                 "all_scores": res.get("all_scores", [res["score"]]),
                 "history": res["history"].to_dict(),
-                # seeds, wall clock and per-seed finals when present
-                **{
-                    k: res[k]
-                    for k in ("base_seed", "seeds", "wall_clock_s", "per_seed_finals")
-                    if k in res
-                },
+                # seeds, wall clock and per-seed final records when present
+                **{k: res[k] for k in _CARRIED_KEYS if k in res},
             }
             for name, res in results.items()
         },
@@ -366,12 +378,7 @@ def _results_from_json(
             "all_scores": res_data.get("all_scores", [score]),
             "history": AblationHistory.from_dict(res_data["history"]),
         }
-        for _k in (
-            "base_seed",
-            "seeds",
-            "wall_clock_s",
-            "per_seed_finals",
-        ):
+        for _k in _CARRIED_KEYS:
             if _k in res_data:
                 results[name][_k] = res_data[_k]
     return results, pretrained_score, config
@@ -516,18 +523,14 @@ def _merge_result_files(
                     "all_scores": list(res.get("all_scores", [res["score"]])),
                     "history": res["history"],
                     # carry seed, wall-clock and per-seed final records
-                    **{
-                        k: list(res[k])
-                        for k in ("seeds", "wall_clock_s", "per_seed_finals")
-                        if k in res
-                    },
+                    **{k: list(res[k]) for k in _PER_SEED_KEYS if k in res},
                     **({"base_seed": res["base_seed"]} if "base_seed" in res else {}),
                 }
             else:
                 # Concatenate scores from this file
                 new_scores = list(res.get("all_scores", [res["score"]]))
                 merged[name]["all_scores"].extend(new_scores)
-                for _k in ("seeds", "wall_clock_s", "per_seed_finals"):
+                for _k in _PER_SEED_KEYS:
                     if _k in res:
                         merged[name].setdefault(_k, []).extend(res[_k])
                 # Recompute mean/std over all seeds
@@ -675,7 +678,7 @@ def main(argv: list[str] | None = None) -> None:
                 )
 
         logger.info("Loading results from %s", results_path)
-        results, pretrained_score, _ = _results_from_json(results_path)
+        results, pretrained_score, run_config = _results_from_json(results_path)
         logger.info("Loaded %d ablation results.", len(results))
 
         # Filter to requested subset (--ablations); --all keeps everything
@@ -693,7 +696,13 @@ def main(argv: list[str] | None = None) -> None:
                 list(results.keys()),
             )
 
-        generate_summary_tables(results, pretrained_score, output_dir)
+        generate_summary_tables(
+            results,
+            pretrained_score,
+            output_dir,
+            emit_tex_macros=args.emit_tex_macros,
+            config=run_config,
+        )
         generate_all_plots(results, pretrained_score, output_dir)
         generate_diagnosis_report(results, pretrained_score, output_dir)
         logger.info("Analysis complete. Outputs in %s", output_dir)
@@ -741,7 +750,13 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("Saved merged results to %s", merged_path)
 
         # Regenerate analysis
-        generate_summary_tables(results, pretrained_score, output_dir)
+        generate_summary_tables(
+            results,
+            pretrained_score,
+            output_dir,
+            emit_tex_macros=args.emit_tex_macros,
+            config=config,
+        )
         generate_all_plots(results, pretrained_score, output_dir)
         generate_diagnosis_report(results, pretrained_score, output_dir)
         logger.info("Analysis complete. Outputs in %s", output_dir)
@@ -879,6 +894,7 @@ def main(argv: list[str] | None = None) -> None:
     for abl_name in selected:
         spec = REGISTRY[abl_name]
         seed_scores: list[float] = []
+        seed_final_evals: list[dict] = []
         seed_histories: list[AblationHistory] = []
         seeds_used: list[int] = []
         seed_times: list[float] = []
@@ -898,7 +914,7 @@ def main(argv: list[str] | None = None) -> None:
                 )
 
                 _t0 = time.monotonic()
-                history, final_score, trained_model = run_ablation(
+                history, final_score, final_per_env, trained_model = run_ablation(
                     spec=spec,
                     cfg=cfg,
                     checkpoint_path=checkpoint_path,
@@ -911,6 +927,7 @@ def main(argv: list[str] | None = None) -> None:
                     round(time.monotonic() - _t0, 1)
                 )  # per-seed wall clock
                 seed_scores.append(final_score)
+                seed_final_evals.append({"per_env_win_rates": final_per_env})
                 seed_histories.append(history)
         except Exception:
             logger.exception(
@@ -938,6 +955,9 @@ def main(argv: list[str] | None = None) -> None:
             "seeds": seeds_used,
             "wall_clock_s": seed_times,  # per-seed wall clock
             "per_seed_finals": [_history_finals(h) for h in seed_histories],
+            # detail of the evaluation `score` is the mean of, so that the
+            # per-environment table and the headline numbers read one draw
+            "per_seed_final_evals": seed_final_evals,
         }
 
         # W&B summary for this ablation
@@ -968,7 +988,13 @@ def main(argv: list[str] | None = None) -> None:
 
         # Intermediate analysis (regenerates after each ablation)
         logger.info("Generating plots, tables, and report...")
-        generate_summary_tables(results, pretrained_score, output_dir)
+        generate_summary_tables(
+            results,
+            pretrained_score,
+            output_dir,
+            emit_tex_macros=args.emit_tex_macros,
+            config=vars(cfg),
+        )
         generate_all_plots(results, pretrained_score, output_dir)
         generate_diagnosis_report(results, pretrained_score, output_dir)
 

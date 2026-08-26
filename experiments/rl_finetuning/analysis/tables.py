@@ -464,10 +464,51 @@ def make_repr_drift_table(
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
 
+def _per_seed_per_env(res: dict) -> list[dict[str, float]]:
+    """Per-seed per-environment win rates, best source first.
+
+    ``per_seed_final_evals`` is the detail of the post-training evaluation
+    whose mean is ``score``; reading it keeps this table and every headline
+    number on one draw. ``per_seed_finals`` holds the *last in-loop*
+    evaluation instead -- a second, independent draw of the same episode
+    count, which on 80 episodes differs from the final one by several points
+    of win rate. It is only a fallback for results files written before the
+    final evaluation's detail was recorded.
+    """
+    for key in ("per_seed_final_evals", "per_seed_finals"):
+        finals = [
+            f["per_env_win_rates"]
+            for f in res.get(key, [])
+            if isinstance(f, dict) and isinstance(f.get("per_env_win_rates"), dict)
+        ]
+        if finals:
+            return finals
+    return []
+
+
+def _per_env_source(results: dict[str, dict]) -> str:
+    """Which evaluation the per-layout numbers below will come from.
+
+    A results file written before the final evaluation's detail was kept has
+    only the last in-loop evaluation to offer, which is an independent draw of
+    the same episode count: its per-layout values need not average to `score`.
+    Saying so in `results.tex` is what stops that gap being rediscovered as an
+    arithmetic error in the manuscript.
+    """
+    if any(r.get("per_seed_final_evals") for r in results.values()):
+        return "the same final evaluation as the Score macros"
+    if any(r.get("per_seed_finals") for r in results.values()):
+        return (
+            "the last IN-LOOP evaluation, a second independent draw -- they "
+            "need not average to the Score macros"
+        )
+    return "the merged single-run history"
+
+
 def make_per_env_table(
     results: dict[str, dict],
 ) -> pl.DataFrame:
-    """Per-environment win rate at final eval checkpoint.
+    """Per-environment win rate at the final evaluation.
 
     Args:
         results: Ablation results dict.
@@ -477,13 +518,7 @@ def make_per_env_table(
     """
     rows: list[dict] = []
     for name, res in sorted(results.items()):
-        # Average per-seed final win rates when recorded;
-        # fall back to the legacy single merged history otherwise.
-        finals = [
-            f["per_env_win_rates"]
-            for f in res.get("per_seed_finals", [])
-            if isinstance(f, dict) and isinstance(f.get("per_env_win_rates"), dict)
-        ]
+        finals = _per_seed_per_env(res)
         if finals:
             row = {"Method": name}
             for k in sorted({k for f in finals for k in f}):
@@ -491,6 +526,7 @@ def make_per_env_table(
                 row[k] = round(float(np.mean(vals)), 4)
             rows.append(row)
             continue
+        # Legacy single merged history: no per-seed record at all.
         h: AblationHistory = res["history"]
         if h.per_env_win_rates:
             row = {"Method": name}
@@ -621,10 +657,170 @@ def make_hypothesis_verdict_table(
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
 
+# ---------------------------------------------------------------------------
+# LaTeX macros
+#
+# The paper workspace inserts generated numbers through `\newcommand` macros
+# in `papers/<slug>/src/results.tex` so each one is traceable to the run that
+# produced it, and hand-editing a number into the draft is a rule violation.
+# Macros from this repository are prefixed `mh`, the sibling repo's `cx`, so
+# both halves of a two-environment table can live in one file.
+# ---------------------------------------------------------------------------
+
+#: Macro namespace for this repository's numbers.
+_MACRO_PREFIX = "mh"
+
+#: LaTeX control sequences are letters only, so condition names carrying a
+#: digit (`layer_ablation_top1`) need it spelled out.
+_DIGIT_WORDS = {
+    "0": "Zero",
+    "1": "One",
+    "2": "Two",
+    "3": "Three",
+    "4": "Four",
+    "5": "Five",
+    "6": "Six",
+    "7": "Seven",
+    "8": "Eight",
+    "9": "Nine",
+}
+
+
+def _macro(*parts: str) -> str:
+    """Control sequence name for one quantity, e.g. ``mhBaselineRlScore``."""
+    out = _MACRO_PREFIX
+    for part in parts:
+        for chunk in str(part).replace("-", "_").split("_"):
+            if not chunk:
+                continue
+            chunk = "".join(_DIGIT_WORDS.get(c, c) for c in chunk)
+            out += chunk[0].upper() + chunk[1:]
+    if not out.isalpha():
+        raise ValueError(f"Not a usable LaTeX macro name: {out!r}")
+    return out
+
+
+def _cv_a_and_ess(
+    history: AblationHistory,
+    batch_size: int | None,
+) -> tuple[float, float] | None:
+    """Mean weight dispersion and mean effective sample size over training.
+
+    ``CV_A = sqrt(B / ESS - 1)`` is the coefficient of variation of the
+    return weights implied by Kish's effective sample size, and is averaged
+    over training iterations, not computed from the mean ESS -- the two
+    differ, and §6.4 of the paper quotes the former.
+
+    Args:
+        history: One ablation's recorded history.
+        batch_size: ``B``, the number of advantages each ESS was taken over.
+
+    Returns:
+        ``(mean CV_A, mean ESS)``, or ``None`` when either is unavailable.
+    """
+    ess = [e for e in history.effective_batch_size if e > 0]
+    if not ess or not batch_size:
+        return None
+    cv = [np.sqrt(max(batch_size / e - 1.0, 0.0)) for e in ess]
+    return float(np.mean(cv)), float(np.mean(ess))
+
+
+def write_tex_macros(
+    results: dict[str, dict],
+    pretrained_score: float,
+    out_dir: Path,
+    config: dict | None = None,
+) -> Path:
+    """Write ``results.tex``: the headline numbers as LaTeX macros.
+
+    Win rates are emitted in percentage points at the precision the
+    manuscript prints, so a macro can replace a literal without changing the
+    rendered number.
+
+    Args:
+        results: Ablation results dict.
+        pretrained_score: Pretrained model win rate, as a fraction.
+        out_dir: Directory to write ``results.tex`` into.
+        config: The run's recorded config; ``batch_size`` is what CV_A is
+            taken over, so without it CV_A and ESS are omitted.
+
+    Returns:
+        Path to the written file.
+    """
+    batch_size = int(config["batch_size"]) if config and "batch_size" in config else None
+    lines = [
+        "% Generated by experiments/rl_finetuning/analysis/tables.py.",
+        "% Do not hand-edit: regenerate with",
+        "%   uv run python experiments/rl_finetuning/run_ablations.py \\",
+        "%     --analyze-only --emit-tex-macros --output-dir <dir>",
+        "% Win rates are in percentage points; CV_A and ESS are means over",
+        "% training iterations of the first seed's history.",
+        f"% Per-layout macros come from {_per_env_source(results)}.",
+        "",
+        f"\\newcommand{{\\{_macro('pretrained', 'win', 'rate')}}}"
+        f"{{{100 * float(pretrained_score):.2f}}}",
+        "",
+    ]
+
+    for name, res in sorted(results.items()):
+        lines.append(
+            f"\\newcommand{{\\{_macro(name, 'score')}}}"
+            f"{{{100 * float(res['score']):.2f}}}"
+        )
+        lines.append(
+            f"\\newcommand{{\\{_macro(name, 'sd')}}}"
+            f"{{{100 * float(res.get('score_std', 0.0)):.2f}}}"
+        )
+        stats = _cv_a_and_ess(res["history"], batch_size)
+        if stats is not None:
+            cv, ess = stats
+            lines.append(f"\\newcommand{{\\{_macro(name, 'CVA')}}}{{{cv:.2f}}}")
+            lines.append(f"\\newcommand{{\\{_macro(name, 'ESS')}}}{{{ess:.0f}}}")
+    lines.append("")
+
+    group_df = make_group_summary_table(results, pretrained_score)
+    baseline = float(results["baseline_rl"]["score"]) if "baseline_rl" in results else None
+    for row in group_df.to_dicts():
+        g = row["Group"]
+        for field in ("Mean", "Best", "Worst", "StdDev"):
+            lines.append(
+                f"\\newcommand{{\\{_macro('group', g, field)}}}"
+                f"{{{100 * float(row[field]):.2f}}}"
+            )
+        lines.append(f"\\newcommand{{\\{_macro('group', g, 'N')}}}{{{int(row['N'])}}}")
+        if baseline is not None:
+            # Magnitude only: the manuscript carries the sign as $-$ / $+$.
+            delta = abs(100 * (float(row["Mean"]) - baseline))
+            lines.append(
+                f"\\newcommand{{\\{_macro('group', g, 'delta')}}}{{{delta:.2f}}}"
+            )
+    lines.append("")
+
+    # Per-layout win rates, the disaggregation tab:per-env reports. One decimal,
+    # which is what that table prints.
+    for row in make_per_env_table(results).to_dicts():
+        name = row.pop("Method")
+        for env, value in row.items():
+            tag = str(env).replace("MiniHack-", "").replace("-v0", "")
+            lines.append(
+                f"\\newcommand{{\\{_macro(name, 'env', tag)}}}"
+                f"{{{100 * float(value):.1f}}}"
+            )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "results.tex"
+    path.write_text("\n".join(lines) + "\n")
+    n_macros = sum(1 for x in lines if x.startswith("\\newcommand"))
+    logger.info("Saved %s (%d macros)", path, n_macros)
+    return path
+
+
 def generate_summary_tables(
     results: dict[str, dict],
     pretrained_score: float,
     output_dir: Path,
+    emit_tex_macros: bool = False,
+    config: dict | None = None,
 ) -> dict[str, pl.DataFrame]:
     """Generate all summary tables and save to ``output_dir/tables/``.
 
@@ -632,6 +828,9 @@ def generate_summary_tables(
         results: Full ablation results dict.
         pretrained_score: Pretrained model eval score.
         output_dir: Root output directory; tables go in ``output_dir/tables/``.
+        emit_tex_macros: Also write ``tables/results.tex``, the headline
+            numbers as ``\newcommand`` macros for the manuscript.
+        config: The run's recorded config, needed for CV_A's batch size.
 
     Returns:
         Dict mapping table name to polars DataFrame.
@@ -718,6 +917,9 @@ def generate_summary_tables(
             caption="Hypothesis verdicts",
             label="tab:hyp-verdicts",
         )
+
+    if emit_tex_macros:
+        write_tex_macros(results, pretrained_score, tables_dir, config)
 
     logger.info("All tables saved to %s", tables_dir)
     return tables

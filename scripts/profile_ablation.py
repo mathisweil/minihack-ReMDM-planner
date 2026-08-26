@@ -248,7 +248,7 @@ def main() -> None:
 
     spec = REGISTRY[args.ablation]
     t0 = time.perf_counter()
-    _, final_score, _ = T.run_ablation(
+    _, final_score, _, _ = T.run_ablation(
         spec, cfg, args.checkpoint, device, seed=args.seed
     )
     wall = time.perf_counter() - t0

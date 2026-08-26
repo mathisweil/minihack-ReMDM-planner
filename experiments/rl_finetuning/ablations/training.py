@@ -810,7 +810,7 @@ def run_ablation(
     device: torch.device,
     seed: int = 0,
     wandb_step_offset: int = 0,
-) -> tuple[AblationHistory, float, nn.Module]:
+) -> tuple[AblationHistory, float, dict[str, float], nn.Module]:
     """Run one complete ablation experiment.
 
     Loads a pretrained checkpoint, sets up the ablation-specific loss
@@ -826,7 +826,10 @@ def run_ablation(
             monotonically increasing across ablations/seeds.
 
     Returns:
-        Tuple of (history, final_score, final_state_dict).
+        Tuple of (history, final_score, final_per_env, model). ``final_score``
+        and ``final_per_env`` are the mean and the per-layout detail of the
+        *same* final evaluation, so headline scores and the per-environment
+        table cannot come from two different draws.
     """
     logger.info("=" * 60)
     logger.info("ABLATION: %s  [Group %s]", spec.name, spec.group)
@@ -1443,7 +1446,8 @@ def run_ablation(
         cfg,
         device,
     )
-    final_score = float(np.mean([v["win_rate"] for v in final_results.values()]))
+    final_per_env = {k: v["win_rate"] for k, v in final_results.items()}
+    final_score = float(np.mean(list(final_per_env.values())))
 
     logger.info("  [%s] FINAL id_win_rate: %.4f", spec.name, final_score)
 
@@ -1451,4 +1455,4 @@ def run_ablation(
     if spec.use_lora:
         remove_lora_from_model(raw_model)
 
-    return history, final_score, raw_model
+    return history, final_score, final_per_env, raw_model

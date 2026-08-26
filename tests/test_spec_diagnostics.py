@@ -39,11 +39,14 @@ from experiments.rl_finetuning.analysis.report import (
     _score_hypothesis,
 )
 from experiments.rl_finetuning.analysis.tables import (
+    _macro,
     baseline_rl_score_of,
     make_forgetting_analysis_table,
+    make_per_env_table,
     metric_scale,
     verdict,
     write_significance_test,
+    write_tex_macros,
 )
 from experiments.rl_finetuning.diagnostics.gradient import compute_surgery_metrics
 from experiments.rl_finetuning.diagnostics.representation import _linear_cka
@@ -546,6 +549,87 @@ def test_merge_concatenates_scores_and_recomputes_over_the_union(tmp_path):
         math.sqrt(2 / 3), rel=1e-6
     )
     assert pretrained == pytest.approx(0.5)
+
+
+def test_the_tex_macros_carry_the_numbers_the_manuscript_prints(tmp_path):
+    """`results.tex` is how a generated number reaches the draft, so each
+    macro must be a usable control sequence holding the value at the
+    precision the manuscript prints it: win rates in percentage points,
+    CV_A = sqrt(B / ESS - 1) averaged over iterations.
+
+    Derivation: score 0.4375 -> 43.75. With B = 4608 and ESS 4608/2 and
+    4608/5, CV_A = (sqrt(1) + sqrt(4)) / 2 = 1.50.
+    """
+    history = AblationHistory(effective_batch_size=[4608 / 2, 4608 / 5])
+    results = {
+        "baseline_rl": {
+            "score": 0.4375,
+            "score_std": 0.0612,
+            "history": history,
+        },
+        "layer_ablation_top1": {
+            "score": 0.4125,
+            "score_std": 0.01,
+            "history": AblationHistory(),
+        },
+    }
+    path = write_tex_macros(results, 0.475, tmp_path, {"batch_size": 4608})
+    text = path.read_text()
+
+    for name in re.findall(r"\\newcommand\{\\([A-Za-z]*)\}", text):
+        assert name.isalpha() and name.startswith("mh")
+    assert len(re.findall(r"\\newcommand", text)) == len(
+        re.findall(r"\\newcommand\{\\[A-Za-z]+\}", text)
+    )
+
+    assert "\\newcommand{\\mhPretrainedWinRate}{47.50}" in text
+    assert "\\newcommand{\\mhBaselineRlScore}{43.75}" in text
+    assert "\\newcommand{\\mhBaselineRlSd}{6.12}" in text
+    assert "\\newcommand{\\mhBaselineRlCVA}{1.50}" in text
+    assert "\\newcommand{\\mhBaselineRlESS}{1613}" in text
+    # a digit in the condition name is spelled out, or the macro is unusable
+    assert "\\newcommand{\\mhLayerAblationTopOneScore}{41.25}" in text
+    # no ESS recorded -> no CV_A macro invented for it
+    assert _macro("layer_ablation_top1", "CVA") not in text
+    # group means come from the same table the CSV does
+    assert "\\newcommand{\\mhGroupBaselineMean}{43.75}" in text
+    # and the file says which evaluation its per-layout numbers came from
+    assert "% Per-layout macros come from the merged single-run history." in text
+
+
+def test_the_per_env_table_reads_the_evaluation_the_score_comes_from():
+    """`score` is the mean of the post-training evaluation, so the
+    per-environment table must be that same evaluation's detail
+    (`per_seed_final_evals`), not the last in-loop one (`per_seed_finals`).
+
+    Two draws of the same 80 episodes differ by several points, which is what
+    made `tab:group_summary` fail to reconcile with `tab:per-env`. The
+    in-loop record stays as a fallback for results files written before the
+    final evaluation's detail was kept.
+    """
+    final = {"MiniHack-Room-v0": 0.5, "MiniHack-Corridor-v0": 0.7}
+    in_loop = {"MiniHack-Room-v0": 0.1, "MiniHack-Corridor-v0": 0.3}
+    history = AblationHistory(per_env_win_rates=[in_loop])
+
+    both = {
+        "baseline_rl": {
+            "score": 0.6,
+            "history": history,
+            "per_seed_final_evals": [{"per_env_win_rates": final}],
+            "per_seed_finals": [{"per_env_win_rates": in_loop}],
+        }
+    }
+    row = make_per_env_table(both).to_dicts()[0]
+    assert row["MiniHack-Room-v0"] == pytest.approx(0.5)
+    assert row["MiniHack-Corridor-v0"] == pytest.approx(0.7)
+    # the mean of the row is the score it is tabulated beside
+    assert np.mean([row[k] for k in final]) == pytest.approx(0.6)
+
+    legacy = {"baseline_rl": {k: v for k, v in both["baseline_rl"].items()
+                              if k != "per_seed_final_evals"}}
+    assert make_per_env_table(legacy).to_dicts()[0]["MiniHack-Room-v0"] == (
+        pytest.approx(0.1)
+    )
 
 
 # ---------------------------------------------------------------------------
