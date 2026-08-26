@@ -248,6 +248,14 @@ baselines_dt_batch_size: 256
 # >= the longest oracle trajectory observed during data collection.
 # Aligned with baselines_dt_eval_max_steps so positional embeddings
 # cover the full eval-cap horizon.
+#
+# KNOWN VIOLATION, measured 2026-08-26: oracle collection over 20,000
+# trajectories produced a longest of 500 steps (mean 93.8), so this value
+# breaks the invariant above and `dt` logs "positions will be clamped".
+# Left at 200 deliberately: raising this key alone breaks the alignment
+# with baselines_dt_eval_max_steps, and raising that one changes DT's eval
+# truncation and so its reported score. Both need setting together, by
+# someone who is actually reporting DT. See PAPER-FIXES.md, findings item 4.
 baselines_dt_max_ep_len: 200
 # DT eval rollout cap (steps before truncating an episode as a loss).
 baselines_dt_eval_max_steps: 200
