@@ -6,6 +6,15 @@ than it does on Craftax**: the $\bar{A}$ step-size confound was refuted on Craft
 of 0.931 and declined there, but the MiniHack ratio is 1.738, where the confound is real and
 nothing tracks it.
 
+> **STATUS: DONE — 2026-08-27. Do not re-run any of this without asking.**
+> Jobs A and B were already complete; Runs 1, 2 and 3 (reduced: 1e-4 and 1e-5) were executed
+> on canada-l and the GPU was released. Results, exact numbers, artefact paths and what is
+> still outstanding are in **[REPORT — executed 2026-08-27](#report--executed-2026-08-27)** at
+> the bottom of this file. Read that before acting on anything below it — the instructions that
+> follow are the original task spec, kept for reference, and two of their pointers are wrong
+> (the Craftax `gdelta_verification/` path, and the claim that `results.tex` had never been
+> emitted). Headline: **Run 2 contradicts the manuscript's central inference.**
+
 **Use the `/ucl-gpu` skill to find and reserve a free GPU on the UCL CS duck cluster before
 starting anything under "Runs", and release it when done.** Read `CLAUDE.md` and
 `experiments/README.md` first. Two of the items below need no accelerator at all — do those
@@ -261,3 +270,198 @@ Then answer, in one line each:
 
 Release the GPU reservation when finished. **Do not edit anything under the manuscript's
 `src/`** — these are findings for the authors. If a run contradicts the paper, say so plainly.
+
+---
+
+# REPORT — executed 2026-08-27
+
+**Status: jobs A and B were already complete on arrival; Runs 1, 2 and 3 (reduced) were
+executed and are done. All four GPU runs finished; the reservation is released.** Nothing
+under any manuscript `src/` was touched, and no `final_*` or ablation machine config was
+edited.
+
+Everything ran on **canada-l** (duck cluster, RTX 3090 Ti, 24,564 MiB) under
+`experiments/rl_finetuning/configs/ablations_final_minihack_gpu_24gb.yaml` **unmodified**,
+from `checkpoints/online/Minihack-Online-Diffusion-DAgger-100M/iter563.pth`.
+Only one host was ever free — the fleet was rescanned every 7 minutes for 3.5 hours and
+never showed a second free card (5 hosts down, 17 held by other users), so the four runs
+ran back-to-back rather than in parallel.
+
+## The table
+
+| Run | Condition | lr | per-seed | mean | seed sd | wandb | wall-clock | GPU-h |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `advantage_clip` matched step | 1.636e-4 | 38.75 / 31.25 / 41.25 | **37.08** | 4.25 | `xy1s1ic7` | 49m56s | 0.83 |
+| 2 | `bc_all` (new arm) | 3e-4 | 36.25 / 35.00 / 30.00 | **33.75** | 2.70 | `6vpbqtp4` | 50m23s | 0.84 |
+| 3a | `baseline_rl` | 1e-4 | 42.50 / 43.75 / 46.25 | **44.17** | 1.56 | `5fzphilq` | 51m01s | 0.85 |
+| 3b | `baseline_rl` | 1e-5 | 47.50 / 46.25 / 46.25 | **46.67** | 0.59 | `zadg8rtj` | 48m02s | 0.80 |
+
+Total **3.32 GPU-hours**, 16:03–19:26 BST. Scores are ID win rate in percentage points.
+W&B project `myopic-planner/minihack-ReMDM-planner-ablations`.
+
+Published reference these sit against (`experiments/rl_finetuning/outputs/minihack_ablations/results.json`):
+pretrained **47.50**, `baseline_rl` **43.75 ± 6.12**, `advantage_clip` **33.75 ± 5.10**,
+`bc_wins` **45.83 ± 3.58**. RUNS.md's quoted values were checked against that file and match.
+
+## The five answers
+
+1. **Yes.** Runs 1 and 2 each re-evaluated `iter563.pth` under the reference config and logged
+   `Pretrained baseline ID win rate: 0.4750` — 47.50 exactly, twice, independently.
+2. **$\bar{A}_{\text{base}}/\bar{A}_{\text{clip}} = 0.545$** (i.e. $\bar{A}_{\text{clip}}/\bar{A}_{\text{base}} = 1.834 \pm 0.195$
+   at 3 seeds x 8 draws, up from 1.738 at 3 draws). The shuffled-$\delta$ null leaves **16.1%**
+   of the baseline norm ratio (1.956 -> 0.316), so ~84% is genuine return signal; the cosine
+   collapses 0.803 -> -0.032. The null retains 15–17% across all four transforms.
+3. **Only partly — about a third of the gap is step size.** Matching moves clipping
+   33.75 -> 37.08, closing 3.33 of the 10.00-point gap; 6.67 points remain. Neither the
+   residual (t = 1.55) nor the original gap (t = 2.17) is separable from zero at 3 seeds.
+   **The paper's decision to rest its claim on Craftax Classic is therefore load-bearing, not
+   incidental.**
+4. **More — by 10.00 points (t = 2.59).** `bc_all` 33.75 vs `baseline_rl` 43.75; it ranks 24th
+   of 26 conditions. **This contradicts the manuscript's headline inference:** the return
+   weighting is *protective*, the reading the paper keeps open as the inverse of its own.
+   The three-way contrast localises it — `baseline_rl` (return-weighted, all windows) 43.75;
+   `bc_all` (uniform, all windows) 33.75; `bc_wins` (uniform, wins only) 45.83. Dropping the
+   weighting while keeping every rollout window costs 10 points; filtering to wins recovers it.
+   **The sibling replicates this on Craftax** (`bc_all` 4.73 vs `baseline_rl` 8.34, pretrained
+   11.98), so the answer is not environment-specific.
+5. **Effectively yes, at 1e-5.** 3e-4 -> 43.75, 1e-4 -> 44.17, 1e-5 -> **46.67 ± 0.59**, which is
+   0.83 short of 47.50 — under one eval episode (4 envs x 20 episodes ⇒ 1.25-point granularity),
+   and one seed hit 47.50 exactly. Seed sd tightens monotonically as lr falls: 6.12 -> 1.56 -> 0.59.
+
+## Where the artefacts are
+
+> **Warning: `results/` is gitignored (`.gitignore:274`), so all four new run directories are
+> untracked and local-only.** RUNS.md warned only that `experiments/rl_finetuning/outputs/` is
+> *not* ignored, but its own Run 1 command writes to `results/`. Copy anything the paper cites
+> out of `results/` before relying on it. No `.gitignore` line was added — that needs asking.
+
+| What | Path |
+|---|---|
+| Run 1 — clipping at matched step | `results/minihack_matched_step/` |
+| Run 2 — `bc_all` | `results/minihack_bc_all/` |
+| Run 3a — `baseline_rl` @1e-4 | `results/minihack_lr_1e-4/` |
+| Run 3b — `baseline_rl` @1e-5 | `results/minihack_lr_1e-5/` |
+| Published 25 + `bc_all` pooled (26) | `results/minihack_published_plus_bcall/` |
+| Published suite (25 conditions) | `experiments/rl_finetuning/outputs/minihack_ablations/results.json` |
+| `mh` macro namespace | `experiments/rl_finetuning/outputs/minihack_ablations/tables/results.tex` |
+| $g_\delta$ + shuffled null | `experiments/rl_finetuning/outputs/minihack_ablations/gdelta/gdelta_{seed0,seed1,seed2,aggregate}.json` |
+| `rw` macro namespace (Craftax) | `craftax-ReMDM-planner/experiments/rl_finetuning/outputs/craftax_classic_ablations/tables/results.tex` |
+| Craftax $g_\delta$ aggregate | `craftax-ReMDM-planner/experiments/rl_finetuning/outputs/craftax_classic_ablations/gdelta/gdelta_aggregate.json` |
+
+Each run directory carries `results.json`, `diagnosis.md`, `checkpoint_<name>.pth`, `figures/`
+and `tables/` in the standard layout of experiments/README.md §Output structure.
+
+**Craftax review runs already exist** (from an earlier session), useful for cross-environment
+comparison: `craftax-ReMDM-planner/experiments/rl_finetuning/outputs/review_anchor_baseline_rl`
+(8.34), `review_run1_bc_all` (4.73), `review_run2_advclip_lr_matched` (4.92),
+`review_run4_baseline_lr1e-4` (10.15), `review_run4_baseline_lr1e-5` (10.81); pretrained 11.98.
+
+## Job A — the macro namespaces (was already done, verified)
+
+Both namespaces exist as files: `mh` (338 macros) and `rw` (238). The emitter produces the
+**sibling scheme**, confirming `1132d97` closed the gap and that `state.md` is stale — the real
+families are:
+
+```
+\mhPretrainedScore  \mhBatchSize  \mhPooledSeedSd
+\mhScore<Tag>  \mhScoreSd<Tag>  \mhDeltaPretrained<Tag>  \mhDeltaBaseline<Tag>
+\mhEss<Tag>  \mhCvA<Tag>  \mhEnv<Tag><Layout>
+\mhGroup{Best,Worst,Mean,Sd,N,Delta}{Baseline,A,B,C,D}
+\mhGdelta{Abar,AbarRatio,CvA,Ess,Ratio,RatioSd,Cos,CosSd,RatioShuf,RatioShufSd,CosShuf,CosShufSd}<Tag>
+\mhGdelta{NSeeds,NParams,Batch,RandomCosSd,BcSelfCos,BcSelfCosSd,EqFourResidual}
+```
+
+`<Tag>` is the CamelCase condition name **with digits spelled out** — `LayerAblationTopOne`,
+not `LayerAblationTop1`. Layout tags likewise: `RoomRandomFivexFive`,
+`RoomRandomOneFivexOneFive`, `CorridorRTwo`, `MazeWalkNinexNine`.
+
+**Both import defects reproduce and were left unfixed, as instructed:** the `.tex` export
+carries `\label{tab:main-results}`, identical to the Craftax export's, so the two collide; and
+the CSV `Score` column is fractional while the macros are already scaled x100.
+
+**Provenance of the published `results.json`, now settled:** the local copy at
+`experiments/rl_finetuning/outputs/minihack_ablations/results.json` is *not* byte-identical to
+the Hub copy, but differs **only** in three scrubbed wandb name fields
+(`wandb_project`, `wandb_entity`, `baselines_wandb_project`). All 25 scores and every history
+value are identical. The local file is the published run pre-anonymisation; the Hub copy is the
+de-identified export. A sha mismatch here is the publish transform, not a different run.
+
+## Job B — $g_\delta$ at publication settings (was already done, verified)
+
+Artefacts are 3 seeds x 8 draws, stamped `checkpoint_step: 563`, `batch: 4608`, measured against
+the published `results.json`.
+
+| transform | $\bar{A}$ | $\bar{A}$ ratio | $\|g_\delta\|/\|\nabla L_{BC}\|$ | shuffled | % surviving | cos | cos shuffled |
+|---|---|---|---|---|---|---|---|
+| `baseline_rl` | 0.462 | 1.000 | 1.956 | 0.316 | 16.1% | 0.803 | -0.032 |
+| `advantage_clip` | 0.838 | 1.834 | 0.114 | 0.018 | 15.5% | 0.838 | -0.196 |
+| `normalized_adv` | -0.000 | 0.000 | 0.768 | 0.133 | 17.3% | 0.803 | -0.007 |
+| `bc_wins` | 1.000 | 2.192 | 2.422 | 0.412 | 17.0% | 0.771 | -0.162 |
+
+**The Eq. 4 residual did NOT tighten at 8 draws — it got slightly worse:** 2.14e-05 (3 draws)
+-> **4.84e-05** (8 draws), against Craftax's 4.8e-07. Two orders looser. Worth resolving before
+any MiniHack decomposition number is published.
+
+**RUNS.md's cross-check path above is wrong:** there is no
+`craftax-ReMDM-planner/experiments/rl_finetuning/outputs/gdelta_verification/`. The Craftax
+aggregate lives at `.../outputs/craftax_classic_ablations/gdelta/gdelta_aggregate.json` and
+reports `eq4_residual_max` **4.8e-07**, not 4.44e-07.
+
+## Code changes made (Run 2's arm)
+
+`bc_all` added as a 26th `AblationSpec`, group B — a spec entry plus a factory passing `None`,
+no new numerics, exactly as this file specified:
+
+- `experiments/rl_finetuning/ablations/losses.py` — `make_loss_bc_all`, `del advantages` then
+  `_core_loss(..., None, ...)`.
+- `experiments/rl_finetuning/ablations/registry.py` — import + `AblationSpec`.
+- `tests/test_smoke_experiments.py` — registry count 25 -> 26.
+- `tests/test_config.py` — pinned description added.
+- `tests/test_spec_ablations.py` — new guard
+  `test_bc_all_ignores_the_advantages_and_averages_over_the_whole_batch`.
+- `experiments/README.md` — 25 -> 26 ablations, 15 -> 16 loss factories, table row.
+
+`uv run pytest`: **414 passed, 6 skipped, 11 deselected.**
+
+**Sibling parity:** the Craftax repo had already added `bc_all` with the same name and the same
+`del advantages` mechanism; the description, hypothesis and docstring here were aligned to it
+character-for-character, so `test_config.py`'s pinned table matches across the two repos. One
+deliberate divergence: the MiniHack side has the `test_spec_ablations.py` guard above and the
+sibling does not — **consider adding it there** (sibling has 39 spec tests, MiniHack now 40).
+
+**`bc_all` is poolable with the published suite** — `--merge` accepted it (machine confirmation
+that it agrees on every key in `run_ablations._RESULT_AFFECTING`), because it ran at the default
+`lr: 3.0e-4` under the reference config. The pooled 26-condition set was written to
+`results/minihack_published_plus_bcall/`; **the published `results.json` was left untouched.**
+Run 1 was deliberately *not* merged, as this file requires — its `lr` differs.
+
+## Full ranking, published 25 + `bc_all` (pretrained 47.50)
+
+```
+ 1 head_only            49.58 ± 3.86     14 trust_region_kl      42.50 ± 1.02
+ 2 gradient_surgery     48.75 ± 3.54     15 low_t                42.08 ± 5.24
+ 3 layer_ablation_top1  48.75 ± 2.04     16 llrd                 42.08 ± 1.18
+ 4 frozen_backbone      46.67 ± 0.59     17 mixed_replay         41.25 ± 4.68
+ 5 bc_wins              45.83 ± 3.58     18 layer_ablation_top2  40.42 ± 1.56
+ 6 entropy_bonus        44.58 ± 3.28     19 attention_only       39.58 ± 2.36
+ 7 kl_penalty           44.17 ± 2.12     20 layer_ablation_top3  39.17 ± 2.57
+ 8 reward_filtering     44.17 ± 5.03     21 running_stats        38.33 ± 3.12
+ 9 baseline_rl          43.75 ± 6.12     22 action_diversity     37.50 ± 4.08
+10 ffn_only             43.75 ± 1.02     23 advantage_clip       33.75 ± 5.10
+11 ewc                  43.33 ± 1.18     24 bc_all               33.75 ± 2.70   <- new
+12 lora                 43.33 ± 1.56     25 reward_model         32.08 ± 1.18
+13 t_curriculum         42.92 ± 2.57     26 normalized_adv       12.08 ± 4.12
+```
+
+## Still outstanding
+
+- **Run 3, full version.** The reduced sweep (1e-4, 1e-5) was chosen and run. The `3e-5` arm was
+  not run, and `3e-4` was not re-run as a reproducibility check — ~1.6 GPU-hours to complete.
+- **The MiniHack expert-eval harness** (this file's "Not a run, but tracked" section). Not
+  started; it needs asking first. Still true that the BFS oracle teacher is never scored, so
+  nobody can tell whether 47.50 is near its teacher or far below it.
+- **The manuscript LR claim was not verified.** This file asks to check the "identical to the
+  pretraining LR" line against the manuscript; the `.tex` sources are not in this workspace, so
+  it could not be checked. The config arithmetic *is* confirmed: suite `lr: 3.0e-4`
+  (`ablations_default.yaml:25`) vs `dagger_lr: 3.0e-5` (`configs/defaults.yaml:148`) — 10x.
+- **The two `.tex` import defects** remain unfixed, as instructed.

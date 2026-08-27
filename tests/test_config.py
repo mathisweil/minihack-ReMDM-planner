@@ -1299,6 +1299,9 @@ _EXPECTED_DESCRIPTIONS = {
     "baseline_rl": (
         "Return-weighted ELBO -- no modifications"
     ),
+    "bc_all": (
+        "Uniform ELBO on all rollout windows (no advantage weighting)"
+    ),
     "bc_wins": (
         "Uniform ELBO on win windows only (no advantage weighting)"
     ),

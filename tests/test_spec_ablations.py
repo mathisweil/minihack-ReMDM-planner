@@ -32,6 +32,7 @@ from experiments.rl_finetuning.ablations.losses import (
     _ewc_penalty,
     make_loss_advantage_clip,
     make_loss_baseline,
+    make_loss_bc_all,
     make_loss_bc_wins,
     make_loss_entropy_bonus,
     make_loss_ewc,
@@ -232,6 +233,48 @@ def test_bc_wins_averages_uniformly_over_winning_windows():
         )
     )
     assert all_wins == pytest.approx(uniform, abs=0.0)
+
+
+# ---------------------------------------------------------------------------
+# bc_all -- the unweighted-rollout arm
+# ---------------------------------------------------------------------------
+
+
+def test_bc_all_ignores_the_advantages_and_averages_over_the_whole_batch():
+    """bc_all separates "trained on self-generated rollouts" from
+    "weighted those rollouts by return": it must discard whatever
+    weight vector the pipeline hands it and reduce to the plain uniform
+    ELBO. Three weight vectors that a return-weighted arm would score
+    differently -- all-ones, a spread of real advantages, and a binary
+    win mask -- must all give the identical loss, and that loss must
+    equal the baseline's on uniform weights. Unlike bc_wins it keeps
+    the losing windows, so a batch with no win still carries signal.
+    """
+    model = _FixedLogitsModel(_UNIFORM)
+    cfg = _cfg()
+    local, glob, x0 = _batch()
+
+    def bc_all(adv):
+        torch.manual_seed(0)
+        return float(
+            make_loss_bc_all(_ctx(cfg=cfg))(model, local, glob, x0, adv, cfg, "cpu")
+        )
+
+    torch.manual_seed(0)
+    uniform = float(
+        make_loss_baseline(_ctx(cfg=cfg))(
+            model, local, glob, x0, torch.ones(B), cfg, "cpu"
+        )
+    )
+
+    assert bc_all(torch.ones(B)) == pytest.approx(uniform, abs=0.0)
+    assert bc_all(torch.tensor([10.0, 0.0, 1.0, 1.1])) == pytest.approx(
+        uniform, abs=0.0
+    )
+    assert bc_all(None) == pytest.approx(uniform, abs=0.0)
+    # No winning window: bc_wins collapses to zero action loss, bc_all does not.
+    assert bc_all(torch.zeros(B)) == pytest.approx(uniform, abs=0.0)
+    assert uniform != 0.0
 
 
 # ---------------------------------------------------------------------------

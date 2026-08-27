@@ -26,6 +26,7 @@ from experiments.rl_finetuning.ablations.losses import (
     LossFn,
     make_loss_advantage_clip,
     make_loss_baseline,
+    make_loss_bc_all,
     make_loss_bc_wins,
     make_loss_entropy_bonus,
     make_loss_ewc,
@@ -318,6 +319,15 @@ REGISTRY: dict[str, AblationSpec] = {
         loss_factory=make_loss_bc_wins,
         optimizer_factory=_std_opt,
         wins_only=True,
+    ),
+    "bc_all": AblationSpec(
+        name="bc_all",
+        group="B",
+        description="Uniform ELBO on all rollout windows (no advantage weighting)",
+        hypothesis="If it degrades like baseline_rl: the self-generated rollouts, "
+        "not the return weighting, are the cause",
+        loss_factory=make_loss_bc_all,
+        optimizer_factory=_std_opt,
     ),
     "low_t": AblationSpec(
         name="low_t",
