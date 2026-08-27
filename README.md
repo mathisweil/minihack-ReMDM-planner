@@ -527,11 +527,21 @@ Profile with `python scripts/profile_dagger.py [--override key=value ...]`.
 ## Testing
 
 ```bash
-uv run pytest            # 17 modules; `slow` deselected by default
+uv run pytest            # the default suite
 uv run pytest -m slow    # slow entry points only (BC + PPO baselines)
 ```
 
-`conftest.py` forces CPU and disables W&B. `test_spec_*.py` and `test_method_spec*.py` pin each canonical statement of the parent workspace's `research/spec-*.md` against the implementation; `test_config.py` and `test_recipe_values.py` guard the preset, delta-only and poolability rules and the shipped recipe values; `test_ablation_perf.py` and `test_gpu_step_perf.py` hold measured perf expectations. `test_smoke_src.py` and `test_smoke_experiments.py` cover both pipelines: modules import, the model builds from `configs/defaults.yaml`, a forward pass returns the expected shape and dtype with no NaNs, one training step gives a finite loss, save/reload reproduces identical output, each entry point runs, and all 26 registry ablations step. They assert things *run*, not that results are good. CPU-only, seeded, synthetic data; nothing written outside `tmp_path`. For a quality signal, use `--mode smoke`.
+A CPU-only suite, 17 modules. Tiny synthetic data and a shrunken model throughout — no real checkpoints, datasets or network calls, and nothing written outside `tmp_path`. `conftest.py` forces CPU and disables W&B; `slow` marks the multi-second CLI smokes and is deselected by default. For a quality signal, use `--mode smoke`.
+
+| File | Covers |
+|---|---|
+| `test_smoke_src.py`, `test_smoke_experiments.py` | that things **run**: imports, model from the real config, a forward pass of the expected shape and dtype with no NaNs, a finite training step, save/reload identity, every CLI entry point, and all 26 registry ablations |
+| `test_spec_*.py`, `test_method_spec*.py` | that things are **correct**: each canonical statement of the parent workspace's `research/spec-*.md` pinned against the implementation |
+| `test_config.py`, `test_recipe_values.py` | the preset, delta-only and poolability rules, and the shipped recipe values |
+| `test_gdelta.py`, `test_tex_macros.py` | the `--measure-gdelta` decomposition, and the `--emit-tex-macros` output: definitions only, uniquely named, letters only |
+| `test_ablation_perf.py`, `test_gpu_step_perf.py` | measured throughput expectations |
+| `test_env_reuse.py`, `test_failure_behaviour.py` | MiniHack env pooling, and failures that must raise rather than be swallowed |
+| `test_gpu_agreement.py` | CPU/GPU agreement, skipped without a device |
 
 ## Implementation notes
 
