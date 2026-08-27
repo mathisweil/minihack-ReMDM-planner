@@ -97,7 +97,7 @@ def test_experiment_module_imports_cleanly(module_name):
 def test_registry_is_well_formed():
     from experiments.rl_finetuning.ablations.registry import REGISTRY
 
-    assert len(REGISTRY) == 25
+    assert len(REGISTRY) == 26
 
     for name, spec in REGISTRY.items():
         assert spec.name == name

@@ -10,7 +10,7 @@ the core training pipeline. They start from a pretrained DAgger checkpoint.
 ## `rl_finetuning/` -- RL Fine-Tuning Ablation Suite
 
 Diagnoses why RL fine-tuning of the diffusion model collapses and which interventions fix it.
-Implements **25 ablations**: a baseline plus four groups (A: Regularisation, B: Training Signal, C: Architecture, D: Data Quality), with a comprehensive diagnostic and analysis pipeline.
+Implements **26 ablations**: a baseline plus four groups (A: Regularisation, B: Training Signal, C: Architecture, D: Data Quality), with a comprehensive diagnostic and analysis pipeline.
 
 **Training data is on-policy, and returns are per window.** Each iteration rolls the *current* model out under its EMA weights and trains on the resulting windows; a window's return is the reward sum over exactly the actions it trains on, not the episode total broadcast to every window.
 
@@ -20,9 +20,9 @@ Implements **25 ablations**: a baseline plus four groups (A: Regularisation, B: 
 rl_finetuning/
 ├── run_ablations.py          # CLI entry point
 ├── ablations/
-│   ├── losses.py             # 15 loss/objective factory functions + LossContext
+│   ├── losses.py             # 16 loss/objective factory functions + LossContext
 │   ├── optimizers.py         # AdamW, LLRD, LoRA, frozen params, PCGrad helpers
-│   ├── registry.py           # AblationSpec dataclass + REGISTRY (25 ablations)
+│   ├── registry.py           # AblationSpec dataclass + REGISTRY (26 ablations)
 │   └── training.py           # run_ablation() loop, MixedReplayBuffer, RewardModel,
 │                             #   AblationHistory dataclass
 ├── diagnostics/
@@ -103,7 +103,7 @@ python experiments/rl_finetuning/run_ablations.py \
     --fast
 ```
 
-**Full suite (all 25 ablations):**
+**Full suite (all 26 ablations):**
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
     --checkpoint path/to/dagger_checkpoint.pth \
@@ -234,6 +234,7 @@ policy.
 | | `advantage_clip` | PPO-style advantage clipping [1-eps, 1+eps] |
 | | `normalized_adv` | Std-normalised advantages (per-minibatch) |
 | | `bc_wins` | Uniform ELBO on win windows (no advantage weighting) |
+| | `bc_all` | Uniform ELBO on all rollout windows (no advantage weighting) |
 | | `low_t` | ELBO restricted to low-t (fine-detail) regime |
 | **C: Architecture** | `frozen_backbone` | Train the action head + token embeddings (backbone frozen) |
 | | `head_only` | Train only the final action projection |
@@ -412,7 +413,7 @@ structural difference between the two.
 ```
 
 `results.json` is written incrementally after each ablation completes -- a partial file
-with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--merge`.
+with N of 26 ablations is fully valid and loadable by `--analyze-only` or `--merge`.
 
 ### CLI reference
 
@@ -421,7 +422,7 @@ with N of 25 ablations is fully valid and loadable by `--analyze-only` or `--mer
 | `--checkpoint PATH` | Pretrained DAgger checkpoint (`.pth` or `wandb:` artifact) |
 | `--config PATH` | Main config override (default: `configs/defaults.yaml`) |
 | `--ablations-config PATH` | Ablations config, layered on `ablations_default.yaml` (default: `ablations_default.yaml`) |
-| `--all` | Run all 25 ablations |
+| `--all` | Run all 26 ablations |
 | `--ablations NAME [NAME ...]` | Run specific ablations by name |
 | `--list` | Print registered ablations and exit |
 | `--fast` | Smoke-test mode (50 iterations, 20 eval episodes) |

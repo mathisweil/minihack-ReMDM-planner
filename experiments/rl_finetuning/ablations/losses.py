@@ -465,6 +465,43 @@ def make_loss_bc_wins(ctx: LossContext) -> LossFn:
     return loss_fn
 
 
+def make_loss_bc_all(ctx: LossContext) -> LossFn:
+    """Uniform ELBO over every rollout window (BC on self-generated data).
+
+    The return weighting is dropped outright: ``advantages`` is ignored and
+    ``_core_loss`` takes its plain batch mean, which is exactly a weight of
+    1.0 on every window. The batch is the one ``baseline_rl`` trains on --
+    same collection, same windows -- so the pair separates the on-policy data
+    distribution from the weighting applied to it, which no other arm does.
+
+    ``bc_wins`` is the nearest neighbour and does not answer this: it keeps
+    only the winning windows, so it varies the data as well as the weights.
+
+    Hypothesis: if this degrades like ``baseline_rl``, fine-tuning on
+    self-generated rollouts is the cause and the weighting is incidental.
+
+    Args:
+        ctx: Shared loss context.
+
+    Returns:
+        ``LossFn`` averaging uniformly over the whole batch.
+    """
+
+    def loss_fn(
+        model: nn.Module,
+        local_obs: Tensor,
+        global_obs: Tensor,
+        x0: Tensor,
+        advantages: Tensor | None,
+        cfg: SimpleNamespace,
+        device: torch.device,
+    ) -> Tensor:
+        del advantages  # uniform weights: the point of this arm
+        return _core_loss(model, local_obs, global_obs, x0, None, cfg, device)
+
+    return loss_fn
+
+
 def make_loss_low_t(ctx: LossContext) -> LossFn:
     """Return-weighted ELBO restricted to low-t regime.
 
