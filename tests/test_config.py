@@ -5,6 +5,9 @@ import ast
 import importlib.util
 import json
 import math
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -566,6 +569,275 @@ def test_the_published_config_drops_the_same_environment_keys_in_both_repos():
     for key in ("lr", "LR", "batch_size", "NUM_ENVS", "noise_schedule",
                 "use_amp", "USE_AMP", "hubris", "wandbish"):
         assert not hf.is_environment_key(key), key
+
+
+# ---------------------------------------------------------------------------
+# Publishing: the scrub is APPLIED at every depth, not merely correct
+# ---------------------------------------------------------------------------
+# The suite already asserts is_environment_key() CLASSIFIES correctly. Nothing
+# asserted it was APPLIED below the top level, and in the sibling repo it was
+# not: scrub_abs_paths() recursed with shorten_paths but filtered environment
+# keys only at the top of the document, so WANDB_PROJECT and WANDB_ENTITY
+# survived one level down inside a nested config_snapshot and were published,
+# while the uploader printed a successful scrub. The predicate was proven and
+# its use was sampled. These pin the use.
+
+
+def test_environment_keys_are_dropped_below_the_top_level():
+    """The regression test for the sibling's leak: a nested config snapshot."""
+    hf = _hf_upload()
+    doc = {
+        "lr": 3e-4,
+        "resume_metadata": {
+            "config_snapshot": {
+                "use_wandb": True,
+                "wandb_project": "minihack-ReMDM-planner",
+                "wandb_entity": "myopic-planner",
+                "batch_size": 4608,
+            },
+        },
+    }
+    out = hf.scrub(doc)
+
+    snap = out["resume_metadata"]["config_snapshot"]
+    assert snap == {"batch_size": 4608}, snap
+    assert out["lr"] == 3e-4
+    # The whole document, flattened, must mention no environment key at all.
+    assert hf.environment_key_paths(out) == []
+
+
+def test_environment_keys_are_dropped_inside_lists():
+    """Nesting through a list is the other way past a dict-only filter."""
+    hf = _hf_upload()
+    out = hf.scrub({"runs": [{"wandb_run_id": "a07wlxl7", "seed": 0}]})
+    assert out == {"runs": [{"seed": 0}]}
+
+
+def test_environment_key_paths_names_where_the_leak_is():
+    """A scrub that reports 'done' without naming what it removed is how the
+    sibling's leak stayed invisible."""
+    hf = _hf_upload()
+    paths = hf.environment_key_paths(
+        {"a": {"b": {"wandb_project": "p"}}, "use_wandb": True}
+    )
+    assert sorted(paths) == ["a.b.wandb_project", "use_wandb"]
+
+
+def test_the_scrub_still_shortens_paths_at_depth():
+    """Both passes recurse; fixing the filter must not lose the shortener."""
+    hf = _hf_upload()
+    out = hf.scrub({"outer": {"dataset_path": "/very/long/cluster/path/data.npz"}})
+    assert out["outer"]["dataset_path"] == "path/data.npz"
+
+
+def test_dropping_environment_keys_preserves_mapping_type():
+    """A state dict must stay an OrderedDict; the published checkpoint keeps
+    its structure, and only the environment keys go."""
+    from collections import OrderedDict
+
+    hf = _hf_upload()
+    out = hf.drop_environment_keys(
+        OrderedDict([("wandb_run_id", "x"), ("model_state_dict",
+                     OrderedDict([("w", 1), ("b", 2)]))])
+    )
+    assert isinstance(out, OrderedDict)
+    assert isinstance(out["model_state_dict"], OrderedDict)
+    assert list(out["model_state_dict"]) == ["w", "b"]
+    assert "wandb_run_id" not in out
+
+
+def test_a_clean_document_is_returned_unchanged():
+    """No environment key anywhere means nothing is rewritten -- the property
+    scrub_checkpoint relies on to copy bytes rather than re-save them."""
+    hf = _hf_upload()
+    doc = {"lr": 1e-4, "nested": {"batch_size": 8, "envs": ["a", "b"]}}
+    assert hf.scrub(doc) == doc
+    assert hf.environment_key_paths(doc) == []
+
+
+# ---------------------------------------------------------------------------
+# Publishing: the licence is the one git committed, not the one on disk
+# ---------------------------------------------------------------------------
+# `hf download --local-dir .` writes the Hub's copies over the working tree.
+# The Hub repo carries its own README.md (the model card) and its own LICENSE,
+# and comparing `git ls-files` against the Hub listing those two are the only
+# tracked files a pull overwrites. Publishing read LICENSE straight off the
+# tree, so a pull-then-publish round trip re-published whatever the pull left
+# behind. That shipped a LICENSE naming a superseded paper title, caught only
+# by hand -- neither `--dry-run` nor the staged-tree listing would show it,
+# because both print a LICENSE that is merely the wrong one.
+
+_STALE_LICENSE = (
+    'Copyright (c) 2026 The authors of "The Double Intractability of '
+    'Reinforcement Learning for Discrete Diffusion Planners"\n'
+)
+_CURRENT_LICENSE = (
+    'Copyright (c) 2026 The authors of "Return-Weighted ELBO Fine-Tuning '
+    'Degrades Masked Diffusion Planners"\n'
+)
+
+requires_git = pytest.mark.skipif(
+    shutil.which("git") is None, reason="git is not on PATH"
+)
+
+
+def _checkout(root: Path, license_text: str) -> None:
+    """A throwaway checkout with LICENSE committed.
+
+    Isolated from the developer's git config: hooks, commit templates and
+    commit.gpgsign would otherwise leak in and make this machine-dependent.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "LICENSE").write_text(license_text)
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+    }
+    run = lambda *a: subprocess.run(  # noqa: E731
+        ["git", *a], cwd=root, env=env, capture_output=True, check=True
+    )
+    run("init", "-q", "--template=")
+    run("add", "LICENSE")
+    run(
+        "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+        "commit", "-qm", "licence",
+    )
+
+
+def _staged_license(hf, root: Path, staging: Path) -> bytes:
+    """Run the real `stage()` against *root* and return the staged LICENSE.
+
+    The module constants are bound from ROOT at import (hf_upload.py, top), so
+    rebinding ROOT alone would leave `stage_inference`'s
+    `INFERENCE.relative_to(ROOT)` pointing at the real repository and raising.
+    """
+    hf.ROOT = root
+    hf.CKPTS = root / "checkpoints"
+    hf.RUNS = root / "experiments" / "rl_finetuning" / "outputs"
+    hf.INFERENCE = root / "results" / "inference"
+    hf.PAPER_FIGURES = root / "results" / "paper_figures"
+    staging.mkdir(parents=True, exist_ok=True)
+    # This repo's stage() carries a trailing `metric` the sibling's does not.
+    hf.stage(staging, {}, [], [], [], None)
+    return (staging / "LICENSE").read_bytes()
+
+
+@requires_git
+def test_the_published_licence_is_the_one_git_committed(tmp_path):
+    """A clean checkout publishes the committed bytes."""
+    repo = tmp_path / "repo"
+    _checkout(repo, _CURRENT_LICENSE)
+    staged = _staged_license(_hf_upload(), repo, tmp_path / "staging")
+    assert staged == _CURRENT_LICENSE.encode()
+
+
+@requires_git
+def test_a_clobbered_licence_publishes_gits_bytes_not_the_working_trees(
+    tmp_path, capsys
+):
+    """The regression test for the incident: a LICENSE overwritten by a Hub
+    download must not reach the Hub, and the operator must be told."""
+    repo = tmp_path / "repo"
+    _checkout(repo, _CURRENT_LICENSE)
+    # Exactly what `hf download --local-dir .` did.
+    (repo / "LICENSE").write_text(_STALE_LICENSE)
+
+    staged = _staged_license(_hf_upload(), repo, tmp_path / "staging")
+
+    assert staged == _CURRENT_LICENSE.encode()
+    assert staged != _STALE_LICENSE.encode()
+    assert b"Double Intractability" not in staged
+    assert "differs from the one committed at HEAD" in capsys.readouterr().err
+
+
+@requires_git
+def test_the_published_licence_is_byte_exact(tmp_path):
+    """CRLF and a missing trailing newline survive.
+
+    Fails the moment `capture_output=True` is 'tidied' into `text=True`, or
+    `git cat-file blob` is swapped back for `git show`.
+    """
+    repo = tmp_path / "repo"
+    awkward = 'Copyright (c) 2026\r\nNo trailing newline here.'
+    repo.mkdir()
+    (repo / "LICENSE").write_bytes(awkward.encode())
+    _checkout(repo, awkward)
+
+    staged = _staged_license(_hf_upload(), repo, tmp_path / "staging")
+    assert staged == awkward.encode()
+
+
+def test_publishing_from_a_non_git_checkout_still_works_and_says_so(
+    tmp_path, capsys
+):
+    """A tarball or slim container must still publish -- with a warning."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "LICENSE").write_text(_CURRENT_LICENSE)
+
+    staged = _staged_license(_hf_upload(), repo, tmp_path / "staging")
+
+    assert staged == _CURRENT_LICENSE.encode()
+    assert "UNVERIFIED" in capsys.readouterr().err
+
+
+@requires_git
+def test_an_uncommitted_licence_falls_back_to_the_working_tree(tmp_path, capsys):
+    """`git init` with nothing committed is a distinct branch from 'no repo'."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "LICENSE").write_text(_CURRENT_LICENSE)
+    subprocess.run(["git", "init", "-q", "--template="], cwd=repo, check=True)
+
+    staged = _staged_license(_hf_upload(), repo, tmp_path / "staging")
+
+    assert staged == _CURRENT_LICENSE.encode()
+    assert "UNVERIFIED" in capsys.readouterr().err
+
+
+def test_git_missing_falls_back_rather_than_failing_the_publish(
+    tmp_path, capsys, monkeypatch
+):
+    """Decision: git is consulted, never required."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "LICENSE").write_text(_CURRENT_LICENSE)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+    staged = _staged_license(_hf_upload(), repo, tmp_path / "staging")
+
+    assert staged == _CURRENT_LICENSE.encode()
+    assert "git is not on PATH" in capsys.readouterr().err
+
+
+def test_the_model_card_no_longer_recommends_a_clobbering_download():
+    """The card told users to run the command that causes the bug.
+
+    `snapshot_download(repo_id=..., local_dir=".")` with no narrowing writes
+    the Hub's own README.md, LICENSE and .gitattributes over a working copy's.
+    """
+    hf = _hf_upload()
+    row = {
+        "path": "checkpoints/online/Minihack-Online-Diffusion-DAgger-100M",
+        "role": "Diffusion planner (online DAgger)",
+        "env": "MiniHack-Room-Random-5x5-v0",
+        "arch": "4L, d_model 256, 4 heads, horizon 64, 5M params",
+        "step": "563",
+        "detail": "5,657,661 env steps",
+        "size": "100 MB",
+        "restores": "`model_state_dict`",
+        "file": "iter563.pth",
+        "config": "config_563.yaml",
+    }
+    # This repo's model_card() takes fig_rows *and* a trailing metric.
+    card = hf.model_card("owner/repo", [row], [], [], [], 1.0, None)
+
+    assert 'snapshot_download(repo_id="owner/repo", local_dir=".")' not in card
+    assert "ignore_patterns" in card
+    for name in ("README.md", "LICENSE", ".gitattributes"):
+        assert name in card, name
+
 
 def _shipped_defaults() -> dict:
     """The shipped `configs/defaults.yaml` as a published snapshot would be.

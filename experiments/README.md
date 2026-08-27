@@ -348,8 +348,8 @@ ones that run trained under; without it the standard layering applies.
 ```bash
 uv run python experiments/rl_finetuning/run_ablations.py \
     --measure-gdelta --gdelta-seeds 0 1 2 \
-    --checkpoint results/checkpoints/online/<run>/iterNNN.pth \
-    --results-path results/experiments/rl_finetuning/outputs/minihack_ablations/results.json \
+    --checkpoint checkpoints/online/<run>/iterNNN.pth \
+    --results-path experiments/rl_finetuning/outputs/minihack_ablations/results.json \
     --output-dir experiments/rl_finetuning/outputs/minihack_ablations
 ```
 

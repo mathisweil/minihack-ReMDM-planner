@@ -226,13 +226,15 @@ uv run hf download mathisweil/remdm-minihack-checkpoints \
     --include "checkpoints/online/Minihack-*/**" --local-dir .
 ```
 
+**Keep the `--include`.** The Hub repo carries its own `README.md` (the generated model card), `LICENSE` and `.gitattributes`, so dropping the glob and pulling everything into `--local-dir .` overwrites this repository's copies of all three. Intersecting `git ls-files` with the Hub listing, those two tracked files — `LICENSE` and `README.md` — are the only ones a pull hits; everything else the Hub holds is gitignored. To fetch everything, add `--exclude "README.md" "LICENSE" ".gitattributes"`, or use a `--local-dir` of its own.
+
 Each released directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config.yaml` (config snapshot) and `selection.json`. The `-100M` suffix counts **sample-equivalents, not env steps** — the runs behind these train 5,650,000 env steps. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading.
 
 Historical note: the released DAgger `selection.json` records `"every": null, "configured_max": null` and `"unit": "dagger_iterations"`. It was published by a version of `selection()` that read two config keys which had been renamed out of the config, so the values came back empty. It is **historical and noncanonical** and stays as published (author decision 2026-08-17); the checkpoint's own `config_<step>.yaml` carries the real cadence and budget, so nothing is lost. A publish from the current code records the candidate set in env steps — `"every": 940000, "configured_max": 5650000` for the shipped recipe — and raises rather than writing a null for any key it cannot read.
 
 ### Publishing to the Hub
 
-`scripts/hf_upload.py` rediscovers and uploads three things, each keeping its repo-relative path: `checkpoints/` (adding a `model.safetensors` EMA export and `selection.json` per directory), every `experiments/rl_finetuning/outputs/<run>/` holding a `results.json` (with `diagnosis.md`, `tables/`, `figures/`), and the eval JSONs in `results/inference/`. It drops W&B and hub config keys, shortens absolute paths and regenerates the model card.
+`scripts/hf_upload.py` rediscovers and uploads four things, each keeping its repo-relative path: `checkpoints/` (adding a `model.safetensors` EMA export and `selection.json` per directory), every `experiments/rl_finetuning/outputs/<run>/` holding a `results.json` (with `diagnosis.md`, `tables/`, `figures/`, `gdelta/`), the eval JSONs in `results/inference/`, and the manuscript figure PDFs in `results/paper_figures/`. It drops W&B and hub config keys, shortens absolute paths and regenerates the model card.
 
 ```bash
 HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-minihack-checkpoints \
@@ -240,6 +242,12 @@ HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-mi
 ```
 
 `--dry-run` prints the staged tree and card without uploading; drop it to upload. `--selection-metric` records what the best-of-N checkpoints were chosen on. Also `--inference-results <FILE|DIR> ...` (eval JSONs kept elsewhere), `--private`, `--yes`. Publish one model per directory, with a single `.pth` and config.
+
+**The manuscript figures are built by the sibling repo.** Each figure in *Return-Weighted ELBO Fine-Tuning Degrades Masked Diffusion Planners* puts Craftax Classic and MiniHack side by side, so `craftax-ReMDM-planner/scripts/paper_figures.py` reads *both* repositories' ablation `results.json` and neither can build them alone. Copy the PDFs it emits into `results/paper_figures/` here; both Hub repos publish the same set. The upload warns when they are absent rather than passing over them silently.
+
+**Pulling before publishing overwrites `README.md` and `LICENSE`.** `hf download --local-dir .` writes the Hub's own copies of both over the working tree. Publishing used to copy `LICENSE` straight off that tree, so a pull-then-publish round-trip republished whatever the pull left behind — which is how a `LICENSE` naming a superseded paper title reached the Hub and stayed there for a release cycle. Neither `--dry-run` nor the staged-tree listing catches that, because both print a `LICENSE` that is merely the wrong one.
+
+`hf_upload.py` now stages `LICENSE` from `git cat-file blob HEAD:LICENSE` (and `hf_upload_demo.py` its bundle's `README.md`), so a clobbered tree can no longer reach the Hub; it warns and publishes the committed bytes, or warns that git could not be consulted and publishes the working copy unverified. **The pull still overwrites your files, though** — `git checkout -- README.md LICENSE` afterwards, or avoid it with the download flags above.
 
 **Checkpoint discovery expects the released layout**, `checkpoints/<role>/<name>/*.pth` — the layout the Hub repo mirrors. A training run writes to its own `checkpoints/dagger_<timestamp>/` directory, so copy the checkpoints you mean to release into `checkpoints/{offline,online}/<name>/` first, or nothing is staged. `checkpoints/hf/` is skipped: that is where a Hub *download* lands, and publishing from it would push already-published artefacts back up into a nested `checkpoints/hf/checkpoints/...` tree.
 
