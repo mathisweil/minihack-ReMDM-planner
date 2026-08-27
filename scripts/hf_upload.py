@@ -291,7 +291,15 @@ def scrub(cfg: dict) -> dict:
 # analysis/tables.py` in a generated LaTeX comment became
 # `experimentsanalysis/tables.py`, because matching could start at the slash
 # after `experiments`.
-_ABS_PATH = re.compile(r"(?<![\w.\-])/(?:[\w.\-]+/){2,}[\w.\-]+")
+#
+# `@` and `+` are in the class because the lookbehind makes a narrow class
+# leak rather than merely under-match: with them omitted,
+# `/home/user@dom/proj/run/file.txt` fails at the start (`user@dom` is not one
+# component) and the lookbehind then refuses to restart at `/proj`, so there
+# is no fallback match and the whole absolute path ships unshortened. `@` is
+# exactly where an email-like component appears in a home-directory path,
+# which is the leak class this scrub exists for.
+_ABS_PATH = re.compile(r"(?<![\w.@+\-])/(?:[\w.@+\-]+/){2,}[\w.@+\-]+")
 
 #: What a staged tree holds that is worth reading as text.
 _TEXT_SUFFIXES = (".md", ".txt", ".csv", ".tex")

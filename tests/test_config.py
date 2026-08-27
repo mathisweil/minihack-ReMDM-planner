@@ -722,6 +722,13 @@ def test_shortening_leaves_relative_paths_alone(tmp_path):
         "at /cs/student/project_msc/2025/dsml/someone/out/results.json now"
     ) == "at out/results.json now"
 
+    # A narrow character class does not merely under-match here: the
+    # lookbehind refuses to restart mid-path, so an absolute path containing
+    # `@` or `+` would fail to match at all and ship UNSHORTENED. `@` is where
+    # an email-like component appears in a home directory path.
+    assert hf.shorten_text_paths("/home/user@dom/proj/run/file.txt") == "run/file.txt"
+    assert hf.shorten_text_paths("/cs/a+b/c/d/e.txt") == "d/e.txt"
+
     tex = tmp_path / "tables"
     tex.mkdir()
     (tex / "results.tex").write_text(f"% {keep}\n\\newcommand{{\\mhX}}{{1}}\n")
