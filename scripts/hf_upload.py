@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -70,14 +71,25 @@ RUN_DIRS = ("tables", "figures", "gdelta")
 # in the released config while claiming to scrub W&B settings. Keys are
 # compared lower-cased, because craftax records them UPPERCASE and minihack
 # lower-case.
-DROP_PREFIXES = ("wandb_", "hub_")
+DROP_PREFIXES = ("hub_",)
+# `wandb_` is matched anywhere in the key, not only at the start. A prefix
+# rule caught `wandb_project` but not `baselines_wandb_project`, which was
+# published in both released config.yaml files, nor the sibling's
+# `RESUME_WANDB_RUN_ID` -- the same way `use_wandb` slipped past originally.
+# The underscore is what keeps it narrow: `wandbish` contains `wandb` but not
+# `wandb_`, so the negative assertions still hold in both repos.
+DROP_SUBSTRINGS = ("wandb_",)
 DROP_KEYS = ("_wandb", "use_wandb")
 
 
 def is_environment_key(key: str) -> bool:
     """True for a config key that is provenance rather than recipe."""
     lowered = key.lower()
-    return lowered in DROP_KEYS or lowered.startswith(DROP_PREFIXES)
+    return (
+        lowered in DROP_KEYS
+        or lowered.startswith(DROP_PREFIXES)
+        or any(mark in lowered for mark in DROP_SUBSTRINGS)
+    )
 
 
 COPY_IGNORE = shutil.ignore_patterns(
@@ -270,6 +282,90 @@ def scrub(cfg: dict) -> dict:
     settings from a nested config snapshot in the sibling repo.
     """
     return drop_environment_keys(shorten_paths(cfg))
+
+
+#: An absolute POSIX path with at least three components, as it appears
+#: inside a JSON string, a Markdown table or a LaTeX table cell.
+# The lookbehind anchors the match to an absolute path. Without it the regex
+# also matched from the middle of a relative one: `experiments/rl_finetuning/
+# analysis/tables.py` in a generated LaTeX comment became
+# `experimentsanalysis/tables.py`, because matching could start at the slash
+# after `experiments`.
+#
+# `@` and `+` are in the class because the lookbehind makes a narrow class
+# leak rather than merely under-match: with them omitted,
+# `/home/user@dom/proj/run/file.txt` fails at the start (`user@dom` is not one
+# component) and the lookbehind then refuses to restart at `/proj`, so there
+# is no fallback match and the whole absolute path ships unshortened. `@` is
+# exactly where an email-like component appears in a home-directory path,
+# which is the leak class this scrub exists for.
+_ABS_PATH = re.compile(r"(?<![\w.@+\-])/(?:[\w.@+\-]+/){2,}[\w.@+\-]+")
+
+#: What a staged tree holds that is worth reading as text.
+_TEXT_SUFFIXES = (".md", ".txt", ".csv", ".tex")
+_DOC_SUFFIXES = (".json", ".yaml", ".yml")
+
+
+def shorten_text_paths(text: str) -> str:
+    """Apply the ``shorten_paths`` rule to paths embedded in plain text.
+
+    ``shorten_paths`` only reaches strings it can find by walking a parsed
+    document. The same cluster paths appear inside ``diagnosis.md`` prose and
+    LaTeX table cells, where nothing parses them.
+    """
+    return _ABS_PATH.sub(lambda m: "/".join(Path(m.group(0)).parts[-2:]), text)
+
+
+def scrub_staged_tree(staging: Path) -> list[str]:
+    """Scrub every document and text file in the staged tree, in place.
+
+    The stagers copy whole directories -- ``tables/``, ``figures/``,
+    ``gdelta/`` -- so naming the files to scrub means maintaining a list by
+    hand, and a list of known filenames is the same mistake as a known
+    nesting. Walking what was actually staged makes the set of files scrubbed
+    identical to the set published, by construction.
+
+    This closes a reach bug, not a depth one: ``stage_runs`` copied
+    ``results.json`` with ``shutil.copy2`` and scrubbed nothing at all, so the
+    released file carried `wandb_project`, `wandb_entity` and the absolute
+    path of the machine it ran on. ``scrub`` was correct and was simply never
+    called on it.
+
+    A file is rewritten only when scrubbing changes it, so anything already
+    clean keeps its bytes.
+
+    Returns:
+        Staged-relative paths of the files that changed.
+    """
+    changed: list[str] = []
+    for path in sorted(staging.rglob("*")):
+        if not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        if suffix in _DOC_SUFFIXES:
+            raw = path.read_text()
+            try:
+                doc = (json.loads(raw) if suffix == ".json"
+                       else yaml.safe_load(raw))
+            except (json.JSONDecodeError, yaml.YAMLError):
+                continue
+            if not isinstance(doc, (dict, list)):
+                continue
+            clean = drop_environment_keys(shorten_paths(doc))
+            if clean == doc:
+                continue
+            path.write_text(
+                json.dumps(clean, indent=2) + "\n" if suffix == ".json"
+                else yaml.safe_dump(clean, sort_keys=False)
+            )
+            changed.append(str(path.relative_to(staging)))
+        elif suffix in _TEXT_SUFFIXES:
+            raw = path.read_text()
+            clean = shorten_text_paths(raw)
+            if clean != raw:
+                path.write_text(clean)
+                changed.append(str(path.relative_to(staging)))
+    return changed
 
 
 def scrub_checkpoint(src: Path, dst: Path) -> None:
@@ -512,8 +608,11 @@ def stage_inference(staging: Path, files: list[Path]) -> list[dict[str, str]]:
         if any(r["file"] == name for r in rows):
             name = f"{src.parent.name}-{src.name}"
         target_dir.mkdir(parents=True, exist_ok=True)
+        # scrub, not shorten_paths: this shortened cluster paths while doing
+        # nothing about environment keys, the same asymmetry as stage_runs one
+        # step further along. These payloads carry no config today.
         (target_dir / name).write_text(
-            json.dumps(shorten_paths(payload), indent=2) + "\n",
+            json.dumps(scrub(payload), indent=2) + "\n",
         )
         row = describe_inference(name, payload)
         row["size"] = human_size(target_dir / name)
@@ -558,6 +657,10 @@ def stage(
     # ROOT is passed explicitly rather than read inside the helper, so a
     # test can rebind it and have that take effect.
     copy_tracked_file("LICENSE", staging / "LICENSE", ROOT)
+    # Last, so it covers everything every stager copied -- including the whole
+    # directories stage_runs copies wholesale, which no stager scrubbed.
+    for name in scrub_staged_tree(staging):
+        print(f"  scrubbed provenance from {name}")
     return rows, run_rows, inf_rows, fig_rows
 
 
