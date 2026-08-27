@@ -284,12 +284,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p.add_argument(
         "--action-dist",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help=(
             "After training, roll out the pretrained and fine-tuned models to "
             "compare action distributions (figures/action_dist/). Off by "
-            "default: MiniHack rollouts are not vectorised, so this adds "
-            "roughly num_envs * episodes * (1 + n_ablations) episodes."
+            "default here: MiniHack rollouts are not vectorised, so this adds "
+            "roughly num_envs * episodes * (1 + n_ablations) episodes. The "
+            "craftax twin takes the same flag but defaults on -- its rollout "
+            "is one vectorised scan (PARITY, known structural divergences)."
         ),
     )
     p.add_argument(
