@@ -46,7 +46,8 @@ def _curriculum_with_rates(rates: dict[str, tuple[int, int]]) -> DynamicCurricul
 
 def test_curriculum_bucket_weights_interior():
     """Sampling weights are 0.2 / 1.0 / 0.1 for win rates in [0,0.15),
-    [0.15,0.85) and above (spec-training §1.7; README:343-344,502).
+    [0.15,0.85) and above (spec-training §1.7; README §Implementation
+    notes, Curriculum).
 
     Derivation: win rates 0.10 / 0.50 / 0.90 fall in the three buckets;
     normalised sampling probabilities are [0.2,1.0,0.1]/1.3 =
@@ -107,7 +108,8 @@ def test_curriculum_low_boundary_is_exclusive():
 
 def test_efficiency_filter_thresholds():
     """Oracle data is added iff the model failed or took more than
-    1.5x the oracle's steps (spec-training §1.6; README:364-372).
+    1.5x the oracle's steps (spec-training §1.6; README §DAgger training
+    loop step 4, with efficiency_multiplier in §Key hyperparameters).
 
     The boundary is strict: exactly 1.5x is efficient enough (the
     documented rule is 'took >1.5x oracle steps').
@@ -154,7 +156,7 @@ def test_buffer_pads_episode_tails():
 def test_buffer_offline_data_is_pinned_and_online_fifo_evicted():
     """Offline windows are pinned at the front and never evicted;
     online windows FIFO-evict when the total exceeds capacity
-    (spec-training §1.8; README:503).
+    (spec-training §1.8; README §Implementation notes, Replay buffer).
 
     Derivation: capacity 6, seq_len 2. Offline trajectory of 3 steps ->
     3 windows (actions starting 7). Online adds of 2 x 3-window
@@ -224,8 +226,9 @@ def test_evaluator_seeds_are_fixed_and_run_seed_independent(monkeypatch):
 
 def test_no_warm_start_disables_oracle_buffer_seeding(monkeypatch):
     """run_dagger(no_warm_start=True) must not seed the buffer with
-    oracle trajectories (README:505 defines DAgger warm-start as exactly
-    this seeding; was defect §8.9: the seeding ran unconditionally).
+    oracle trajectories (README §Implementation notes, DAgger warm-start,
+    defines it as exactly this seeding; was defect §8.9: the seeding ran
+    unconditionally).
 
     The oracle collector is stubbed to count invocations (returning
     None, so no environments are needed) and Trainer.train is stubbed
@@ -260,7 +263,8 @@ def test_no_warm_start_disables_oracle_buffer_seeding(monkeypatch):
     # Both directions, or the assertion above is satisfied by deleting the
     # seeding entirely (sweep S11-5: with only the negative direction
     # asserted, `if no_warm_start:` -> `if True:` left the suite green).
-    # README §DAgger fixes the count: 3 oracle trajectories per ID env.
+    # README §Implementation notes, DAgger warm-start, fixes the count:
+    # 3 oracle trajectories per ID environment.
     calls["n"] = 0
     cfg.checkpoint_dir = tempfile.mkdtemp(prefix="remdm-ws-test-")
     online.run_dagger(cfg, None, False)
