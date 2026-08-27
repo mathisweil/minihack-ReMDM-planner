@@ -1,8 +1,9 @@
 """Upload the trained MiniHack ReMDM checkpoints and results to the Hugging Face Hub.
 
 Discovers every checkpoint under ``checkpoints/``, every ablation run under
-``experiments/rl_finetuning/outputs/`` and every ``--mode inference`` result
-under ``results/inference/``, stages them with the repo-relative layout
+``experiments/rl_finetuning/outputs/``, every ``--mode inference`` result
+under ``results/inference/`` and the manuscript figure PDFs under
+``results/paper_figures/``, stages them with the repo-relative layout
 preserved, drops W&B and hub metadata (which carries the author's account,
 hostname and local paths), exports safetensors inference weights alongside each
 full training state, generates a model card from the checkpoints' own config
@@ -25,10 +26,21 @@ from pathlib import Path
 
 import yaml
 
+# scripts/ is not a package, so the helper is imported by bare name.
+# Python already puts this file's directory on sys.path when the script is
+# run directly; the explicit insert is for the file-location loaders the
+# tests use (tests/test_config.py), which do not.
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from _git_provenance import copy_tracked_file  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 CKPTS = ROOT / "checkpoints"
 RUNS = ROOT / "experiments" / "rl_finetuning" / "outputs"
 INFERENCE = ROOT / "results" / "inference"
+PAPER_FIGURES = ROOT / "results" / "paper_figures"
 
 PAPER = (
     "Return-Weighted ELBO Fine-Tuning Degrades "
@@ -126,6 +138,26 @@ def discover_runs() -> list[Path]:
     if not RUNS.is_dir():
         return []
     return sorted(d for d in RUNS.iterdir() if (d / "results.json").is_file())
+
+
+def discover_paper_figures() -> list[Path]:
+    """The manuscript figures, as vector PDFs.
+
+    Built by ``scripts/paper_figures.py``, which lives in the sibling repo
+    because each figure reads *both* repositories' ablation ``results.json``
+    and puts Craftax Classic and MiniHack side by side in one figure. The
+    resulting PDFs therefore describe this repo's results as much as the
+    sibling's, and both Hub repos publish the same set from
+    ``results/paper_figures/``.
+
+    They were previously published by neither: discovery covered only
+    ``checkpoints/``, the ablation run directories and ``results/inference/``,
+    so ``results/paper_figures/`` matched nothing and the upload said nothing
+    about it.
+    """
+    if not PAPER_FIGURES.is_dir():
+        return []
+    return sorted(PAPER_FIGURES.glob("*.pdf"))
 
 
 def discover_inference(extra: list[str]) -> list[Path]:
@@ -431,19 +463,44 @@ def stage_inference(staging: Path, files: list[Path]) -> list[dict[str, str]]:
     return rows
 
 
+def stage_paper_figures(staging: Path, files: list[Path]) -> list[dict[str, str]]:
+    """Copy the manuscript figures into ``results/paper_figures/``."""
+    if not files:
+        return []
+    target_dir = staging / PAPER_FIGURES.relative_to(ROOT)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for src in files:
+        shutil.copy2(src, target_dir / src.name)
+        rows.append({"file": src.name, "size": human_size(target_dir / src.name)})
+    return rows
+
+
 def stage(
     staging: Path,
     models: dict[Path, list[Path]],
     runs: list[Path],
     inference: list[Path],
+    figures: list[Path],
     metric: str | None,
-) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
-    """Stage checkpoints, results and LICENSE; the card is written by the caller."""
+) -> tuple[
+    list[dict[str, str]], list[dict[str, str]],
+    list[dict[str, str]], list[dict[str, str]],
+]:
+    """Stage checkpoints, results and LICENSE; the card is written by the caller.
+
+    LICENSE comes from git rather than the working tree: a
+    ``hf download --local-dir .`` overwrites it with the Hub's own copy, and
+    publishing from the tree would push that straight back up as current.
+    """
     rows = stage_checkpoints(staging, models, metric)
     run_rows = stage_runs(staging, runs)
     inf_rows = stage_inference(staging, inference)
-    shutil.copy2(ROOT / "LICENSE", staging / "LICENSE")
-    return rows, run_rows, inf_rows
+    fig_rows = stage_paper_figures(staging, figures)
+    # ROOT is passed explicitly rather than read inside the helper, so a
+    # test can rebind it and have that take effect.
+    copy_tracked_file("LICENSE", staging / "LICENSE", ROOT)
+    return rows, run_rows, inf_rows, fig_rows
 
 
 # =============================================================================
@@ -466,7 +523,11 @@ def checkpoint_table(rows: list[dict[str, str]]) -> str:
     )
 
 
-def results_section(run_rows: list[dict[str, str]], inf_rows: list[dict[str, str]]) -> str:
+def results_section(
+    run_rows: list[dict[str, str]],
+    inf_rows: list[dict[str, str]],
+    fig_rows: list[dict[str, str]],
+) -> str:
     """Ablation and inference tables; empty when the release carries neither."""
     parts = []
     if run_rows:
@@ -496,6 +557,21 @@ def results_section(run_rows: list[dict[str, str]], inf_rows: list[dict[str, str
                 ],
             ),
         )
+    if fig_rows:
+        parts.append(
+            "Manuscript figures as vector PDF, under `results/paper_figures/`. "
+            "Each puts Craftax Classic and MiniHack side by side, so they are "
+            "built from both repositories' ablation `results.json` by the "
+            "sibling repo's `scripts/paper_figures.py` and published "
+            "identically in both Hub repos.\n\n"
+            + table(
+                ["Figure", "Size"],
+                [
+                    f"`{r['file']}` | {r['size']}"
+                    for r in sorted(fig_rows, key=lambda r: r["file"])
+                ],
+            ),
+        )
     return "## Results\n\n" + "\n".join(parts) if parts else ""
 
 
@@ -510,6 +586,7 @@ def model_card(
     rows: list[dict[str, str]],
     run_rows: list[dict[str, str]],
     inf_rows: list[dict[str, str]],
+    fig_rows: list[dict[str, str]],
     total_mb: float,
     metric: str | None,
 ) -> str:
@@ -554,14 +631,27 @@ Weights are PyTorch training states with a `safetensors` export of the EMA
 weights alongside, and the paths above mirror the source repository so a
 snapshot can be dropped straight into a working copy.
 
-{results_section(run_rows, inf_rows)}
+{results_section(run_rows, inf_rows, fig_rows)}
 ## Download
+
+This repo mirrors the code repository's layout, so a snapshot drops straight
+into a working copy -- but it also carries its own `README.md` (this card),
+`LICENSE` and `.gitattributes`, and `local_dir="."` would overwrite the code
+repository's copies of all three. Exclude them, or download into a directory
+of its own.
 
 ```python
 from huggingface_hub import snapshot_download
 
-# everything (~{total_mb:.0f} MB)
-snapshot_download(repo_id="{repo_id}", local_dir=".")
+# everything (~{total_mb:.0f} MB), into a clone of the code repository
+snapshot_download(
+    repo_id="{repo_id}",
+    local_dir=".",
+    ignore_patterns=["README.md", "LICENSE", ".gitattributes"],
+)
+
+# or somewhere of its own, leaving any working copy untouched
+snapshot_download(repo_id="{repo_id}", local_dir="remdm-minihack")
 
 # a single model
 snapshot_download(
@@ -686,15 +776,17 @@ def main() -> int:
         return 1
     runs = discover_runs()
     inference = discover_inference(args.inference_results)
+    figures = discover_paper_figures()
 
     with tempfile.TemporaryDirectory(prefix="remdm-minihack-") as tmp:
         staging = Path(tmp)
-        rows, run_rows, inf_rows = stage(
-            staging, models, runs, inference, args.selection_metric,
+        rows, run_rows, inf_rows, fig_rows = stage(
+            staging, models, runs, inference, figures, args.selection_metric,
         )
         total_mb = dir_size_mb(staging)
         card = model_card(
-            args.repo_id, rows, run_rows, inf_rows, total_mb, args.selection_metric,
+            args.repo_id, rows, run_rows, inf_rows, fig_rows, total_mb,
+            args.selection_metric,
         )
         (staging / "README.md").write_text(card)
 
@@ -702,6 +794,7 @@ def main() -> int:
         print(f"Staged {plural(len(rows), 'checkpoint')}, "
               f"{plural(len(run_rows), 'ablation run')}, "
               f"{plural(len(inf_rows), 'inference result')}, "
+              f"{plural(len(fig_rows), 'paper figure')}, "
               f"{plural(len(files), 'file')}, {total_mb:.0f} MB")
         for r in sorted(rows, key=lambda r: r["path"]):
             print(f"  {r['path']:<70} {r['size']:>8}  {r['detail']}")
@@ -710,6 +803,8 @@ def main() -> int:
             print(f"  {r['path']:<70} {r['size']:>8}  {r['contents']}")
         for r in sorted(inf_rows, key=lambda r: r["file"]):
             print(f"  results/inference/{r['file']:<52} {r['size']:>8}  {r['metric']}")
+        for r in sorted(fig_rows, key=lambda r: r["file"]):
+            print(f"  results/paper_figures/{r['file']:<48} {r['size']:>8}")
         if not run_rows:
             print(f"Warning: no ablation runs with a results.json under {RUNS}.",
                   file=sys.stderr)
@@ -717,6 +812,12 @@ def main() -> int:
             print("Warning: no inference results; produce them with "
                   "`main.py --mode inference --output "
                   f"{INFERENCE.relative_to(ROOT)}/<name>.json`.", file=sys.stderr)
+        if not fig_rows:
+            print(
+                "Warning: no manuscript figures; build them with the sibling "
+                "repo's `scripts/paper_figures.py` and copy the PDFs into "
+                f"{PAPER_FIGURES.relative_to(ROOT)}/.", file=sys.stderr,
+            )
         if not args.selection_metric:
             print(
                 "Warning: --selection-metric not given; these are best-of-N "

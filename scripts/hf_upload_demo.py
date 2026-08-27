@@ -47,6 +47,15 @@ import shutil
 import sys
 from pathlib import Path
 
+# scripts/ is not a package, so the helper is imported by bare name. Python
+# already puts this file's directory on sys.path when the script is run
+# directly; the explicit insert is for file-location loaders that do not.
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from _git_provenance import copy_tracked_file, dirty_paths  # noqa: E402
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -118,6 +127,17 @@ def stage(staging_dir: Path) -> None:
     ablation_dst = staging_dir / "ablation_assets"
     ablation_dst.mkdir()
 
+    # Tracked directories are reported, not overridden: no Hub download writes
+    # to any of these paths, and staging a whole tree from HEAD would publish
+    # an intentional uncommitted edit as stale -- the same bug inverted.
+    dirty = dirty_paths(["src", "configs", "environments"], PROJECT_ROOT)
+    if dirty:
+        print(
+            f"Warning: publishing uncommitted changes in {', '.join(dirty)}. "
+            f"Commit them first if the bundle is meant to be reproducible.",
+            file=sys.stderr,
+        )
+
     # Source trees
     for sub in ("src", "configs", "environments"):
         src = PROJECT_ROOT / sub
@@ -129,7 +149,13 @@ def stage(staging_dir: Path) -> None:
     for fname in ("main.py", "pyproject.toml", "README.md"):
         src = PROJECT_ROOT / fname
         if src.exists():
-            shutil.copy2(src, staging_dir / fname)
+            # All three are git-tracked, and README.md is one of the two files
+            # a `hf download --local-dir .` overwrites with the Hub's own copy
+            # -- after such a pull the working-tree README.md IS the model
+            # card. Publish what git committed so a clobbered tree cannot
+            # reach the demo repo; the helper warns and falls back if git
+            # cannot answer.
+            copy_tracked_file(fname, staging_dir / fname, PROJECT_ROOT)
             logger.info(f"  staged {fname}")
 
     # Stripped checkpoint — created on demand from the published DAgger ckpt.
