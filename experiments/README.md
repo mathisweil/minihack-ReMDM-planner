@@ -31,7 +31,7 @@ rl_finetuning/
 │   └── timestep.py           # t-bin gradient norms, per-t loss decomposition
 ├── analysis/
 │   ├── gdelta.py             # Return term g_delta of the decomposition (no training)
-│   ├── plots.py              # 12 matplotlib figure generators
+│   ├── plots.py              # 16 matplotlib figure generators
 │   ├── tables.py             # Summary tables as polars DataFrames + LaTeX export
 │   ├── report.py             # diagnosis.md + decision tree figure
 │   └── action_distribution.py  # Pre/post-RL action distribution analysis
@@ -69,7 +69,7 @@ cka_batch_size: 128
 | Rule | Behaviour |
 |---|---|
 | Base | `ablations_default.yaml`, applied automatically; there is no `extends` key |
-| `--fast` | Applied raw on top, so machine keys (`use_amp`, `batch_size`, `diffusion_steps_collect`) survive |
+| `--fast` | Applied raw on top, so machine keys it does not set (`use_amp`, `diffusion_steps_collect`) survive. It does set `batch_size: 128`, which therefore overrides the machine value |
 | Unknown key | `KeyError`, not a silent no-op. Valid keys are those in `configs/defaults.yaml` plus `ablations_default.yaml` |
 | Restated default | Rejected by `tests/test_config.py`: a key whose value equals what it would inherit is redundant and must be deleted |
 
@@ -205,9 +205,10 @@ keys that change the result, not just the wall-clock:
 | `diffusion_steps_collect` | 5 | 3 | different collection policy |
 | `eval_episodes` | 20 | 10 | noisier score |
 
-Differences in diagnostic cadence (`eval_every`, `cka_every`, `cka_batch_size`,
-`per_layer_every`, `repr_drift_every`, `grad_align_every`, `t_analysis_every`)
-are wall-clock only and do not affect poolability.
+Values above are post-layering: a config's own value, or what it inherits from
+`ablations_default.yaml`. Differences in diagnostic cadence (`eval_every`, `cka_every`,
+`cka_batch_size`, `per_layer_every`, `repr_drift_every`, `grad_align_every`,
+`t_analysis_every`) are wall-clock only and do not affect poolability.
 
 `tests/test_config.py` enforces this: every `ablations_final_*.yaml` must be
 declared poolable or not, configs declared poolable must match the reference on
@@ -391,21 +392,26 @@ Four points on scope:
   environment; torch needs to be told. It defaults to CUDA where available.
 
 The sibling `craftax-ReMDM-planner` carries the same module with the same
-driver flags and the same output JSON schema. Its version needs an explicit
-Orbax sharding to restore a GPU-written checkpoint on CPU;
-`torch.load(map_location=...)` has no such problem, which is the only
-structural difference between the two.
+`--measure-gdelta` flags and the same output JSON schema; the two drivers
+otherwise differ on four flags (craftax has `--num-envs`; this repo has
+`--device`, `--wandb-resume-id`, `--action-dist-episodes`). Its version needs
+an explicit Orbax sharding to restore a GPU-written checkpoint on CPU, where
+`torch.load(map_location=...)` has no such problem.
 
 **`results.json` schema:**
 ```json
 {
   "pretrained_score": 0.1234,
-  "config": {"max_iter": 1000, "batch_size": 512, ...},
+  "config": {"max_iter": 1000, "batch_size": 512, ...},   // keys lowercase
+  "merge_provenance": { ... },        // --merge only: inputs + which supplied config
   "ablations": {
     "kl_penalty": {
       "score": 0.1456,
       "score_std": 0.008,
       "all_scores": [0.14, 0.15, 0.14],
+      "base_seed": 42, "seeds": [42, 43, 44],
+      "wall_clock_s": 812.4,
+      "per_seed_finals": [{...}], "per_seed_final_evals": [{...}],
       "history": { ... }
     }
   }
@@ -425,7 +431,7 @@ with N of 26 ablations is fully valid and loadable by `--analyze-only` or `--mer
 | `--all` | Run all 26 ablations |
 | `--ablations NAME [NAME ...]` | Run specific ablations by name |
 | `--list` | Print registered ablations and exit |
-| `--fast` | Smoke-test mode (50 iterations, 20 eval episodes) |
+| `--fast` | Smoke-test mode (`max_iter: 50`, `eval_episodes: 5`, `batch_size: 128`) |
 | `--num-seeds N` | Number of seeds per ablation (overrides `num_seeds`, default 3) |
 | `--seed N` | Base random seed |
 | `--output-dir DIR` | Output directory (default: auto-timestamped) |
@@ -446,6 +452,9 @@ with N of 26 ablations is fully valid and loadable by `--analyze-only` or `--mer
 | `--eval-every N` | Override evaluation frequency |
 | `--lr FLOAT` | Override learning rate |
 | `--device DEVICE` | Torch device (default: auto-detect) |
+| `--emit-tex-macros` | Also write `tables/results.tex`, one `\newcommand` per headline number |
+| `--action-dist` / `--no-action-dist` | Pre/post action-distribution analysis (default **off** here; **on** in the craftax twin) |
+| `--action-dist-episodes N` | Episodes per environment for that analysis (default 10) |
 
 ### W&B logging
 

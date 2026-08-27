@@ -4,8 +4,9 @@
 # Override keys for quick CI / smoke testing.  This file is an OVERLAY, not a
 # link in the extends chain: when --fast is passed it is applied raw on top of
 # whatever ablations config is in use, so it never drags default values back
-# over a machine config (a GPU-H200 run with --fast keeps use_amp, B=512 and
-# diffusion_steps_collect=3, and only picks up the keys listed below).
+# over a machine config (a GPU-H200 run with --fast keeps the machine keys this
+# file does not set, such as use_amp and diffusion_steps_collect=3, and picks up
+# only the keys listed below -- batch_size included, which is set here).
 #
 # Passing this file to --ablations-config directly still works; it then
 # inherits ablations_default.yaml implicitly like any other config.

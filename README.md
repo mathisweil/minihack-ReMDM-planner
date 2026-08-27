@@ -52,9 +52,11 @@ minihack-ReMDM-planner/
 ├── scripts/                HF upload utilities, DAgger and ablation profilers
 ├── tests/                  Smoke suite — uv run pytest
 ├── checkpoints/            Gitignored — offline/, online/ (see Checkpoints)
-├── results/inference/      Eval JSONs from --mode inference (published, see Checkpoints)
+├── results/                Gitignored, created on demand — inference/ eval JSONs and
+│                           paper_figures/ manuscript PDFs, both published (see Checkpoints)
 ├── demo_minihack.ipynb     Demo notebook
 ├── main.py                 CLI entry point
+├── RUNS.md                 Measurement runs and what they found
 └── pyproject.toml          uv project — deps, cuda extra, dev group
 ```
 
@@ -97,7 +99,7 @@ python main.py --mode offline --data data/dataset.pt --override total_timesteps=
 python main.py --mode offline --data data/dataset.pt --checkpoint checkpoints/offline_step40000.pth
 ```
 
-Gradient steps default to `total_timesteps // offline_batch_size`; ID + OOD eval runs on the `id_eval_every_timesteps` / `ood_eval_every_timesteps` cadence. The `offline_*_grad_steps` keys override that in grad-step units — see the hazard note under [Configuration](#configuration). See the hazard note under [Configuration](#configuration).
+Gradient steps default to `total_timesteps // offline_batch_size`; ID + OOD eval runs on the `id_eval_every_timesteps` / `ood_eval_every_timesteps` cadence. The `offline_*_grad_steps` keys override that in grad-step units — see the hazard note under [Configuration](#configuration).
 
 ## Evaluation from a checkpoint
 
@@ -155,7 +157,7 @@ python main.py --mode inference --checkpoint checkpoints/iter600.pth --blind-glo
 
 ### RL fine-tuning ablation suite
 
-25 registered ablations (same names as in the craftax repo). See `experiments/README.md`.
+26 registered ablations (same names as in the craftax repo). See `experiments/README.md`.
 
 ```bash
 python experiments/rl_finetuning/run_ablations.py --list
@@ -253,7 +255,7 @@ HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-mi
 
 ## Results, citation, licence
 
-Results tables and the full method description are in the accompanying paper (under submission); `demo_minihack.ipynb` reproduces the headline comparison. Citation to be added on publication. Licence: MIT, see `LICENSE`.
+Results tables and the full method description are in *Return-Weighted ELBO Fine-Tuning Degrades Masked Diffusion Planners* (under submission); `demo_minihack.ipynb` reproduces the headline comparison. Citation to be added on publication. Licence: MIT, see `LICENSE`.
 
 ---
 
@@ -430,6 +432,7 @@ BFS oracle priority: (1) kick adjacent doors, (2) BFS to staircase, (3) BFS to f
     "step": int,
     "env_steps": int,                  # step * offline_batch_size
     "wandb_run_id": str | None,
+    "rng_states": {"torch", "numpy", "python"},   # required to resume
 }
 
 # Offline BC, final (offline_final.pth)
@@ -490,12 +493,13 @@ python main.py --mode online --checkpoint old.pth --override wandb_resume_id=abc
 | `train/` | `buffer_size`, `buffer_online_frac`, `model_won`, `added_to_buffer`, `episodes_collected`, `model_steps`, `oracle_steps`, `efficiency_ratio`, `lr`, `grad_norm`, `global_gate`, `env_steps`, `progress` |
 | `speed/` | `iter_time_sec`, `collect_time_sec`, `train_step_time_sec`, `samples_per_sec`, `env_steps_per_sec`, `gpu_memory_mb` |
 | `model/` | `param_norm`, `param_drift_from_init`, `ema_gate_value` (every 10 iters) |
-| `eval_id/{env}/`, `eval_ood/{env}/` | Per-env win rate, avg steps, avg reward |
+| `eval_id/{env}/`, `eval_ood/{env}/` | Per-env `win_rate`, `wins`, `avg_reward`, `avg_steps`, `n_episodes` |
 | `eval_id/`, `eval_ood/` | `mean_win_rate` |
 | `curriculum/{env}/` | `win_rate` per training environment |
 | `ckpt_eval_id/`, `ckpt_eval_ood/` | Per-env metrics at checkpoint time |
 | `ckpt_eval/` | `id_winrate`, `ood_winrate` |
 | `offline/` | `final_loss`, `total_steps`, `total_timesteps` (summary only) |
+| `inference/{env}/` | Per-env metrics from `--mode inference` |
 
 DAgger and offline BC both emit to `eval_id/` and `eval_ood/`, through the same `Evaluator` and EMA-weight path.
 
@@ -512,11 +516,11 @@ Profile with `python scripts/profile_dagger.py [--override key=value ...]`.
 ## Testing
 
 ```bash
-uv run pytest            # 15 modules; `slow` deselected by default
+uv run pytest            # 17 modules; `slow` deselected by default
 uv run pytest -m slow    # slow entry points only (BC + PPO baselines)
 ```
 
-`conftest.py` forces CPU and disables W&B. `test_spec_*.py` and `test_method_spec*.py` pin each canonical statement of `research/spec-*.md` against the implementation; `test_config.py` and `test_recipe_values.py` guard the preset, delta-only and poolability rules and the shipped recipe values; `test_ablation_perf.py` and `test_gpu_step_perf.py` hold measured perf expectations. `test_smoke_src.py` and `test_smoke_experiments.py` cover both pipelines: modules import, the model builds from `configs/defaults.yaml`, a forward pass returns the expected shape and dtype with no NaNs, one training step gives a finite loss, save/reload reproduces identical output, each entry point runs, and all 25 registry ablations step. They assert things *run*, not that results are good. CPU-only, seeded, synthetic data; nothing written outside `tmp_path`. For a quality signal, use `--mode smoke`.
+`conftest.py` forces CPU and disables W&B. `test_spec_*.py` and `test_method_spec*.py` pin each canonical statement of the parent workspace's `research/spec-*.md` against the implementation; `test_config.py` and `test_recipe_values.py` guard the preset, delta-only and poolability rules and the shipped recipe values; `test_ablation_perf.py` and `test_gpu_step_perf.py` hold measured perf expectations. `test_smoke_src.py` and `test_smoke_experiments.py` cover both pipelines: modules import, the model builds from `configs/defaults.yaml`, a forward pass returns the expected shape and dtype with no NaNs, one training step gives a finite loss, save/reload reproduces identical output, each entry point runs, and all 26 registry ablations step. They assert things *run*, not that results are good. CPU-only, seeded, synthetic data; nothing written outside `tmp_path`. For a quality signal, use `--mode smoke`.
 
 ## Implementation notes
 

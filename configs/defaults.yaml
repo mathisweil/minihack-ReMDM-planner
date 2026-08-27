@@ -255,7 +255,7 @@ baselines_dt_batch_size: 256
 # Left at 200 deliberately: raising this key alone breaks the alignment
 # with baselines_dt_eval_max_steps, and raising that one changes DT's eval
 # truncation and so its reported score. Both need setting together, by
-# someone who is actually reporting DT. See PAPER-FIXES.md, findings item 4.
+# someone who is actually reporting DT.
 baselines_dt_max_ep_len: 200
 # DT eval rollout cap (steps before truncating an episode as a loss).
 baselines_dt_eval_max_steps: 200
