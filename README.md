@@ -37,10 +37,10 @@ uv sync --extra cuda12
 ```
 
 Extras: `cuda13` and `cuda12` are mutually exclusive and Linux-only. Neither is needed on a
-modern driver: plain `uv sync` already yields a CUDA 13.0 build on Linux. Use `cuda12` only
+modern driver — plain `uv sync` already yields a CUDA 13.0 build on Linux; use `cuda12` only
 if `nvidia-smi` reports a driver older than 580.
 
-> **Install path must not contain spaces.** MiniHack's `mh_patch_nhdat.sh` interpolates paths unquoted and fails silently on whitespace, leaving every environment as the same default level with no goal staircase. `src/envs/minihack_env.py` detects this and substitutes a Python implementation, but a space-free path avoids the issue entirely.
+> **Install path must not contain spaces.** MiniHack's `mh_patch_nhdat.sh` interpolates paths unquoted and fails silently on whitespace, leaving every environment as the same default level with no goal staircase. `src/envs/minihack_env.py` detects this and substitutes a Python implementation, but a space-free path avoids it entirely.
 
 ## Repo layout
 
@@ -84,7 +84,7 @@ python main.py --mode online --checkpoint checkpoints/iter600.pth       # resume
 python main.py --mode online --checkpoint checkpoints/iter600.pth --no-warm-start
 ```
 
-Per iteration: curriculum-sampled model rollouts, BFS oracle labelling on the same seeds, efficiency filtering into the replay buffer, `grad_steps_per_iteration` gradient steps. Halts when cumulative env steps reach `total_timesteps`. See [DAgger training loop](#dagger-training-loop).
+Per iteration: curriculum-sampled model rollouts, BFS oracle labelling on the same seeds, efficiency filtering into the replay buffer, then `grad_steps_per_iteration` gradient steps — see [DAgger training loop](#dagger-training-loop).
 
 ### Offline BC
 
@@ -137,14 +137,10 @@ python main.py --mode inference --config $DIR/config.yaml --checkpoint $DIR/iter
 Six algorithms: SB3 discrete-action RL (`ppo`, `a2c`, `dqn`, `ppo-rnn`), Behavioural Cloning (`bc`) on oracle demos, and a causal Decision Transformer (`dt`). All share `total_timesteps`, so numbers are comparable to DAgger and offline BC. Hyperparameters live under the `baselines_*` config namespace; outputs go to `baselines_output_dir`.
 
 ```bash
-python main.py --mode baselines --algo ppo
-python main.py --mode baselines --algo a2c
-python main.py --mode baselines --algo dqn --seeds 0 1 2
-python main.py --mode baselines --algo ppo-rnn
-python main.py --mode baselines --algo bc --num-seeds 3
-python main.py --mode baselines --algo dt --seeds 0 1 2
+python main.py --mode baselines --algo ppo                        # any of the six
+python main.py --mode baselines --algo dqn --seeds 0 1 2          # explicit seeds
+python main.py --mode baselines --algo bc --num-seeds 3           # or a seed count
 python main.py --mode baselines --algo ppo --output results/ppo.json
-python main.py --mode baselines --algo ppo --override total_timesteps=5650000   # match ReMDM online budget
 ```
 
 ### Architecture ablations
@@ -189,12 +185,12 @@ python experiments/rl_finetuning/run_ablations.py --measure-gdelta --gdelta-seed
 
 One YAML config holds the experiment; the CLI holds the run.
 
-- **`configs/defaults.yaml`**: the **shared final paper recipe**, not a cheap baseline. Both clusters train exactly this; running with no `--config` trains it too.
-- **Config files** (`configs/*.yaml`): any file passed via `--config` is deep-merged onto `defaults.yaml`, so presets contain **only their deltas** — never re-state a default value. Presets are a single layer: they never inherit from one another.
-- **CLI flags**: per-invocation values — `--seed`, `--checkpoint`, `--data`, `--output`, `--episodes`, `--envs`, mode switches.
-- **`--override KEY=VALUE`** (repeatable): ad hoc config overrides. Keys are validated against `defaults.yaml` and values are cast to the key's type; a typo is an error, not a silent no-op.
+Precedence, lowest to highest: `configs/defaults.yaml` < `--config` preset < `--override` and run flags. Exactly two config layers — a preset never inherits from another preset.
 
-Precedence, lowest to highest: `configs/defaults.yaml` < `--config` file < `--override` and run flags.
+- **`configs/defaults.yaml`**: the **shared final paper recipe**, not a cheap baseline. Both machines train exactly this; running with no `--config` trains it too.
+- **Config files** (`configs/*.yaml`): deep-merged onto `defaults.yaml`, so presets contain **only their deltas** — never re-state a default value.
+- **Run flags**: `--seed`, `--checkpoint`, `--data`, `--output`, `--episodes`, `--envs`, mode switches.
+- **`--override KEY=VALUE`** (repeatable): keys are validated against `defaults.yaml` and cast to the key's type, so a typo is an error, not a silent no-op.
 
 > **Hazard when writing a preset.** Four keys silently *override* an env-step-derived value when non-null, and `defaults.yaml` now sets all four as part of the recipe: `offline_total_grad_steps`, `offline_eval_every_grad_steps`, `offline_checkpoint_every_grad_steps`, `offline_buffer_capacity`. A preset that wants its own `total_timesteps` to govern the offline budget must pin them back to **explicit `null`** — omitting them inherits the pins. Left unpinned, `smoke.yaml` would train 60,000 offline gradient steps instead of 19. `tests/test_config.py` enforces the pins for every preset that derives its own budget.
 
@@ -212,7 +208,7 @@ Key hyperparameters are documented inline in `configs/defaults.yaml`; the [appen
 
 ## Checkpoints
 
-Training writes to a unique run directory under `checkpoint_dir` (default `checkpoints/`), named `{tag}_{YYYYMMDD}_{HHMMSS}_{hex4}`. DAgger saves `iter{N}.pth` on the `checkpoint_every_timesteps` cadence; offline BC saves `offline_step{N}.pth` and `offline_final.pth`. Checkpoints also upload as versioned W&B artifacts (type `model`) when `use_wandb` is on. All checkpoints store the W&B run ID, so passing them back via `--checkpoint` resumes the same W&B curve automatically.
+Training writes to a unique run directory under `checkpoint_dir` (default `checkpoints/`), named `{tag}_{YYYYMMDD}_{HHMMSS}_{hex4}`. DAgger saves `iter{N}.pth` on the `checkpoint_every_timesteps` cadence; offline BC saves `offline_step{N}.pth` and `offline_final.pth`. With `use_wandb` on they also upload as versioned W&B artifacts (type `model`). Every checkpoint stores its W&B run ID, so passing it back via `--checkpoint` resumes the same curve.
 
 `checkpoints/` is gitignored. Released weights live on the Hugging Face Hub: **[mathisweil/remdm-minihack-checkpoints](https://huggingface.co/mathisweil/remdm-minihack-checkpoints)**
 
@@ -232,7 +228,7 @@ uv run hf download mathisweil/remdm-minihack-checkpoints \
 
 **Keep the `--include`.** The Hub repo carries its own `README.md` (the generated model card), `LICENSE` and `.gitattributes`; dropping the glob and pulling into `--local-dir .` overwrites this repository's copies of all three. To fetch everything, add `--exclude "README.md" "LICENSE" ".gitattributes"`, or use a separate `--local-dir`. Publishing is safe either way — `hf_upload.py` stages `LICENSE` and the demo `README.md` from git, not the working tree.
 
-Each released directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config.yaml` (config snapshot) and `selection.json`. The `-100M` suffix counts **sample-equivalents, not env steps** — the runs behind these train 5,650,000 env steps. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading.
+Each released directory ships `<step>.pth` (full training state), `model.safetensors` (EMA weights only, no pickle), `config.yaml` and `selection.json`. The `-100M` suffix counts **sample-equivalents, not env steps** — the runs behind these train 5,650,000 env steps. See [Checkpoint format](#checkpoint-format) for the `.pth` schema and programmatic loading.
 
 Historical note: the released DAgger `selection.json` records `"every": null, "configured_max": null` and `"unit": "dagger_iterations"`, written by a `selection()` that read two since-renamed config keys. It is **historical and noncanonical** and stays as published (author decision 2026-08-17); the checkpoint's own `config_<step>.yaml` carries the real cadence and budget. Current code records the candidate set in env steps — `"every": 940000, "configured_max": 5650000` for the shipped recipe — and raises rather than writing a null.
 
@@ -247,11 +243,11 @@ HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-mi
 
 `--dry-run` prints the staged tree and card without uploading; drop it to upload. `--selection-metric` records what the best-of-N checkpoints were chosen on. Also `--inference-results <FILE|DIR> ...` (eval JSONs kept elsewhere), `--private`, `--yes`. Publish one model per directory, with a single `.pth` and config.
 
-**The manuscript figures are built by the sibling repo.** Each one puts Craftax Classic and MiniHack side by side, so `craftax-ReMDM-planner/scripts/paper_figures.py` reads *both* repositories' ablation `results.json` and neither can build them alone. Copy the PDFs it emits into `results/paper_figures/` here; both Hub repos publish the same set, and the upload warns when they are absent rather than passing over them silently.
+**The manuscript figures are built by the sibling repo.** Each one puts Craftax Classic and MiniHack side by side, so `../craftax-ReMDM-planner/scripts/paper_figures.py` reads *both* repositories' ablation `results.json` and neither can build them alone. Copy the PDFs it emits into `results/paper_figures/` here; both Hub repos publish the same set, and the upload warns when they are absent rather than passing over them silently.
 
 **A `hf download --local-dir .` overwrites `README.md` and `LICENSE` in the working tree.** Publishing is unaffected — `hf_upload.py` stages `LICENSE` from `git cat-file blob HEAD:LICENSE`, and `hf_upload_demo.py` its bundle's `README.md`, warning if git cannot be consulted — but restore your own files with `git checkout -- README.md LICENSE`, or avoid the clobber with the download flags above.
 
-**Checkpoint discovery expects the released layout**, `checkpoints/<role>/<name>/*.pth` — the layout the Hub repo mirrors. A training run writes to its own `checkpoints/dagger_<timestamp>/` directory, so copy the checkpoints you mean to release into `checkpoints/{offline,online}/<name>/` first, or nothing is staged. `checkpoints/hf/` is skipped: that is where a Hub *download* lands, and publishing from it would push already-published artefacts back up into a nested `checkpoints/hf/checkpoints/...` tree.
+**Checkpoint discovery expects the released layout**, `checkpoints/<role>/<name>/*.pth`. A training run writes to its own `checkpoints/dagger_<timestamp>/`, so copy what you mean to release into `checkpoints/{offline,online}/<name>/` first, or nothing is staged. `checkpoints/hf/` is skipped — that is where a Hub *download* lands, and publishing from it would nest already-published artefacts under `checkpoints/hf/checkpoints/...`.
 
 ## Results, citation, licence
 
@@ -294,12 +290,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 - **Loss:** continuous-time MDLM NELBO: per sample `w(t) * sum_masked(CE) / L` with `w(t) = -alpha'(t) / (1 - alpha(t))` clipped to `[0, 1000]`; optional `label_smoothing`.
 - **Greedy sampling:** used for DAgger collection. Same MaskGIT loop, argmax decoding, no temperature/top-K/remasking, `diffusion_steps_collect` steps.
 
-**Reverse sampling (ReMDM Algorithm 1)**, over `K` steps (default 10):
-
-1. Predict logits; apply temperature and top-p (nucleus) filtering; sample predictions and record each committed token's decode probability `psi`.
-2. **Unmask:** each masked position commits independently with the posterior probability `(alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)`.
-3. **ReMDM remask:** each committed position re-masks with probability `sigma` from the configured Section-4.1 schedule.
-4. Final step: any remaining masked positions are committed by a greedy cleanup pass.
+**Reverse sampling (ReMDM Algorithm 1)**, over `K` steps (default 10). Per step: predict logits, apply temperature and top-p filtering, sample, and record each committed token's decode probability `psi`; **unmask** each masked position independently with posterior probability `(alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)`; **remask** each committed position with probability `sigma` from the configured Section-4.1 schedule. A final greedy cleanup commits anything still masked.
 
 | Strategy | Formula | Description |
 |---|---|---|
@@ -336,8 +327,7 @@ config. Two model keys are result-affecting in their own right:
 | `top_p` | 0.9 | Nucleus threshold (ReMDM Sec 5) |
 | `replan_every` | 16 | Env steps before replanning; the actions already executed in the current plan window are locked into the new plan (inpainting) |
 | `loss_weight_clip` | 1000.0 | NELBO weight clip bound |
-| `label_smoothing` | 0.0 | Cross-entropy label smoothing |
-| `physics_aware_sampling` | false | Penalise hazardous actions at inference |
+| `label_smoothing` | 0.0 | Cross-entropy label smoothing (0 = exact ELBO) |
 
 **Training budget (unified).** Offline BC, DAgger and the SB3 baselines share one env-step budget. This is the only knob that should change to scale a run.
 
@@ -348,9 +338,9 @@ config. Two model keys are result-affecting in their own right:
 | `ood_eval_every_timesteps` | 470,000 | OOD eval cadence |
 | `checkpoint_every_timesteps` | 940,000 | Checkpoint cadence |
 
-- **Offline BC:** gradient steps = `total_timesteps // offline_batch_size`. The cosine LR `T_max` derives from the same quantity, so any run length decays to the 10% floor at its end.
+- **Offline BC:** gradient steps = `total_timesteps // offline_batch_size`, and the cosine LR `T_max` derives from the same quantity, so any run length decays to the 10% floor at its end.
 - **DAgger:** tracks cumulative `env.step()` calls (model + oracle) and halts at `total_timesteps`. `episodes_per_iteration` and `grad_steps_per_iteration` set the collect/train ratio and **must not** scale with the budget.
-- **Caveat, `ema_decay`:** an absolute-update-count constant (half-life ~ `1 / (1 - decay)` steps). Shifting `total_timesteps` by more than ~2x changes the fraction of training the EMA window covers; set a matching decay manually for very short or long runs.
+- **Caveat, `ema_decay`:** an absolute-update-count constant (half-life ~ `1 / (1 - decay)` steps). Shifting `total_timesteps` by more than ~2x changes the fraction of training the EMA window covers; set a matching decay by hand for very short or long runs.
 
 **Offline grad-step pins.** These four override the env-step-derived budget whenever
 non-null, and `defaults.yaml` sets all four. A preset whose own `total_timesteps` should
@@ -368,38 +358,32 @@ govern must pin them back to explicit `null` — see the hazard note under
 
 | Parameter | Default | Description |
 |---|---|---|
-| `offline_lr` | 0.0003 | BC LR (cosine-decayed to 10%) |
-| `dagger_lr` | 0.00003 | DAgger LR (constant) |
-| `offline_batch_size` | 2048 | Offline BC batch size |
-| `dagger_batch_size` | 2048 | DAgger batch size |
-| `offline_grad_clip` | 1.0 | Gradient norm clip (offline) |
-| `dagger_grad_clip` | 1.0 | Gradient norm clip (DAgger) |
+| `offline_lr` / `dagger_lr` | 0.0003 / 0.00003 | BC LR (cosine-decayed to 10%) and DAgger LR (constant) |
+| `offline_batch_size` / `dagger_batch_size` | 2048 / 2048 | Batch size per pipeline |
+| `offline_grad_clip` / `dagger_grad_clip` | 1.0 / 1.0 | Gradient norm clip per pipeline |
 | `weight_decay` | 0.0 | AdamW weight decay (core training; the ablation suite keeps 1e-4) |
 | `grad_steps_per_iteration` | 100 | Gradient steps per DAgger iteration |
 | `episodes_per_iteration` | 30 | Episodes per DAgger iteration |
 | `aux_loss_weight` | 0.5 | Auxiliary goal loss weight |
 | `buffer_capacity` | 10000 | Replay buffer size (windows) |
 | `efficiency_multiplier` | 1.5 | DAgger efficiency filter threshold |
-| `curriculum_preseed` | true | Pre-seed curriculum with 50/50 prior |
-| `curriculum_queue_size` | 100 | Curriculum window size per environment |
 
 **Collection, evaluation, performance**
 
 | Parameter | Default | Description |
 |---|---|---|
 | `collect_episodes_per_env` | 5000 | Oracle episodes per ID environment |
-| `collect_num_workers` | 8 | Process workers for collection |
 | `eval_episodes_per_env` | 50 | Episodes per env at eval (per-run: `--episodes`) |
-| `checkpoint_eval_episodes` | 50 | Episodes per env at checkpoint eval |
 | `use_amp` | true | Mixed precision via `torch.amp`; see [Performance tuning](#performance-tuning) |
 | `torch_compile` | true | `torch.compile` the model |
-| `num_collection_workers` | 8 | Workers for DAgger collection |
 | `checkpoint_dir` | `checkpoints` | Root for per-run checkpoint directories |
 | `seed` | null | RNG seed (null = random; per-run: `--seed`) |
 
+Worker counts (`collect_num_workers`, `num_collection_workers`, both 8) are machine values.
 The `collect_output`, `use_wandb`, `wandb_*` and `offline_log_every` keys mirror the run
-flags documented under [Configuration](#configuration). The 21 `baselines_*` keys hold the
-SB3/BC/DT hyperparameters and are commented where they are declared.
+flags under [Configuration](#configuration), the `curriculum_*` keys the behaviour under
+[DAgger training loop](#dagger-training-loop), and the 21 `baselines_*` keys hold the
+SB3/BC/DT hyperparameters; all are commented where they are declared.
 
 ## DAgger training loop
 
@@ -409,7 +393,6 @@ SB3/BC/DT hyperparameters and are commented where they are declared.
 4. **Efficiency filter:** add the oracle trajectory if the model failed or took >1.5x the oracle's steps.
 5. **Budget accounting:** `env_steps_total += model_steps + oracle_steps`; halt at `total_timesteps`.
 6. **Training:** sample the buffer, run `grad_steps_per_iteration` steps, update EMA after each.
-
 
 BFS oracle priority: (1) kick adjacent doors, (2) BFS to staircase, (3) BFS to frontier, (4) BFS to farthest tile, (5) random cardinal.
 
@@ -425,7 +408,7 @@ BFS oracle priority: (1) kick adjacent doors, (2) BFS to staircase, (3) BFS to f
 ## Checkpoint format
 
 ```python
-# DAgger
+# DAgger (iter{N}.pth)
 {
     "model_state_dict": ..., "ema_state_dict": ...,
     "optimizer_state_dict": ..., "scheduler_state_dict": ...,
@@ -435,20 +418,12 @@ BFS oracle priority: (1) kick adjacent doors, (2) BFS to staircase, (3) BFS to f
     "wandb_run_id": str | None,
     "rng_states": {"torch", "numpy", "python"},
 }
-
-# Offline BC, step-level (offline_step{N}.pth, when checkpoint_every_timesteps > 0)
-{
-    "model_state_dict": ..., "ema_state_dict": ...,
-    "optimizer_state_dict": ..., "scheduler_state_dict": ...,
-    "step": int,
-    "env_steps": int,                  # step * offline_batch_size
-    "wandb_run_id": str | None,
-    "rng_states": {"torch", "numpy", "python"},   # required to resume
-}
-
-# Offline BC, final (offline_final.pth)
-{"model_state_dict": ..., "ema_state_dict": ..., "wandb_run_id": str | None}
 ```
+
+Offline BC step-level (`offline_step{N}.pth`, when `checkpoint_every_timesteps > 0`) is the
+same minus `curriculum_state`, with `step` for `iteration` and `env_steps = step *
+offline_batch_size`. Its `rng_states` is **required**: resume raises without it. The final
+`offline_final.pth` carries only `model_state_dict`, `ema_state_dict` and `wandb_run_id`.
 
 ### Load programmatically
 
@@ -465,50 +440,31 @@ model.load_state_dict(load_file(f"{DIR}/model.safetensors"))
 model.eval()
 ```
 
-```python
-# From the full .pth, to resume or to pick training vs EMA weights
-import torch
-from src.config import load_config
-from src.models.denoiser import make_model, ModelEMA
-
-DIR = "checkpoints/online/Minihack-Online-Diffusion-DAgger-100M"
-cfg = load_config(f"{DIR}/config.yaml")
-ckpt = torch.load(f"{DIR}/iter563.pth", map_location="cpu", weights_only=False)
-
-model = make_model(cfg)
-model.load_state_dict(ckpt["model_state_dict"])
-
-ema = ModelEMA(model, decay=cfg.ema_decay)
-ema.load_state_dict(ckpt["ema_state_dict"])
-ema.apply_to(model)          # what evaluation uses by default
-model.eval()
-```
+From the full `.pth` instead, to resume or to pick training over EMA weights: `torch.load(..., weights_only=False)`, then `model.load_state_dict(ckpt["model_state_dict"])` and, for what evaluation uses by default, `ModelEMA(model, decay=cfg.ema_decay)` with `load_state_dict(ckpt["ema_state_dict"])` and `apply_to(model)`.
 
 ### W&B artifacts and run resumption
 
-W&B model artifacts contain the `.pth` and a `config.yaml` snapshot. Reference format is `wandb:entity/project/artifact-name:version`, version being `latest`, `v0`, `v1`.
-
-All training loops store the W&B run ID in their checkpoints. Resuming extracts it and passes it to `wandb.init(resume="must")`, so curves continue with no gaps.
+W&B model artifacts contain the `.pth` and a `config.yaml` snapshot; the reference format is `wandb:entity/project/artifact-name:version`, version being `latest`, `v0`, `v1`. Resuming reads the run ID out of the checkpoint and passes it to `wandb.init(resume="must")`, so curves continue with no gaps.
 
 ```bash
-python main.py --mode online --checkpoint checkpoints/iter600.pth               # automatic
-# Manual override (checkpoint predates the feature)
+# Automatic. A checkpoint predating the feature needs the ID passing by hand:
 python main.py --mode online --checkpoint old.pth --override wandb_resume_id=abc123xyz
 ```
 
 ## W&B metric namespaces
 
+Declared in `src/planners/logging.py`; the key lists there are authoritative.
+
 | Namespace | Contents |
 |---|---|
 | `diffusion/` | `loss`, `loss_diff`, `loss_aux` |
-| `train/` | `buffer_size`, `buffer_online_frac`, `model_won`, `added_to_buffer`, `episodes_collected`, `model_steps`, `oracle_steps`, `efficiency_ratio`, `lr`, `grad_norm`, `global_gate`, `env_steps`, `progress` |
-| `speed/` | `iter_time_sec`, `collect_time_sec`, `train_step_time_sec`, `samples_per_sec`, `env_steps_per_sec`, `gpu_memory_mb` |
+| `train/` | Buffer, collection and optimiser state — 13 keys including `model_steps`, `oracle_steps`, `efficiency_ratio`, `global_gate`, `env_steps` |
+| `speed/` | Per-iteration timings, throughput and `gpu_memory_mb` |
 | `model/` | `param_norm`, `param_drift_from_init`, `ema_gate_value` (every 10 iters) |
 | `eval_id/{env}/`, `eval_ood/{env}/` | Per-env `win_rate`, `wins`, `avg_reward`, `avg_steps`, `n_episodes` |
 | `eval_id/`, `eval_ood/` | `mean_win_rate` |
+| `ckpt_eval_id/`, `ckpt_eval_ood/`, `ckpt_eval/` | The same, at checkpoint time |
 | `curriculum/{env}/` | `win_rate` per training environment |
-| `ckpt_eval_id/`, `ckpt_eval_ood/` | Per-env metrics at checkpoint time |
-| `ckpt_eval/` | `id_winrate`, `ood_winrate` |
 | `offline/` | `final_loss`, `total_steps`, `total_timesteps` (summary only) |
 | `inference/{env}/` | Per-env metrics from `--mode inference` |
 
@@ -516,11 +472,11 @@ DAgger and offline BC both emit to `eval_id/` and `eval_ood/`, through the same 
 
 ## Performance tuning
 
-| Key | Default | Effect |
-|---|---|---|
-| `use_amp` | **true** | `torch.amp.autocast("cuda")` + `GradScaler` in both trainers. Roughly 2x on gradient steps, with loss and win rates statistically equivalent to FP32. No-op on CPU |
-| `torch_compile` | **true** | `torch.compile(model, mode="default")`. No measured gain beyond AMP |
-| `num_collection_workers` | 8 | Affects the threaded CPU fallback. Collection auto-selects GPU-batched (CUDA, `episodes_per_iteration > 1`) > threaded CPU > sequential |
+`use_amp` (default true) puts `torch.amp.autocast("cuda")` + `GradScaler` in both trainers —
+roughly 2x on gradient steps, with loss and win rates statistically equivalent to FP32, and a
+no-op on CPU. `torch_compile` (default true) shows no measured gain beyond AMP.
+`num_collection_workers` affects only the threaded CPU fallback: collection auto-selects
+GPU-batched (CUDA, `episodes_per_iteration > 1`) > threaded CPU > sequential.
 
 Profile with `python scripts/profile_dagger.py [--override key=value ...]`.
 
@@ -547,8 +503,6 @@ A CPU-only suite, 17 modules. Tiny synthetic data and a shrunken model throughou
 
 - **MDLM loss** returns `0.0` (not NaN) when no masked positions exist. NELBO-weighted per MDLM eq (10).
 - **PAD tokens** are never masked and are excluded from the loss.
-- **Sampling paths:** evaluation uses stochastic ReMDM (temperature, top-p, remasking, `diffusion_steps_eval`); DAgger collection uses greedy argmax (`diffusion_steps_collect`).
-- **`remdm_sample`** guarantees a fully committed output via a final greedy cleanup of any remaining masked positions.
 - **EMA** updates after every gradient step, not per iteration. `DataCollector` syncs EMA weights before each rollout.
 - **Curriculum** starts from a 50/50 prior per environment and buckets the rolling win-rate: `[0, 0.15)` -> 0.2, `[0.15, 0.85)` -> 1.0, `[0.85, 1.0]` -> 0.1.
 - **Replay buffer** pins offline data at the front; only online samples are FIFO-evicted. Returns `None` when empty.

@@ -1,13 +1,13 @@
 # ReMDM Experiments
 
 Research and diagnostic scripts for investigating RL fine-tuning of the ReMDM
-diffusion planner. These scripts are **standalone research code** -- they
+diffusion planner. These scripts are **standalone research code** — they
 import from `src/` (model, sampling, env wrapper, evaluator) but never modify
 the core training pipeline. They start from a pretrained DAgger checkpoint.
 
 ---
 
-## `rl_finetuning/` -- RL Fine-Tuning Ablation Suite
+## `rl_finetuning/` — RL Fine-Tuning Ablation Suite
 
 Diagnoses why RL fine-tuning of the diffusion model collapses and which interventions fix it.
 Implements **26 ablations**: a baseline plus four groups (A: Regularisation, B: Training Signal, C: Architecture, D: Data Quality), with a comprehensive diagnostic and analysis pipeline.
@@ -95,14 +95,6 @@ python experiments/rl_finetuning/run_ablations.py \
     --fast
 ```
 
-**Using a W&B artifact as checkpoint:**
-```bash
-python experiments/rl_finetuning/run_ablations.py \
-    --checkpoint wandb:entity/project/checkpoint-iter8000:latest \
-    --ablations baseline_rl kl_penalty \
-    --fast
-```
-
 **Full suite (all 26 ablations):**
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
@@ -131,14 +123,8 @@ python experiments/rl_finetuning/run_ablations.py \
 **Re-plot from saved results (no training):**
 ```bash
 python experiments/rl_finetuning/run_ablations.py \
-    --analyze-only --output-dir outputs/run_20260331_120000
-```
-
-**Re-plot a subset of ablations:**
-```bash
-python experiments/rl_finetuning/run_ablations.py \
     --analyze-only --output-dir outputs/run_20260331_120000 \
-    --ablations baseline_rl kl_penalty ewc
+    --ablations baseline_rl kl_penalty ewc     # optional: a subset
 ```
 
 **Spread across GPUs, then merge:**
@@ -164,35 +150,16 @@ python experiments/rl_finetuning/run_ablations.py \
     --output-dir outputs/combined
 ```
 
-`--merge` accepts any number of `results.json` files. Where the same ablation
-appears in more than one, the per-seed scores are concatenated and mean/std
-recomputed over the union:
-
-```bash
-# Seed 0 on GPU 0
-python experiments/rl_finetuning/run_ablations.py \
-    --checkpoint ckpt.pth --ablations baseline_rl --seed 0 \
-    --output-dir outputs/seed0
-
-# Seed 1000 on GPU 1
-python experiments/rl_finetuning/run_ablations.py \
-    --checkpoint ckpt.pth --ablations baseline_rl --seed 1000 \
-    --output-dir outputs/seed1
-
-# Merge: aggregates both seeds into one entry
-python experiments/rl_finetuning/run_ablations.py \
-    --merge outputs/seed0/results.json outputs/seed1/results.json \
-    --output-dir outputs/merged
-# -> <ablation>: <mean> +/- <std> (2 seeds)
-```
-
-The merged file is a `results.json` like any other, so `--analyze-only` works on it.
+`--merge` accepts any number of `results.json` files. Where the same ablation appears
+in more than one — the same arm run at `--seed 0` and `--seed 1000`, say — the per-seed
+scores are concatenated and mean/std recomputed over the union, reported as
+`<ablation>: <mean> +/- <std> (2 seeds)`. The merged file is a `results.json` like any
+other, so `--analyze-only` works on it.
 
 **`--merge` only pools runs from configs that agree on result-affecting keys.**
 It compares the configs the results files recorded and refuses, naming every
-diverging key with both values; a file that records no config is refused too.
-All published
-MiniHack ablation results were produced on the **RTX 3090 Ti**
+diverging key with both values; a file that records no config is refused too. All
+published MiniHack ablation results were produced on the **RTX 3090 Ti**
 (`ablations_final_minihack_gpu_24gb.yaml`), which is the reference config.
 
 `ablations_final_minihack_gpu_h200.yaml` is **not poolable** with it. It diverges on four
@@ -367,36 +334,25 @@ seed's eight `(z_t, t)` draws. The aggregate averages the per-seed means and
 reports the standard deviation **across seeds**, which is what the paper's
 table prints.
 
-Reported per weight transform: `CV_A`, `Abar`, `Abar` relative to the
-baseline's, ESS as a fraction of the batch, `|g_delta| / |grad L_BC|`, the
-cosine between them, and the same two against a **shuffled-delta null** --
-delta permuted across the batch, which preserves `CV_A` and destroys the
-association between a window's weight and its own gradient. Anything that
-survives the shuffle is batch heterogeneity, not return signal.
+Reported per weight transform: `CV_A`, `Abar`, `Abar` relative to the baseline's, ESS
+as a fraction of the batch, `|g_delta| / |grad L_BC|`, the cosine between them, and the
+same two against a **shuffled-delta null** — delta permuted across the batch, which
+preserves `CV_A` and destroys the association between a window's weight and its own
+gradient. Anything that survives the shuffle is batch heterogeneity, not return signal.
 
-Four points on scope:
-
-- **The objective is the ELBO term alone.** The trainer also adds an
-  unweighted auxiliary goal loss; including it would break the identity above
-  for reasons unrelated to the return, so it is excluded. The goal head
-  therefore carries no gradient here.
-- **The collection size is `episodes_per_iter`.** MiniHack rollouts are
-  sequential rather than vectorised, so the sibling suite's `NUM_ENVS` has no
-  counterpart; `measure()` takes the override under the sibling's `num_envs`
-  name and applies it to `episodes_per_iter`.
-- **`--results-path` layers over `configs/defaults.yaml`.** `run_ablations.py`
-  records only scalar keys in `results.json`, so a recorded config carries no
-  `id_envs`; defaults supplies the structural keys and the recorded config
-  wins everywhere it speaks.
-- **`--device` has no sibling counterpart.** JAX picks its backend from the
-  environment; torch needs to be told. It defaults to CUDA where available.
+Scope: the objective is the **ELBO term alone**, excluding the trainer's unweighted
+auxiliary goal loss (which would break the identity above for reasons unrelated to the
+return), so the goal head carries no gradient here. The collection size is
+`episodes_per_iter`, MiniHack rollouts being sequential rather than vectorised;
+`measure()` takes the override under the sibling's `num_envs` name. `--results-path`
+layers over `configs/defaults.yaml`, which supplies the structural keys a recorded
+scalar-only config omits.
 
 The sibling `craftax-ReMDM-planner` carries the same module with the same
-`--measure-gdelta` flags and the same output JSON schema; the two drivers
-otherwise differ on four flags (craftax has `--num-envs`; this repo has
-`--device`, `--wandb-resume-id`, `--action-dist-episodes`). Its version needs
-an explicit Orbax sharding to restore a GPU-written checkpoint on CPU, where
-`torch.load(map_location=...)` has no such problem.
+`--measure-gdelta` flags and output schema; the two drivers otherwise differ on four
+flags (craftax has `--num-envs`; this repo has `--device`, `--wandb-resume-id`,
+`--action-dist-episodes`). Its version needs an explicit Orbax sharding to restore a
+GPU-written checkpoint on CPU, where `torch.load(map_location=...)` does not.
 
 **`results.json` schema:**
 ```json
@@ -418,7 +374,7 @@ an explicit Orbax sharding to restore a GPU-written checkpoint on CPU, where
 }
 ```
 
-`results.json` is written incrementally after each ablation completes -- a partial file
+`results.json` is written incrementally after each ablation completes — a partial file
 with N of 26 ablations is fully valid and loadable by `--analyze-only` or `--merge`.
 
 ### CLI reference
