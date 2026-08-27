@@ -572,6 +572,90 @@ def test_the_published_config_drops_the_same_environment_keys_in_both_repos():
 
 
 # ---------------------------------------------------------------------------
+# Publishing: the scrub is APPLIED at every depth, not merely correct
+# ---------------------------------------------------------------------------
+# The suite already asserts is_environment_key() CLASSIFIES correctly. Nothing
+# asserted it was APPLIED below the top level, and in the sibling repo it was
+# not: scrub_abs_paths() recursed with shorten_paths but filtered environment
+# keys only at the top of the document, so WANDB_PROJECT and WANDB_ENTITY
+# survived one level down inside a nested config_snapshot and were published,
+# while the uploader printed a successful scrub. The predicate was proven and
+# its use was sampled. These pin the use.
+
+
+def test_environment_keys_are_dropped_below_the_top_level():
+    """The regression test for the sibling's leak: a nested config snapshot."""
+    hf = _hf_upload()
+    doc = {
+        "lr": 3e-4,
+        "resume_metadata": {
+            "config_snapshot": {
+                "use_wandb": True,
+                "wandb_project": "minihack-ReMDM-planner",
+                "wandb_entity": "myopic-planner",
+                "batch_size": 4608,
+            },
+        },
+    }
+    out = hf.scrub(doc)
+
+    snap = out["resume_metadata"]["config_snapshot"]
+    assert snap == {"batch_size": 4608}, snap
+    assert out["lr"] == 3e-4
+    # The whole document, flattened, must mention no environment key at all.
+    assert hf.environment_key_paths(out) == []
+
+
+def test_environment_keys_are_dropped_inside_lists():
+    """Nesting through a list is the other way past a dict-only filter."""
+    hf = _hf_upload()
+    out = hf.scrub({"runs": [{"wandb_run_id": "a07wlxl7", "seed": 0}]})
+    assert out == {"runs": [{"seed": 0}]}
+
+
+def test_environment_key_paths_names_where_the_leak_is():
+    """A scrub that reports 'done' without naming what it removed is how the
+    sibling's leak stayed invisible."""
+    hf = _hf_upload()
+    paths = hf.environment_key_paths(
+        {"a": {"b": {"wandb_project": "p"}}, "use_wandb": True}
+    )
+    assert sorted(paths) == ["a.b.wandb_project", "use_wandb"]
+
+
+def test_the_scrub_still_shortens_paths_at_depth():
+    """Both passes recurse; fixing the filter must not lose the shortener."""
+    hf = _hf_upload()
+    out = hf.scrub({"outer": {"dataset_path": "/very/long/cluster/path/data.npz"}})
+    assert out["outer"]["dataset_path"] == "path/data.npz"
+
+
+def test_dropping_environment_keys_preserves_mapping_type():
+    """A state dict must stay an OrderedDict; the published checkpoint keeps
+    its structure, and only the environment keys go."""
+    from collections import OrderedDict
+
+    hf = _hf_upload()
+    out = hf.drop_environment_keys(
+        OrderedDict([("wandb_run_id", "x"), ("model_state_dict",
+                     OrderedDict([("w", 1), ("b", 2)]))])
+    )
+    assert isinstance(out, OrderedDict)
+    assert isinstance(out["model_state_dict"], OrderedDict)
+    assert list(out["model_state_dict"]) == ["w", "b"]
+    assert "wandb_run_id" not in out
+
+
+def test_a_clean_document_is_returned_unchanged():
+    """No environment key anywhere means nothing is rewritten -- the property
+    scrub_checkpoint relies on to copy bytes rather than re-save them."""
+    hf = _hf_upload()
+    doc = {"lr": 1e-4, "nested": {"batch_size": 8, "envs": ["a", "b"]}}
+    assert hf.scrub(doc) == doc
+    assert hf.environment_key_paths(doc) == []
+
+
+# ---------------------------------------------------------------------------
 # Publishing: the licence is the one git committed, not the one on disk
 # ---------------------------------------------------------------------------
 # `hf download --local-dir .` writes the Hub's copies over the working tree.

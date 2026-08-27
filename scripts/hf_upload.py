@@ -203,18 +203,73 @@ def shorten_paths(value):
     return value
 
 
+def environment_key_paths(value, path: str = "") -> list[str]:
+    """Every dotted path at which an environment key appears, at any depth.
+
+    The reporting counterpart to :func:`drop_environment_keys`, so the
+    uploader can name what it removed rather than claiming a scrub happened.
+    Recursion stops at a key that is itself dropped: its whole subtree goes.
+    """
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            name = str(key)
+            here = f"{path}.{name}" if path else name
+            if is_environment_key(name):
+                found.append(here)
+            else:
+                found.extend(environment_key_paths(sub, here))
+    elif isinstance(value, (list, tuple)):
+        for i, sub in enumerate(value):
+            found.extend(environment_key_paths(sub, f"{path}[{i}]"))
+    return found
+
+
+def drop_environment_keys(value):
+    """Strip environment keys at **every** depth, not just the top level.
+
+    Filtering only the top level was a real defect in the sibling repo: its
+    path-shortener recursed while its key-filter did not, so W&B project and
+    entity survived one level down inside a nested config snapshot and were
+    published, while the uploader reported a successful scrub. This repo's
+    checkpoints happen to carry no nested config, so the same one-level filter
+    leaked nothing here -- clean for a reason that was not the code being
+    right, and one schema change away from leaking silently.
+
+    Mapping types are preserved, so an ``OrderedDict`` state dict stays an
+    ``OrderedDict`` and the published checkpoint keeps its original structure.
+    """
+    if isinstance(value, dict):
+        kept = {
+            key: drop_environment_keys(sub)
+            for key, sub in value.items()
+            if not is_environment_key(str(key))
+        }
+        if type(value) is dict:
+            return kept
+        try:
+            return type(value)(kept)
+        except TypeError:
+            # A mapping needing constructor arguments (e.g. a defaultdict
+            # factory). Structure matters less than not shipping the key.
+            return kept
+    if isinstance(value, list):
+        return [drop_environment_keys(sub) for sub in value]
+    return value
+
+
 def scrub(cfg: dict) -> dict:
     """Drop the environment keys and shorten absolute cluster paths.
 
     The prefixes alone missed `use_wandb`, which starts with neither, so it
     shipped in every released config; the sibling repo dropped a different set
     again, and left `USE_WANDB` with it. Both now drop the same one.
+
+    Both passes recurse. They used to disagree -- ``shorten_paths`` descended
+    and the key filter did not -- which is the asymmetry that leaked W&B
+    settings from a nested config snapshot in the sibling repo.
     """
-    return {
-        key: shorten_paths(value)
-        for key, value in cfg.items()
-        if not is_environment_key(key)
-    }
+    return drop_environment_keys(shorten_paths(cfg))
 
 
 def scrub_checkpoint(src: Path, dst: Path) -> None:
@@ -232,12 +287,15 @@ def scrub_checkpoint(src: Path, dst: Path) -> None:
     if not isinstance(ckpt, dict):
         shutil.copy2(src, dst)
         return
-    dropped = [k for k in ckpt if is_environment_key(str(k))]
+    dropped = environment_key_paths(ckpt)
     if not dropped:
+        # Nothing to remove, so copy the bytes rather than re-saving them:
+        # torch.save is not byte-reproducible, and a clean checkpoint should
+        # not change on the Hub just for having been inspected.
         shutil.copy2(src, dst)
         return
-    torch.save({k: v for k, v in ckpt.items() if k not in dropped}, dst)
-    print(f"  scrubbed {', '.join(sorted(map(str, dropped)))} from {src.name}")
+    torch.save(drop_environment_keys(ckpt), dst)
+    print(f"  scrubbed {', '.join(sorted(dropped))} from {src.name}")
 
 
 def export_weights(pth: Path, out: Path) -> dict:
