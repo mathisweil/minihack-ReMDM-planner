@@ -24,8 +24,9 @@ and says loudly that the file went out unverified, so publishing still works
 from a tarball or a slim container.
 
 This module is imported by ``hf_upload.py`` and ``hf_upload_demo.py``. It is
-deliberately dependency-free so the sibling ``minihack-ReMDM-planner`` can
-carry a byte-identical copy; a ``diff`` between the two should stay empty.
+deliberately dependency-free so the sibling repository can carry a
+byte-identical copy; a ``diff`` between the two should stay empty. Nothing
+here may name a path that exists in only one of them.
 """
 
 from __future__ import annotations
@@ -147,10 +148,11 @@ def dirty_paths(relative_paths: list[str], root: Path) -> list[str]:
     """Which of *relative_paths* git reports as modified, for a warn-only report.
 
     Directory-scoped counterpart to :func:`diverged_from_head`. Whole trees are
-    not staged from ``HEAD``: ``Craftax_Baselines`` is a submodule, so
-    ``HEAD:Craftax_Baselines/...`` does not resolve from the superproject, and
-    none of the published directories is a path a Hub download overwrites
-    anyway. Reporting is the proportionate response.
+    not staged from ``HEAD``: a vendored submodule does not resolve as
+    ``HEAD:<dir>/...`` from the superproject, and none of the published
+    directories is a path a Hub download overwrites anyway. Reporting is the
+    proportionate response. The caller names the directories, so this stays
+    true in either repository.
 
     Returns an empty list when git cannot answer -- an unavailable git is
     already reported by the file-level checks, and repeating it per directory
