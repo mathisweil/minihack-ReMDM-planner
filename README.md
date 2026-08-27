@@ -309,18 +309,17 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 
 ## Key hyperparameters
 
-**Model**
+`configs/defaults.yaml` is authoritative and commented inline. Tabulated here are the
+keys that change a result, carry a hazard, or are named elsewhere in this README.
+
+**Model.** `n_embd` 256, `n_head` 4, `n_layer` 4, `n_global_tokens` 8, `seq_len` 64,
+`dropout` 0.0, `global_gate_init` -3.0 — the shape every released checkpoint carries
+(see [Architecture](#architecture)); a checkpoint restores only against a matching
+config. Two model keys are result-affecting in their own right:
 
 | Parameter | Default | Description |
 |---|---|---|
-| `n_embd` | 256 | Transformer hidden dimension |
-| `n_head` | 4 | Attention heads |
-| `n_layer` | 4 | Transformer blocks |
-| `n_global_tokens` | 8 | Global stream context tokens |
-| `seq_len` | 64 | Action plan length |
-| `dropout` | 0.0 | Forward masking already regularises |
-| `ema_decay` | 0.999 | EMA smoothing for inference weights |
-| `global_gate_init` | -3.0 | Initial global gate logit |
+| `ema_decay` | 0.999 | EMA smoothing for inference weights; an absolute update count, see the budget caveat below |
 | `use_global_stream` | true | `false` builds the local-only ablation variant |
 
 **Diffusion**
@@ -353,6 +352,18 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 - **DAgger:** tracks cumulative `env.step()` calls (model + oracle) and halts at `total_timesteps`. `episodes_per_iteration` and `grad_steps_per_iteration` set the collect/train ratio and **must not** scale with the budget.
 - **Caveat, `ema_decay`:** an absolute-update-count constant (half-life ~ `1 / (1 - decay)` steps). Shifting `total_timesteps` by more than ~2x changes the fraction of training the EMA window covers; set a matching decay manually for very short or long runs.
 
+**Offline grad-step pins.** These four override the env-step-derived budget whenever
+non-null, and `defaults.yaml` sets all four. A preset whose own `total_timesteps` should
+govern must pin them back to explicit `null` — see the hazard note under
+[Configuration](#configuration).
+
+| Parameter | Default | Description |
+|---|---|---|
+| `offline_total_grad_steps` | 60000 | Total gradient steps, overriding `total_timesteps // offline_batch_size` |
+| `offline_eval_every_grad_steps` | 5000 | Eval cadence in grad steps |
+| `offline_checkpoint_every_grad_steps` | 10000 | Checkpoint cadence in grad steps |
+| `offline_buffer_capacity` | 1500000 | Offline replay capacity |
+
 **Training**
 
 | Parameter | Default | Description |
@@ -372,23 +383,23 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 | `curriculum_preseed` | true | Pre-seed curriculum with 50/50 prior |
 | `curriculum_queue_size` | 100 | Curriculum window size per environment |
 
-**Collection, evaluation, performance, logging**
+**Collection, evaluation, performance**
 
 | Parameter | Default | Description |
 |---|---|---|
 | `collect_episodes_per_env` | 5000 | Oracle episodes per ID environment |
 | `collect_num_workers` | 8 | Process workers for collection |
-| `collect_output` | `data/dataset.pt` | Collected dataset path (per-run: `--data`) |
 | `eval_episodes_per_env` | 50 | Episodes per env at eval (per-run: `--episodes`) |
 | `checkpoint_eval_episodes` | 50 | Episodes per env at checkpoint eval |
-| `use_amp` | true | Mixed precision via `torch.amp` |
+| `use_amp` | true | Mixed precision via `torch.amp`; see [Performance tuning](#performance-tuning) |
 | `torch_compile` | true | `torch.compile` the model |
 | `num_collection_workers` | 8 | Workers for DAgger collection |
-| `use_wandb` | true | Enable W&B logging |
-| `wandb_project` | `minihack-ReMDM-planner` | W&B project |
-| `wandb_resume_id` | null | W&B run ID for resumption |
-| `offline_log_every` | 50 | Log frequency (offline steps) |
+| `checkpoint_dir` | `checkpoints` | Root for per-run checkpoint directories |
 | `seed` | null | RNG seed (null = random; per-run: `--seed`) |
+
+The `collect_output`, `use_wandb`, `wandb_*` and `offline_log_every` keys mirror the run
+flags documented under [Configuration](#configuration). The 21 `baselines_*` keys hold the
+SB3/BC/DT hyperparameters and are commented where they are declared.
 
 ## DAgger training loop
 
