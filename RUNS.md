@@ -87,7 +87,7 @@ run is on the Hub:
 ```sh
 uv run python - <<'PY'
 from huggingface_hub import hf_hub_download
-print(hf_hub_download("AnonMLuser/remdm-planner-minihack",
+print(hf_hub_download("mathisweil/remdm-minihack-checkpoints",
                       "experiments/rl_finetuning/outputs/minihack_ablations/results.json"))
 PY
 ```
