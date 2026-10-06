@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from tests.conftest import TINY_ENV, requires_minihack
@@ -53,3 +54,26 @@ def test_rollout_matches_evaluator(tiny_cfg, monkeypatch):
     assert run.actions == executed
     assert (len(run.actions), run.won) == (reference["steps"], reference["won"])
     assert {plan.locked for plan in run.plans} == {0, 4}
+
+
+@requires_minihack
+def test_route_stops_at_first_mask_and_ends_on_stairs():
+    gif = _renderer()
+    chars = np.full((6, 3), ord("."))
+    chars[1, 1] = ord(">")
+    north, mask = 0, 99
+    assert gif.route(chars, (5, 1), np.array([north, north, mask, north]), mask) == [
+        (4, 1),
+        (3, 1),
+    ]
+    assert gif.route(chars, (5, 1), np.array([north] * 6), mask)[-1] == (1, 1)
+
+
+@requires_minihack
+def test_token_states_marks_new_now_done_and_remasked():
+    gif = _renderer()
+    mask = 99
+    prev = np.array([0, 1, mask, 3, mask])
+    row = np.array([0, 1, 2, mask, mask])
+    assert gif.token_states(row, prev, 1, None, mask).tolist() == [4, 1, 2, 0, 0]
+    assert gif.token_states(row, None, 1, 1, mask).tolist() == [4, 3, 1, 0, 0]

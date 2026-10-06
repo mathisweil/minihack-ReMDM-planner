@@ -2,9 +2,9 @@
 
 PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) for action-sequence planning in [MiniHack](https://github.com/facebookresearch/minihack) navigation environments. A dual-stream transformer generates 64-step action plans by iteratively denoising masked token sequences, conditioned on a 9x9 local crop and the full 21x79 dungeon map. Trained with **DAgger** under BFS oracle supervision, from scratch. The released checkpoint wins 48.5% of evaluation episodes across the 4 in-distribution layouts and 4.7% zero-shot on the 3 held-out ones (12%, 2% and 0%), so it transfers little ([paper](#results-citation-licence) Table 8).
 
-<img src="https://github.com/mathisweil/mathisweil/raw/main/assets/minihack-planner.gif" alt="Animation of the planner on a MiniHack Room-Random-15x15 layout: a 64-token action plan is denoised over 10 steps, 16 moves are executed, and the planner replans with those moves locked until it reaches the staircase in 66 moves over 5 plans.">
+<img src="https://github.com/mathisweil/mathisweil/raw/main/assets/minihack-planner.gif" alt="Animation of the planner on MiniHack Room-Random-15x15, evaluation layout 13: a 64-move plan is denoised over 10 steps with its tokens filled in any order, the drafted route appears on the map, and the agent follows the first 7 moves of that one plan to the staircase.">
 
-*The planner denoises a 64-move plan in parallel (10 denoising steps), executes 16 moves, then replans with those moves locked. Shown: layout 0 of Room-Random-15x15, the first evaluation layout it solves in 17 to 80 moves (66 moves, 5 plans; [README animation](#readme-animation)). It wins 38% of episodes on this room and 48.5% across the four in-distribution layouts (paper Table 8).*
+*The planner denoises a 64-move plan in parallel (10 denoising steps), executes up to 16 moves, then replans with those moves locked. Shown: layout 13 of Room-Random-15x15, the first evaluation layout won within its first plan (7 moves; [README animation](#readme-animation)). Only 2 of the 50 evaluation layouts are won that directly; most wins replan several times. It wins 38% of episodes on this room and 48.5% across the four in-distribution layouts (paper Table 8).*
 
 The sibling repository [`craftax-ReMDM-planner`](https://github.com/mathisweil/craftax-ReMDM-planner) implements the same method in JAX on Craftax. Both repos share the same CLI, config layout and README structure; commands transfer between them by swapping the repo name and benchmark-specific values.
 
@@ -239,13 +239,13 @@ Historical note: the released DAgger `selection.json` records `"every": null, "c
 
 ### README animation
 
-`scripts/render_rollout_gif.py` renders the animation at the top of this README. It downloads `config.yaml` and `model.safetensors` of the released DAgger checkpoint from [mathisweil/remdm-minihack-checkpoints](https://huggingface.co/mathisweil/remdm-minihack-checkpoints), replays evaluation layouts as `Evaluator._run_episodes_batched` does (same seeds, executed prefix locked at each replan) and encodes the first layout won in 17 to 80 moves. It runs on CPU in under a minute and needs `ffmpeg` on the `PATH`.
+`scripts/render_rollout_gif.py` renders the animation at the top of this README. It downloads `config.yaml` and `model.safetensors` of the released DAgger checkpoint from [mathisweil/remdm-minihack-checkpoints](https://huggingface.co/mathisweil/remdm-minihack-checkpoints), replays evaluation layouts as `Evaluator._run_episodes_batched` does (same seeds, executed prefix locked at each replan) and encodes the first layout won within its first plan window of 16 moves (and in at least 4 moves); longer wins mostly show the agent waiting next to the stairs. It runs on CPU in under a minute and needs `ffmpeg` on the `PATH`.
 
 ```bash
 uv run python scripts/render_rollout_gif.py    # writes results/gif/minihack-planner.gif
 ```
 
-`--env` picks `MiniHack-Room-Random-15x15-v0` (default) or `MiniHack-Room-Random-5x5-v0`, `--episode N` renders one layout without the search, `--checkpoint-dir` reads a local `config.yaml` + `model.safetensors` instead of the Hub, and `--out` sets the output path.
+`--env` picks `MiniHack-Room-Random-15x15-v0` (default) or `MiniHack-Room-Random-5x5-v0`, `--episode N` renders one layout without the search, `--max-steps` and `--min-steps` change the search window, `--checkpoint-dir` reads a local `config.yaml` + `model.safetensors` instead of the Hub, and `--out` sets the output path.
 
 ### Publishing to the Hub
 
