@@ -1,8 +1,12 @@
 # ReMDM Planner for MiniHack
 
-PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) for action-sequence planning in [MiniHack](https://github.com/facebookresearch/minihack) navigation environments. A dual-stream transformer generates 64-step action plans by iteratively denoising masked token sequences, conditioned on a 9x9 local crop and the full 21x79 dungeon map. Trained with **DAgger** under BFS oracle supervision, from scratch; generalises zero-shot from 4 in-distribution to 3 out-of-distribution environments.
+PyTorch implementation of **ReMDM** (Remasking Discrete Diffusion Model) for action-sequence planning in [MiniHack](https://github.com/facebookresearch/minihack) navigation environments. A dual-stream transformer generates 64-step action plans by iteratively denoising masked token sequences, conditioned on a 9x9 local crop and the full 21x79 dungeon map. Trained with **DAgger** under BFS oracle supervision, from scratch. The released checkpoint wins 48.5% of evaluation episodes across the 4 in-distribution layouts and 4.7% zero-shot on the 3 held-out ones (12%, 2% and 0%), so it transfers little ([paper](#results-citation-licence) Table 8).
 
-The sibling repository [`craftax-ReMDM-planner`](../craftax-ReMDM-planner) implements the same method in JAX on Craftax. Both repos share the same CLI, config layout and README structure; commands transfer between them by swapping the repo name and benchmark-specific values.
+<img src="https://github.com/mathisweil/mathisweil/raw/main/assets/minihack-planner.gif" alt="Animation of the planner on a MiniHack Room-Random-15x15 layout: a 64-token action plan is denoised over 10 steps, 16 moves are executed, and the planner replans with those moves locked until it reaches the staircase in 66 moves over 5 plans.">
+
+*The planner denoises a 64-move plan in parallel (10 denoising steps), executes 16 moves, then replans with those moves locked. Shown: layout 0 of Room-Random-15x15, the first evaluation layout it solves in 17 to 80 moves (66 moves, 5 plans; [README animation](#readme-animation)). It wins 38% of episodes on this room and 48.5% across the four in-distribution layouts (paper Table 8).*
+
+The sibling repository [`craftax-ReMDM-planner`](https://github.com/mathisweil/craftax-ReMDM-planner) implements the same method in JAX on Craftax. Both repos share the same CLI, config layout and README structure; commands transfer between them by swapping the repo name and benchmark-specific values.
 
 ## Method
 
@@ -51,11 +55,12 @@ minihack-ReMDM-planner/
 ├── src/                    Model, diffusion, envs, planner pipelines
 ├── experiments/
 │   └── rl_finetuning/      RL fine-tuning ablation suite (run_ablations.py)
-├── scripts/                HF upload utilities, DAgger and ablation profilers
+├── scripts/                HF upload utilities, DAgger and ablation profilers, README animation
 ├── tests/                  Smoke suite — uv run pytest
 ├── checkpoints/            Gitignored — offline/, online/ (see Checkpoints)
 ├── results/                Gitignored, created on demand — inference/ eval JSONs and
-│                           paper_figures/ manuscript PDFs, both published (see Checkpoints)
+│                           paper_figures/ manuscript PDFs, both published (see Checkpoints);
+│                           gif/, the README animation
 ├── demo_minihack.ipynb     Demo notebook
 ├── main.py                 CLI entry point
 ├── RUNS.md                 Measurement runs and what they found
@@ -134,7 +139,7 @@ python main.py --mode inference --config $DIR/config.yaml --checkpoint $DIR/iter
 
 ### RL and imitation baselines
 
-Six algorithms: SB3 discrete-action RL (`ppo`, `a2c`, `dqn`, `ppo-rnn`), Behavioural Cloning (`bc`) on oracle demos, and a causal Decision Transformer (`dt`). All share `total_timesteps`, so numbers are comparable to DAgger and offline BC. Hyperparameters live under the `baselines_*` config namespace; outputs go to `baselines_output_dir`.
+Six algorithms: SB3 discrete-action RL (`ppo`, `a2c`, `dqn`, `ppo-rnn`), Behavioural Cloning (`bc`) on oracle demos, and a causal Decision Transformer (`dt`). All share `total_timesteps` with DAgger and offline BC, but are untuned, so they are not a matched comparison; the paper reports no baseline results. Hyperparameters live under the `baselines_*` config namespace; outputs go to `baselines_output_dir`.
 
 ```bash
 python main.py --mode baselines --algo ppo                        # any of the six
@@ -201,7 +206,7 @@ Precedence, lowest to highest: `configs/defaults.yaml` < `--config` preset < `--
 | `configs/ablation_local_only.yaml` | Local-only planner ablation (`use_global_stream: false`) |
 | `configs/gpu_24gb_bigger_model.yaml` | GPU-24GB, larger model (384D, 6 heads) |
 | `configs/gpu_24gb_learning_behaviour.yaml` | GPU-24GB learning-behaviour study (eta=0.18, B=6144) |
-| `configs/final_minihack_gpu_h200.yaml` | **Paper run, H200.** Machine values only: worker counts (32) and dataset path |
+| `configs/final_minihack_gpu_h200.yaml` | **Paper recipe, H200.** Machine values only: worker counts (32) and dataset path; the paper's runs used the RTX 3090 Ti |
 | `configs/final_minihack_gpu_24gb.yaml` | **Paper run, RTX 3090 Ti.** Machine values only: dataset path (workers stay at the default 8) |
 
 Key hyperparameters are documented inline in `configs/defaults.yaml`; the [appendix](#key-hyperparameters) tabulates them.
@@ -232,6 +237,16 @@ Each released directory ships `<step>.pth` (full training state), `model.safeten
 
 Historical note: the released DAgger `selection.json` records `"every": null, "configured_max": null` and `"unit": "dagger_iterations"`, written by a `selection()` that read two since-renamed config keys. It is **historical and noncanonical** and stays as published (author decision 2026-08-17); the checkpoint's own `config_<step>.yaml` carries the real cadence and budget. Current code records the candidate set in env steps — `"every": 940000, "configured_max": 5650000` for the shipped recipe — and raises rather than writing a null.
 
+### README animation
+
+`scripts/render_rollout_gif.py` renders the animation at the top of this README. It downloads `config.yaml` and `model.safetensors` of the released DAgger checkpoint from [mathisweil/remdm-minihack-checkpoints](https://huggingface.co/mathisweil/remdm-minihack-checkpoints), replays evaluation layouts as `Evaluator._run_episodes_batched` does (same seeds, executed prefix locked at each replan) and encodes the first layout won in 17 to 80 moves. It runs on CPU in under a minute and needs `ffmpeg` on the `PATH`.
+
+```bash
+uv run python scripts/render_rollout_gif.py    # writes results/gif/minihack-planner.gif
+```
+
+`--env` picks `MiniHack-Room-Random-15x15-v0` (default) or `MiniHack-Room-Random-5x5-v0`, `--episode N` renders one layout without the search, `--checkpoint-dir` reads a local `config.yaml` + `model.safetensors` instead of the Hub, and `--out` sets the output path.
+
 ### Publishing to the Hub
 
 `scripts/hf_upload.py` rediscovers and uploads four things, each keeping its repo-relative path: `checkpoints/` (adding a `model.safetensors` EMA export and `selection.json` per directory), every `experiments/rl_finetuning/outputs/<run>/` holding a `results.json` (with `diagnosis.md`, `tables/`, `figures/`, `gdelta/`), the eval JSONs in `results/inference/`, and the manuscript figure PDFs in `results/paper_figures/`. It drops W&B and hub config keys, shortens absolute paths and regenerates the model card.
@@ -251,7 +266,19 @@ HF_TOKEN=hf_xxx uv run python scripts/hf_upload.py --repo-id mathisweil/remdm-mi
 
 ## Results, citation, licence
 
-Results tables and the full method description are in *Return-Weighted ELBO Fine-Tuning Degrades Masked Diffusion Planners* (under submission); `demo_minihack.ipynb` reproduces the headline comparison. Citation to be added on publication. Licence: MIT, see `LICENSE`.
+Results tables and the full method description are in *Return-Weighted ELBO Fine-Tuning Degrades Masked Diffusion Planners* (Muhammad Ali Khan\*, Mathis Weil\*, Ahmet H. Güzel, Jack Parker-Holder, Ilija Bogunovic; \*equal contribution), accepted at the NeurIPS 2026 workshop *Beyond Next-Token Prediction: Diffusion and Flow Models for Next-Generation Decoding* (BeNTo), Sydney, 12 December 2026; `demo_minihack.ipynb` evaluates the DAgger checkpoint live and shows the precomputed ablation results. Licence: MIT, see `LICENSE`.
+
+[Paper](https://openreview.net/forum?id=VGyjG8Gy29) · [Checkpoints on Hugging Face](https://huggingface.co/mathisweil/remdm-minihack-checkpoints) · [Code twin](https://github.com/mathisweil/craftax-ReMDM-planner)
+
+```bibtex
+@inproceedings{khan2026returnweighted,
+  title     = {Return-Weighted {ELBO} Fine-Tuning Degrades Masked Diffusion Planners},
+  author    = {Muhammad Ali Khan and Mathis Weil and Ahmet H. G{\"u}zel and Jack Parker-Holder and Ilija Bogunovic},
+  booktitle = {Beyond Next Token Prediction: Diffusion and Flow Models for Next-Generation Decoding},
+  year      = {2026},
+  url       = {https://openreview.net/forum?id=VGyjG8Gy29}
+}
+```
 
 ---
 
@@ -288,7 +315,7 @@ Signature: `(local_obs, global_obs, noisy_action_seq, t_discrete)` -> `{"actions
 
 - **Forward process (MDLM):** each action token is independently replaced with `MASK` (12) with probability `1 - alpha(t)`, `alpha(t)` linear or cosine. PAD (13) is never masked.
 - **Loss:** continuous-time MDLM NELBO: per sample `w(t) * sum_masked(CE) / L` with `w(t) = -alpha'(t) / (1 - alpha(t))` clipped to `[0, 1000]`; optional `label_smoothing`.
-- **Greedy sampling:** used for DAgger collection. Same MaskGIT loop, argmax decoding, no temperature/top-K/remasking, `diffusion_steps_collect` steps.
+- **Greedy sampling:** used for DAgger collection. A separate MaskGIT-style loop, not the ReMDM sampler below: argmax decoding, the most confident masked positions committed first, no temperature/top-K/remasking, `diffusion_steps_collect` steps.
 
 **Reverse sampling (ReMDM Algorithm 1)**, over `K` steps (default 10). Per step: predict logits, apply temperature and top-p filtering, sample, and record each committed token's decode probability `psi`; **unmask** each masked position independently with posterior probability `(alpha_s - (1 - sigma) alpha_t) / (1 - alpha_t)`; **remask** each committed position with probability `sigma` from the configured Section-4.1 schedule. A final greedy cleanup commits anything still masked.
 
@@ -487,7 +514,7 @@ uv run pytest            # the default suite
 uv run pytest -m slow    # slow entry points only (BC + PPO baselines)
 ```
 
-A CPU-only suite, 17 modules. Tiny synthetic data and a shrunken model throughout — no real checkpoints, datasets or network calls, and nothing written outside `tmp_path`. `conftest.py` forces CPU and disables W&B; `slow` marks the multi-second CLI smokes and is deselected by default. For a quality signal, use `--mode smoke`.
+A CPU-only suite, 18 modules. Tiny synthetic data and a shrunken model throughout — no real checkpoints, datasets or network calls, and nothing written outside `tmp_path`. `conftest.py` forces CPU and disables W&B; `slow` marks the multi-second CLI smokes and is deselected by default. For a quality signal, use `--mode smoke`.
 
 | File | Covers |
 |---|---|
@@ -497,6 +524,7 @@ A CPU-only suite, 17 modules. Tiny synthetic data and a shrunken model throughou
 | `test_gdelta.py`, `test_tex_macros.py` | the `--measure-gdelta` decomposition, and the `--emit-tex-macros` output: definitions only, uniquely named, letters only |
 | `test_ablation_perf.py`, `test_gpu_step_perf.py` | measured throughput expectations |
 | `test_env_reuse.py`, `test_failure_behaviour.py` | MiniHack env pooling, and failures that must raise rather than be swallowed |
+| `test_render_rollout_gif.py` | that the [README animation](#readme-animation) replays the evaluation protocol: under one seed it executes the same actions as `Evaluator`, across a locked-prefix replan and a fresh window |
 | `test_gpu_agreement.py` | CPU/GPU agreement, skipped without a device |
 
 ## Implementation notes

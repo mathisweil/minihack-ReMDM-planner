@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the paper."
+title: "minihack-ReMDM-planner"
+abstract: "Masked diffusion (ReMDM) action planner for MiniHack in PyTorch."
+type: software
+license: MIT
+repository-code: "https://github.com/mathisweil/minihack-ReMDM-planner"
+authors:
+  - family-names: Khan
+    given-names: Muhammad Ali
+  - family-names: Weil
+    given-names: Mathis
+preferred-citation:
+  type: conference-paper
+  title: "Return-Weighted ELBO Fine-Tuning Degrades Masked Diffusion Planners"
+  authors:
+    - family-names: Khan
+      given-names: Muhammad Ali
+    - family-names: Weil
+      given-names: Mathis
+    - family-names: Güzel
+      given-names: Ahmet H.
+    - family-names: Parker-Holder
+      given-names: Jack
+    - family-names: Bogunovic
+      given-names: Ilija
+  collection-title: "Beyond Next Token Prediction: Diffusion and Flow Models for Next-Generation Decoding"
+  conference:
+    name: "NeurIPS 2026 Workshop: Beyond Next-Token Prediction (BeNTo)"
+    city: Sydney
+    country: AU
+    date-start: 2026-12-12
+    date-end: 2026-12-12
+  year: 2026
+  url: "https://openreview.net/forum?id=VGyjG8Gy29"
+  notes: "Muhammad Ali Khan and Mathis Weil contributed equally."
